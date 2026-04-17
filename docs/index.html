@@ -54,14 +54,6 @@
         <span class="btn">Scarica .tar.gz</span>
       </a>
 
-      <a class="card" data-platform="macos-intel" href="https://github.com/Sal1699/RustyMap/releases/latest/download/rustymap-macos-x86_64.tar.gz">
-        <div class="card-icon"></div>
-        <h3>macOS Intel</h3>
-        <p class="arch">x86_64</p>
-        <p class="note">libpcap incluso nel sistema</p>
-        <span class="btn">Scarica .tar.gz</span>
-      </a>
-
       <a class="card" data-platform="macos-arm" href="https://github.com/Sal1699/RustyMap/releases/latest/download/rustymap-macos-aarch64.tar.gz">
         <div class="card-icon"></div>
         <h3>macOS Apple Silicon</h3>
@@ -193,9 +185,7 @@
       const platform = navigator.platform || '';
       let pick = null;
       if (/Win/i.test(platform) || /Windows/i.test(ua)) pick = 'windows';
-      else if (/Mac/i.test(platform)) {
-        pick = /ARM|Apple Silicon/i.test(ua) ? 'macos-arm' : 'macos-intel';
-      }
+      else if (/Mac/i.test(platform)) pick = 'macos-arm';
       else if (/Linux/i.test(platform) || /X11/i.test(ua)) pick = 'linux';
       if (pick) {
         const el = document.querySelector('.card[data-platform="' + pick + '"]');

@@ -24,10 +24,6 @@ jobs:
             target: x86_64-unknown-linux-gnu
             archive: rustymap-linux-x86_64.tar.gz
             bin: rustymap
-          - os: macos-13
-            target: x86_64-apple-darwin
-            archive: rustymap-macos-x86_64.tar.gz
-            bin: rustymap
           - os: macos-latest
             target: aarch64-apple-darwin
             archive: rustymap-macos-aarch64.tar.gz

@@ -14,7 +14,6 @@ Scan TCP/UDP, firewall evasion, OS fingerprinting, idle scan, service detection,
 |---|---|---|
 | Windows | x86_64 (MSVC) | [rustymap-windows-x86_64.zip](https://github.com/Sal1699/RustyMap/releases/latest/download/rustymap-windows-x86_64.zip) |
 | Linux | x86_64 (glibc) | [rustymap-linux-x86_64.tar.gz](https://github.com/Sal1699/RustyMap/releases/latest/download/rustymap-linux-x86_64.tar.gz) |
-| macOS | x86_64 (Intel) | [rustymap-macos-x86_64.tar.gz](https://github.com/Sal1699/RustyMap/releases/latest/download/rustymap-macos-x86_64.tar.gz) |
 | macOS | aarch64 (Apple Silicon) | [rustymap-macos-aarch64.tar.gz](https://github.com/Sal1699/RustyMap/releases/latest/download/rustymap-macos-aarch64.tar.gz) |
 
 Checksums: [`SHA256SUMS.txt`](https://github.com/Sal1699/RustyMap/releases/latest) nella stessa release.
