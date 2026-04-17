@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RustyMap Dashboard</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --fg:#e2e8f0; --mut:#94a3b8; --acc:#38bdf8; --open:#4ade80; --close:#f87171; --filt:#fbbf24; }
+  body { font-family: system-ui, sans-serif; margin:0; background:var(--bg); color:var(--fg); }
+  header { padding:1em 2em; background:#0b1220; border-bottom:1px solid #1f2a44; }
+  header h1 { margin:0; color:var(--acc); font-size:1.2em; }
+  main { display:grid; grid-template-columns: 320px 1fr; gap:1em; padding:1em 2em; }
+  .card { background:var(--card); border-radius:8px; padding:1em; }
+  h2 { margin-top:0; font-size:1em; color:var(--acc); }
+  ul.scans { list-style:none; padding:0; margin:0; max-height: 80vh; overflow:auto; }
+  ul.scans li { padding:0.6em 0.8em; border-bottom:1px solid #334155; cursor:pointer; }
+  ul.scans li:hover { background:#273449; }
+  ul.scans li.active { background:#334155; }
+  .smeta { color:var(--mut); font-size:0.8em; }
+  table { border-collapse:collapse; width:100%; font-size:0.9em; }
+  th, td { padding:4px 10px; border-bottom:1px solid #334155; text-align:left; }
+  th { color:#cbd5e1; font-weight:600; }
+  .state-open { color:var(--open); font-weight:600; }
+  .state-closed { color:var(--close); }
+  .state-filtered { color:var(--filt); }
+  .host { margin-bottom:1em; }
+  .host h3 { margin:0 0 0.4em; font-size:1em; }
+  .muted { color:var(--mut); font-size:0.85em; }
+</style>
+</head>
+<body>
+<header><h1>RustyMap Dashboard</h1></header>
+<main>
+  <section class="card">
+    <h2>Scans</h2>
+    <ul class="scans" id="scans"></ul>
+  </section>
+  <section class="card" id="detail">
+    <h2>Scan detail</h2>
+    <p class="muted">Select a scan from the list.</p>
+  </section>
+</main>
+<script>
+async function loadScans() {
+  const res = await fetch('/api/scans');
+  const data = await res.json();
+  const ul = document.getElementById('scans');
+  ul.innerHTML = '';
+  for (const s of data.scans) {
+    const li = document.createElement('li');
+    li.dataset.id = s.id;
+    li.innerHTML = `<div><b>#${s.id}</b> ${s.scan_type} — ${s.status}</div>
+                    <div class="smeta">${s.started_at}<br>${s.targets} · ${s.ports}</div>`;
+    li.onclick = () => selectScan(s.id, li);
+    ul.appendChild(li);
+  }
+}
+async function selectScan(id, el) {
+  document.querySelectorAll('ul.scans li').forEach(l => l.classList.remove('active'));
+  if (el) el.classList.add('active');
+  const res = await fetch('/api/scans/' + id);
+  const data = await res.json();
+  const d = document.getElementById('detail');
+  let html = `<h2>Scan #${data.scan_id}</h2>`;
+  if (!data.hosts.length) { html += '<p class="muted">No hosts.</p>'; }
+  for (const h of data.hosts) {
+    html += `<div class="host">
+      <h3>${h.ip}${h.hostname ? ' ('+h.hostname+')' : ''}</h3>
+      <div class="muted">${h.up ? 'Up' : 'Down'} — latency ${h.latency_secs.toFixed(3)}s</div>`;
+    if (h.ports.length) {
+      html += '<table><thead><tr><th>Port</th><th>Proto</th><th>State</th><th>Service</th></tr></thead><tbody>';
+      for (const p of h.ports) {
+        html += `<tr><td>${p.port}</td><td>${p.protocol}</td>
+                 <td class="state-${p.state.replace('|','')}">${p.state}</td>
+                 <td>${p.service || ''}</td></tr>`;
+      }
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+  }
+  d.innerHTML = html;
+}
+loadScans();
+setInterval(loadScans, 10000);
+</script>
+</body>
+</html>

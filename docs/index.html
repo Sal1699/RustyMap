@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RustyMap — Network scanner in Rust</title>
+  <meta name="description" content="RustyMap è un port di nmap scritto in Rust: scan TCP/UDP, evasione firewall, OS fingerprinting, idle scan e molto altro." />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" type="image/svg+xml" href="lambda.svg" />
+</head>
+<body>
+  <canvas id="hud-grid" aria-hidden="true"></canvas>
+
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="lambda" aria-hidden="true">
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 58 L30 16 L36 16 L54 58 L46 58 L33 28 L20 58 Z" fill="#F78100" />
+        </svg>
+      </div>
+      <div class="title-block">
+        <h1>RUSTYMAP</h1>
+        <p class="subtitle">Port di nmap in Rust · scan, evasione, fingerprinting</p>
+        <div class="badges">
+          <span class="badge">Rust</span>
+          <span class="badge">Cross-platform</span>
+          <span class="badge">MIT</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="downloads" id="download">
+    <h2>▸ Download</h2>
+    <p class="section-intro">
+      Scegli il binario per il tuo sistema. I rilasci sono firmati via checksum
+      SHA-256 disponibile nella stessa release.
+    </p>
+
+    <div class="download-grid">
+      <a class="card" data-platform="windows" href="https://github.com/Sal1699/RustyMap/releases/latest/download/rustymap-windows-x86_64.zip">
+        <div class="card-icon">⊞</div>
+        <h3>Windows</h3>
+        <p class="arch">x86_64 · MSVC</p>
+        <p class="note">Richiede <a href="https://npcap.com/" target="_blank" rel="noopener">Npcap</a> per raw scans</p>
+        <span class="btn">Scarica .zip</span>
+      </a>
+
+      <a class="card" data-platform="linux" href="https://github.com/Sal1699/RustyMap/releases/latest/download/rustymap-linux-x86_64.tar.gz">
+        <div class="card-icon">🐧</div>
+        <h3>Linux</h3>
+        <p class="arch">x86_64 · glibc</p>
+        <p class="note">Richiede <code>libpcap</code> (già presente su molte distro)</p>
+        <span class="btn">Scarica .tar.gz</span>
+      </a>
+
+      <a class="card" data-platform="macos-intel" href="https://github.com/Sal1699/RustyMap/releases/latest/download/rustymap-macos-x86_64.tar.gz">
+        <div class="card-icon"></div>
+        <h3>macOS Intel</h3>
+        <p class="arch">x86_64</p>
+        <p class="note">libpcap incluso nel sistema</p>
+        <span class="btn">Scarica .tar.gz</span>
+      </a>
+
+      <a class="card" data-platform="macos-arm" href="https://github.com/Sal1699/RustyMap/releases/latest/download/rustymap-macos-aarch64.tar.gz">
+        <div class="card-icon"></div>
+        <h3>macOS Apple Silicon</h3>
+        <p class="arch">aarch64 · M1/M2/M3</p>
+        <p class="note">libpcap incluso nel sistema</p>
+        <span class="btn">Scarica .tar.gz</span>
+      </a>
+    </div>
+
+    <div class="checksum-link">
+      Verifica integrità →
+      <a href="https://github.com/Sal1699/RustyMap/releases/latest" target="_blank" rel="noopener">SHA256SUMS.txt</a>
+    </div>
+  </section>
+
+  <section class="install">
+    <h2>▸ Installazione rapida</h2>
+
+    <div class="install-grid">
+      <div class="install-block">
+        <h3>Windows (PowerShell admin)</h3>
+        <pre><code><span class="prompt">λ</span> Expand-Archive rustymap-windows-x86_64.zip -DestinationPath .
+<span class="prompt">λ</span> cd rustymap-x86_64-pc-windows-msvc
+<span class="prompt">λ</span> .\rustymap.exe --guide</code></pre>
+        <p class="hint">Per scan SYN/raw installa Npcap: <code>.\rustymap.exe --install-npcap</code></p>
+      </div>
+
+      <div class="install-block">
+        <h3>Linux / macOS</h3>
+        <pre><code><span class="prompt">λ</span> tar xzf rustymap-linux-x86_64.tar.gz
+<span class="prompt">λ</span> cd rustymap-x86_64-unknown-linux-gnu
+<span class="prompt">λ</span> sudo ./rustymap --guide</code></pre>
+        <p class="hint">Raw scans richiedono <code>sudo</code> o <code>CAP_NET_RAW</code>.</p>
+      </div>
+
+      <div class="install-block">
+        <h3>Da sorgente (qualsiasi OS)</h3>
+        <pre><code><span class="prompt">λ</span> git clone https://github.com/Sal1699/RustyMap.git
+<span class="prompt">λ</span> cd RustyMap
+<span class="prompt">λ</span> cargo build --release
+<span class="prompt">λ</span> ./target/release/rustymap --guide</code></pre>
+        <p class="hint">Richiede Rust 1.70+ e <code>libpcap-dev</code> su Linux.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="features">
+    <h2>▸ Caratteristiche</h2>
+    <div class="feature-grid">
+      <div class="feat"><strong>Scan TCP/UDP</strong><span>Connect, SYN, FIN, NULL, Xmas, ACK, UDP</span></div>
+      <div class="feat"><strong>Idle (zombie) scan</strong><span>Scan completamente anonimi via host terzo</span></div>
+      <div class="feat"><strong>Evasione firewall</strong><span>Fragmentation, decoy, jitter, stack profiles</span></div>
+      <div class="feat"><strong>Service detection</strong><span>Banner grab e probe attivi (-sV)</span></div>
+      <div class="feat"><strong>OS fingerprinting</strong><span>TTL + porte + banner heuristics</span></div>
+      <div class="feat"><strong>Database SQLite</strong><span>Storico scansioni con diff fra run</span></div>
+      <div class="feat"><strong>Report HTML/JSON/MD</strong><span>Output multipli con template Tera</span></div>
+      <div class="feat"><strong>Scripting Rhai</strong><span>Regole custom e correlazione CVE</span></div>
+      <div class="feat"><strong>Web UI</strong><span>Dashboard locale per navigare i risultati</span></div>
+    </div>
+  </section>
+
+  <section class="quickstart">
+    <h2>▸ Prime scansioni</h2>
+    <pre><code><span class="comment"># TCP connect scan (no privilegi)</span>
+<span class="prompt">λ</span> rustymap --sT 10.0.0.0/24
+
+<span class="comment"># SYN scan stealth con fingerprint Windows 11</span>
+<span class="prompt">λ</span> rustymap --sS --evasion stealth --stack-profile windows11 10.0.0.5
+
+<span class="comment"># Audit completo con report HTML</span>
+<span class="prompt">λ</span> rustymap --sS --sV -O --oH report.html 10.0.0.0/24
+
+<span class="comment"># Idle scan via zombie</span>
+<span class="prompt">λ</span> rustymap --sI 192.168.1.250:80 10.0.0.5
+
+<span class="comment"># Lista completa comandi ed esempi</span>
+<span class="prompt">λ</span> rustymap --guide</code></pre>
+  </section>
+
+  <footer>
+    <p>Rise and shine, Mr. Freeman...</p>
+    <p class="links">
+      <a href="https://github.com/Sal1699/RustyMap" target="_blank" rel="noopener">GitHub</a> ·
+      <a href="https://github.com/Sal1699/RustyMap/releases" target="_blank" rel="noopener">Releases</a> ·
+      <a href="https://github.com/Sal1699/RustyMap/issues" target="_blank" rel="noopener">Issues</a>
+    </p>
+    <p class="fineprint">MIT License · Uso autorizzato in reti di cui possiedi autorizzazione esplicita.</p>
+  </footer>
+
+  <script>
+    // Auto-detect platform and highlight the matching card
+    (function() {
+      const ua = navigator.userAgent;
+      const platform = navigator.platform || '';
+      let pick = null;
+      if (/Win/i.test(platform) || /Windows/i.test(ua)) pick = 'windows';
+      else if (/Mac/i.test(platform)) {
+        pick = /ARM|Apple Silicon/i.test(ua) ? 'macos-arm' : 'macos-intel';
+      }
+      else if (/Linux/i.test(platform) || /X11/i.test(ua)) pick = 'linux';
+      if (pick) {
+        const el = document.querySelector('.card[data-platform="' + pick + '"]');
+        if (el) el.classList.add('recommended');
+      }
+    })();
+
+    // HUD grid animation
+    (function() {
+      const c = document.getElementById('hud-grid');
+      if (!c) return;
+      const ctx = c.getContext('2d');
+      function resize() {
+        c.width = window.innerWidth;
+        c.height = window.innerHeight;
+      }
+      resize();
+      window.addEventListener('resize', resize);
+      function draw() {
+        ctx.clearRect(0, 0, c.width, c.height);
+        ctx.strokeStyle = 'rgba(247, 129, 0, 0.04)';
+        ctx.lineWidth = 1;
+        const step = 32;
+        for (let x = 0; x < c.width; x += step) {
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, c.height); ctx.stroke();
+        }
+        for (let y = 0; y < c.height; y += step) {
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(c.width, y); ctx.stroke();
+        }
+      }
+      draw();
+      window.addEventListener('resize', draw);
+    })();
+  </script>
+</body>
+</html>

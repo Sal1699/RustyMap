@@ -1,0 +1,28 @@
+/target
+
+# Runtime scan outputs
+/audit.jsonl
+/scan.json
+/rustymap.db
+/rustymap.db-journal
+/rustymap.db-wal
+/rustymap.db-shm
+*.db
+*.db-journal
+
+# Vault / credential files
+/rustymap-vault.json
+/*.vault
+
+# Report artifacts
+/report.html
+/report.md
+/*.report.html
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db

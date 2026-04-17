@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ tool }} report - {{ started_at }}</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2em; background: #0f172a; color: #e2e8f0; }
+  h1 { color: #38bdf8; margin-bottom: 0.2em; }
+  .meta { color: #94a3b8; margin-bottom: 1.5em; font-size: 0.9em; }
+  .meta span { margin-right: 1.5em; }
+  .host { background: #1e293b; border-radius: 8px; padding: 1em 1.25em; margin-bottom: 1em; }
+  .host h2 { margin: 0 0 0.4em; font-size: 1.1em; color: #f1f5f9; }
+  .host.down h2 { color: #64748b; }
+  .hostmeta { color: #94a3b8; font-size: 0.85em; margin-bottom: 0.5em; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9em; }
+  th, td { text-align: left; padding: 4px 10px; border-bottom: 1px solid #334155; }
+  th { color: #cbd5e1; font-weight: 600; }
+  .state-open { color: #4ade80; font-weight: 600; }
+  .state-closed { color: #f87171; }
+  .state-filtered { color: #fbbf24; }
+  .state-open\|filtered { color: #22d3ee; }
+  .state-unfiltered { color: #c084fc; }
+  .summary { background: #1e293b; padding: 1em 1.25em; border-radius: 8px; margin-bottom: 1.5em; }
+  .summary strong { color: #38bdf8; }
+</style>
+</head>
+<body>
+  <h1>{{ tool }} {{ version }}</h1>
+  <div class="meta">
+    <span>Scan: <strong>{{ scan_type }}</strong></span>
+    <span>Started: {{ started_at }}</span>
+    <span>Elapsed: {{ elapsed_secs | round(precision=2) }}s</span>
+  </div>
+
+  <div class="summary">
+    <strong>{{ hosts_up }}</strong>/{{ hosts_total }} hosts up &middot;
+    <strong>{{ open_ports_total }}</strong> open port(s) discovered
+  </div>
+
+  {% for h in hosts %}
+  <div class="host{% if not h.up %} down{% endif %}">
+    <h2>{{ h.ip }}{% if h.hostname %} ({{ h.hostname }}){% endif %}</h2>
+    <div class="hostmeta">
+      {% if h.up %}Up &middot; latency {{ h.latency_secs | round(precision=3) }}s &middot; {{ h.open_count }} open{% else %}Down{% endif %}
+    </div>
+    {% if h.ports | length > 0 %}
+    <table>
+      <thead><tr><th>Port</th><th>Proto</th><th>State</th><th>Service</th></tr></thead>
+      <tbody>
+      {% for p in h.ports %}
+        <tr>
+          <td>{{ p.port }}</td>
+          <td>{{ p.protocol }}</td>
+          <td class="state-{{ p.state }}">{{ p.state }}</td>
+          <td>{{ p.service }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+  {% endfor %}
+</body>
+</html>

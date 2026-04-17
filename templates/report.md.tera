@@ -1,0 +1,22 @@
+# {{ tool }} {{ version }} report
+
+- **Scan type:** {{ scan_type }}
+- **Started:** {{ started_at }}
+- **Elapsed:** {{ elapsed_secs | round(precision=2) }}s
+- **Hosts up:** {{ hosts_up }}/{{ hosts_total }}
+- **Open ports discovered:** {{ open_ports_total }}
+
+---
+
+{% for h in hosts %}
+## {{ h.ip }}{% if h.hostname %} ({{ h.hostname }}){% endif %}
+
+{% if h.up %}Status: **Up** — latency {{ h.latency_secs | round(precision=3) }}s — {{ h.open_count }} open{% else %}Status: **Down**{% endif %}
+
+{% if h.ports | length > 0 %}
+| Port | Proto | State | Service |
+|------|-------|-------|---------|
+{% for p in h.ports %}| {{ p.port }} | {{ p.protocol }} | {{ p.state }} | {{ p.service }} |
+{% endfor %}
+{% endif %}
+{% endfor %}
