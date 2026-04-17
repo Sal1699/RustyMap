@@ -27,6 +27,7 @@ mod target;
 mod udp_scan;
 mod vault;
 mod webui;
+mod win_console;
 
 use anyhow::{anyhow, Result};
 use audit::Audit;
@@ -47,6 +48,8 @@ use udp_scan::UdpScanner;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    win_console::init();
+
     let mut args = Cli::parse();
 
     // Apply profile overrides BEFORE any command dispatch
