@@ -77,8 +77,43 @@
     </div>
   </section>
 
+  <section class="terminal-install" id="terminal">
+    <h2>▸ Install da terminale</h2>
+    <p class="section-intro">
+      One-liner che rileva OS/arch, scarica l'ultimo binario dalla release,
+      verifica le dipendenze e lo installa in PATH.
+    </p>
+
+    <div class="install-grid">
+      <div class="install-block">
+        <h3>Linux / macOS</h3>
+        <pre><code><span class="prompt">λ</span> curl -fsSL https://sal1699.github.io/RustyMap/install.sh | bash</code></pre>
+        <p class="hint">
+          Default: installa in <code>/usr/local/bin</code> (o <code>~/.local/bin</code> senza sudo).
+          Per cambiare: <code>| bash -s -- --prefix=$HOME/.local/bin</code>.
+          Per versione specifica: <code>--version=v0.1.0</code>.
+        </p>
+      </div>
+
+      <div class="install-block">
+        <h3>Windows (PowerShell)</h3>
+        <pre><code><span class="prompt">λ</span> iwr -useb https://sal1699.github.io/RustyMap/install.ps1 | iex</code></pre>
+        <p class="hint">
+          Installa in <code>%LOCALAPPDATA%\Programs\RustyMap</code> e aggiorna il PATH utente.
+          Npcap va installato a parte con <code>rustymap --install-npcap</code> (admin).
+        </p>
+      </div>
+
+      <div class="install-block">
+        <h3>Cargo (da crates.io, quando pubblicato)</h3>
+        <pre><code><span class="prompt">λ</span> cargo install rustymap</code></pre>
+        <p class="hint">Richiede Rust 1.70+ e <code>libpcap-dev</code> su Linux.</p>
+      </div>
+    </div>
+  </section>
+
   <section class="install">
-    <h2>▸ Installazione rapida</h2>
+    <h2>▸ Installazione manuale (archivio)</h2>
 
     <div class="install-grid">
       <div class="install-block">

@@ -19,6 +19,20 @@ Scan TCP/UDP, firewall evasion, OS fingerprinting, idle scan, service detection,
 
 Checksums: [`SHA256SUMS.txt`](https://github.com/Sal1699/RustyMap/releases/latest) nella stessa release.
 
+### One-liner install
+
+**Linux / macOS**
+```bash
+curl -fsSL https://sal1699.github.io/RustyMap/install.sh | bash
+```
+
+**Windows (PowerShell)**
+```powershell
+iwr -useb https://sal1699.github.io/RustyMap/install.ps1 | iex
+```
+
+Options: `--prefix=<dir>` (sh) / `-Prefix <dir>` (ps1), `--version=v0.1.0` / `-Version v0.1.0`.
+
 ### Requirements
 
 - **Windows**: [Npcap](https://npcap.com/) for raw/SYN scans. Install via `rustymap.exe --install-npcap` (admin).
