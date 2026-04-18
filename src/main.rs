@@ -26,6 +26,7 @@ mod service_probe;
 mod shutdown;
 mod target;
 mod udp_scan;
+mod updater;
 mod vault;
 mod webui;
 mod win_console;
@@ -67,6 +68,13 @@ async fn main() -> Result<()> {
     if args.guide {
         guide::print_guide();
         return Ok(());
+    }
+
+    if args.check_update {
+        return tokio::task::spawn_blocking(updater::check).await?;
+    }
+    if args.self_update {
+        return tokio::task::spawn_blocking(updater::update).await?;
     }
 
     let cancel = shutdown::install_handler();

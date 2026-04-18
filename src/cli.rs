@@ -277,6 +277,14 @@ pub struct Cli {
     #[arg(long = "dns-reverse", value_name = "CIDR")]
     pub dns_reverse: Option<String>,
 
+    /// Self-update to the latest release from GitHub
+    #[arg(long = "update")]
+    pub self_update: bool,
+
+    /// Check for a newer release without installing
+    #[arg(long = "check-update")]
+    pub check_update: bool,
+
     /// Network interface name for dns-sniff/dns-spoof
     #[arg(long = "iface")]
     pub iface: Option<String>,

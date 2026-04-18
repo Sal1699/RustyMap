@@ -162,8 +162,12 @@ pub fn print_guide() {
     section("AUDIT & INSTALL");
     line("--audit-log FILE      JSONL con tutte le azioni (timestamped)");
     line("--install-npcap       Installa runtime Npcap (Windows admin)");
+    line("--check-update        Controlla se esiste una release più recente");
+    line("--update              Scarica e installa l'ultima release da GitHub");
     example("rustymap --sS --audit-log audit.jsonl 10.0.0.5");
     example("rustymap --install-npcap");
+    example("rustymap --check-update");
+    example("rustymap --update");
 
     section("ALTRO");
     line("--help                Help breve (clap)");
