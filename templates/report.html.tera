@@ -43,6 +43,11 @@
     <div class="hostmeta">
       {% if h.up %}Up &middot; latency {{ h.latency_secs | round(precision=3) }}s &middot; {{ h.open_count }} open{% else %}Down{% endif %}
     </div>
+    {% if h.device_class %}
+    <div class="hostmeta">
+      Device: <strong>{{ h.device_class }}</strong>{% if h.vendor %} &middot; {{ h.vendor }}{% endif %}{% if h.device_confidence %} &middot; confidence {{ h.device_confidence }}%{% endif %}
+    </div>
+    {% endif %}
     {% if h.ports | length > 0 %}
     <table>
       <thead><tr><th>Port</th><th>Proto</th><th>State</th><th>Service</th></tr></thead>

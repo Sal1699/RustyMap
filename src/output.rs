@@ -7,7 +7,8 @@ use std::io::Write;
 
 pub fn print_banner() {
     println!(
-        "Starting RustyMap 0.1.0 ( https://github.com/Sal1699/RustyMap ) at {}",
+        "Starting RustyMap {} ( https://github.com/Sal1699/RustyMap ) at {}",
+        env!("CARGO_PKG_VERSION"),
         chrono::Local::now().format("%Y-%m-%d %H:%M %Z")
     );
 }
@@ -38,6 +39,21 @@ pub fn print_host(host: &HostResult, verbose: u8) {
         println!("OS guess: {} (confidence {}%{})", os.family, os.confidence, ttl_s);
         if verbose > 0 && !os.hints.is_empty() {
             println!("  hints: {}", os.hints.join(", "));
+        }
+    }
+
+    if let Some(dev) = &host.device {
+        let vendor_s = dev.vendor.as_deref().map(|v| format!(" · {}", v)).unwrap_or_default();
+        let model_s = dev.model.as_deref().map(|m| format!(" {}", m)).unwrap_or_default();
+        println!(
+            "Device: {}{}{} (confidence {}%)",
+            dev.class.as_str().bold(),
+            vendor_s,
+            model_s,
+            dev.confidence
+        );
+        if verbose > 0 && !dev.hints.is_empty() {
+            println!("  hints: {}", dev.hints.join(", "));
         }
     }
 
@@ -81,7 +97,8 @@ pub fn write_normal(path: &str, hosts: &[HostResult], elapsed_sec: f64) -> Resul
     let mut f = File::create(path)?;
     writeln!(
         f,
-        "# RustyMap 0.1.0 scan at {}",
+        "# RustyMap {} scan at {}",
+        env!("CARGO_PKG_VERSION"),
         chrono::Local::now().format("%Y-%m-%d %H:%M %Z")
     )?;
     for h in hosts {
@@ -91,6 +108,10 @@ pub fn write_normal(path: &str, hosts: &[HostResult], elapsed_sec: f64) -> Resul
             continue;
         }
         writeln!(f, "  Status: Up (latency {:.3}s)", h.elapsed.as_secs_f64())?;
+        if let Some(dev) = &h.device {
+            let v = dev.vendor.as_deref().map(|v| format!(" · {}", v)).unwrap_or_default();
+            writeln!(f, "  Device: {}{} (confidence {}%)", dev.class.as_str(), v, dev.confidence)?;
+        }
         writeln!(f, "  PORT        STATE       SERVICE")?;
         for p in &h.ports {
             let state = match p.state {

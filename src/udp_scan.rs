@@ -148,12 +148,12 @@ pub fn run_udp_scan(
     let dst = match target.ip {
         IpAddr::V4(v) => v,
         IpAddr::V6(_) => {
-            return HostResult { target, up: false, ports: vec![], elapsed: start.elapsed(), os: None };
+            return HostResult { target, up: false, ports: vec![], elapsed: start.elapsed(), os: None, device: None, mac: None };
         }
     };
     let src = match source_ipv4_for(dst) {
         Ok(s) => s,
-        Err(_) => return HostResult { target, up: false, ports: vec![], elapsed: start.elapsed(), os: None },
+        Err(_) => return HostResult { target, up: false, ports: vec![], elapsed: start.elapsed(), os: None, device: None, mac: None },
     };
 
     let chunk = (ports.len() + parallel - 1) / parallel.max(1);
@@ -191,5 +191,7 @@ pub fn run_udp_scan(
         ports: interesting,
         elapsed: start.elapsed(),
         os: None,
+        device: None,
+        mac: None,
     }
 }

@@ -250,6 +250,8 @@ pub fn run_raw_tcp_scan(
                 ports: vec![],
                 elapsed: start.elapsed(),
                 os: None,
+                device: None,
+                mac: None,
             };
         }
     };
@@ -263,6 +265,8 @@ pub fn run_raw_tcp_scan(
                 ports: vec![],
                 elapsed: start.elapsed(),
                 os: None,
+                device: None,
+                mac: None,
             };
         }
     };
@@ -318,5 +322,7 @@ pub fn run_raw_tcp_scan(
         ports: interesting,
         elapsed: start.elapsed(),
         os: None,
+        device: None,
+        mac: None,
     }
 }

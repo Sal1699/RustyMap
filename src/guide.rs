@@ -65,16 +65,19 @@ pub fn print_guide() {
     section("SERVICE & OS DETECTION");
     line("--sV                  Probe servizi/versione (banner + probe attivi)");
     line("-O, --os              Fingerprinting OS (TTL + porte/banner)");
+    line("                      (device-class auto: router/camera/printer/NAS/IoT…)");
     example("rustymap --sT --sV 10.0.0.5");
     example("rustymap --sS --sV -O 10.0.0.5");
 
     section("EVASIONE FIREWALL / IDS");
-    line("--evasion PRESET          stealth | aggressive | paranoid");
+    line("--evasion PRESET          stealth | aggressive | paranoid | ghost");
     line("--stack-profile NOME      windows11 | linux6 | macos | freebsd | android14");
     line("--scanflags FLAGS         Flag TCP custom (es. SYN,ECE oppure 0x42)");
     line("--source-port PORT        Porta sorgente fissa (53, 80, 88...)");
     line("--decoys IP,IP,...        IP sorgente decoy (spoofed)");
+    line("--decoy-preping           SYN benigni dai decoy prima del probe reale");
     line("--ip-ttl N                TTL IP custom");
+    line("--ttl-jitter N            TTL jitter ±N per probe");
     line("--data-length N           Appende N byte di padding random");
     line("-f, --fragment            Frammenta IP in pezzi piccoli");
     line("--mtu N                   Dim. frammento (multiplo di 8)");
@@ -83,11 +86,11 @@ pub fn print_guide() {
     line("--jitter MS               Jitter gaussiano fra probe");
     line("--rotate-evasion          Ruota TTL/src-port/padding per probe");
     line("--randomize-ports         Ordine porte casuale");
-    example("rustymap --sS --evasion stealth 10.0.0.5");
+    example("rustymap --sS --evasion ghost 10.0.0.5");
     example("rustymap --sS --stack-profile windows11 --source-port 53 10.0.0.5");
     example("rustymap --sS --scanflags SYN,ECE -f --mtu 8 10.0.0.5");
-    example("rustymap --sS --decoys 10.0.0.1,10.0.0.2 --jitter 200 10.0.0.5");
-    example("rustymap --sS --randomize-ports --rotate-evasion 10.0.0.0/24");
+    example("rustymap --sS --decoys 10.0.0.1,10.0.0.2 --decoy-preping 10.0.0.5");
+    example("rustymap --sS --ttl-jitter 8 --rotate-evasion 10.0.0.0/24");
 
     section("OUTPUT");
     line("--oN FILE             Output testuale");
@@ -118,13 +121,15 @@ pub fn print_guide() {
     example("rustymap --list-tags --tag-ip 10.0.0.5");
 
     section("DNS");
-    line("--dns-enum DOMINIO    Brute-force sottodomini");
+    line("--dns-enum DOMINIO    Brute-force sottodomini (+ NS/MX/TXT/SOA + wildcard-filter)");
     line("--dns-wordlist FILE   Wordlist custom per --dns-enum");
+    line("--dns-reverse CIDR    Reverse-DNS sweep (PTR) su un range");
     line("--dns-sniff           Sniff DNS sulla rete (admin + Npcap)");
     line("--dns-spoof D=IP      Spoof risposte DNS (ripetibile)");
     line("--iface NOME          Interfaccia per sniff/spoof");
     line("-n, --no-dns          Niente risoluzione DNS sui target");
     example("rustymap --dns-enum example.com");
+    example("rustymap --dns-reverse 10.0.0.0/24");
     example("rustymap --dns-sniff --iface Ethernet");
     example("rustymap --dns-spoof example.com=10.0.0.5 --iface Ethernet");
 

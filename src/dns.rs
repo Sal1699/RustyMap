@@ -360,13 +360,31 @@ const DEFAULT_WORDLIST: &[&str] = &[
     "ws", "wss", "socket", "rtmp", "stream", "video", "img", "images", "assets",
 ];
 
+fn random_label() -> String {
+    use rand::distributions::{Alphanumeric, DistString};
+    Alphanumeric
+        .sample_string(&mut rand::thread_rng(), 12)
+        .to_lowercase()
+}
+
+pub struct DnsEnumReport {
+    pub base_a: Vec<std::net::IpAddr>,
+    pub ns: Vec<String>,
+    pub mx: Vec<String>,
+    pub txt: Vec<String>,
+    pub soa: Option<String>,
+    pub wildcard_ips: std::collections::HashSet<std::net::IpAddr>,
+    pub subdomains: Vec<(String, Vec<std::net::IpAddr>)>,
+}
+
 pub async fn dns_enum(
     domain: &str,
     wordlist: Option<&str>,
     parallel: usize,
     cancel: Arc<AtomicBool>,
-) -> Result<Vec<(String, Vec<std::net::IpAddr>)>> {
+) -> Result<DnsEnumReport> {
     use futures::stream::{self, StreamExt};
+    use std::collections::HashSet;
     use trust_dns_resolver::TokioAsyncResolver;
 
     let resolver = TokioAsyncResolver::tokio_from_system_conf()?;
@@ -380,6 +398,65 @@ pub async fn dns_enum(
         DEFAULT_WORDLIST.iter().map(|s| s.to_string()).collect()
     };
 
+    // ── Base domain records ────────────────────────────────
+    let base_a: Vec<std::net::IpAddr> = resolver
+        .lookup_ip(domain)
+        .await
+        .map(|l| l.iter().collect())
+        .unwrap_or_default();
+
+    let ns: Vec<String> = resolver
+        .ns_lookup(domain)
+        .await
+        .map(|l| l.iter().map(|n| n.to_string().trim_end_matches('.').to_string()).collect())
+        .unwrap_or_default();
+
+    let mx: Vec<String> = resolver
+        .mx_lookup(domain)
+        .await
+        .map(|l| {
+            l.iter()
+                .map(|m| format!("{} {}", m.preference(), m.exchange().to_string().trim_end_matches('.')))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let txt: Vec<String> = resolver
+        .txt_lookup(domain)
+        .await
+        .map(|l| l.iter().map(|t| t.to_string()).collect())
+        .unwrap_or_default();
+
+    let soa: Option<String> = resolver
+        .soa_lookup(domain)
+        .await
+        .ok()
+        .and_then(|l| l.iter().next().map(|r| {
+            format!(
+                "{} {} serial={}",
+                r.mname().to_string().trim_end_matches('.'),
+                r.rname().to_string().trim_end_matches('.'),
+                r.serial()
+            )
+        }));
+
+    // ── Wildcard detection ─────────────────────────────────
+    let mut wildcard_ips: HashSet<std::net::IpAddr> = HashSet::new();
+    for _ in 0..3 {
+        let fqdn = format!("{}.{}", random_label(), domain);
+        if let Ok(lookup) = resolver.lookup_ip(fqdn.as_str()).await {
+            for ip in lookup.iter() {
+                wildcard_ips.insert(ip);
+            }
+        }
+    }
+    if !wildcard_ips.is_empty() {
+        eprintln!(
+            "[dns-enum] wildcard detected: {} IP(s) will be filtered",
+            wildcard_ips.len()
+        );
+    }
+
     eprintln!(
         "[dns-enum] bruteforcing {} subdomains of {} (parallel: {})",
         words.len(),
@@ -387,11 +464,14 @@ pub async fn dns_enum(
         parallel
     );
 
+    let wc_arc = Arc::new(wildcard_ips.clone());
+
     let results: Vec<Option<(String, Vec<std::net::IpAddr>)>> = stream::iter(words.into_iter())
         .map(|sub| {
             let resolver = resolver.clone();
             let domain = domain.to_string();
             let cancel = Arc::clone(&cancel);
+            let wc = Arc::clone(&wc_arc);
             async move {
                 if cancel.load(Ordering::Relaxed) {
                     return None;
@@ -399,7 +479,8 @@ pub async fn dns_enum(
                 let fqdn = format!("{}.{}", sub, domain);
                 match resolver.lookup_ip(fqdn.as_str()).await {
                     Ok(lookup) => {
-                        let ips: Vec<std::net::IpAddr> = lookup.iter().collect();
+                        let ips: Vec<std::net::IpAddr> =
+                            lookup.iter().filter(|ip| !wc.contains(ip)).collect();
                         if !ips.is_empty() {
                             Some((fqdn, ips))
                         } else {
@@ -414,8 +495,60 @@ pub async fn dns_enum(
         .collect()
         .await;
 
-    let mut found: Vec<(String, Vec<std::net::IpAddr>)> =
+    let mut subdomains: Vec<(String, Vec<std::net::IpAddr>)> =
         results.into_iter().flatten().collect();
-    found.sort_by(|a, b| a.0.cmp(&b.0));
+    subdomains.sort_by(|a, b| a.0.cmp(&b.0));
+
+    Ok(DnsEnumReport {
+        base_a,
+        ns,
+        mx,
+        txt,
+        soa,
+        wildcard_ips,
+        subdomains,
+    })
+}
+
+// ── Reverse DNS sweep ───────────────────────────────────────────
+
+pub async fn dns_reverse(
+    cidr: &str,
+    parallel: usize,
+    cancel: Arc<AtomicBool>,
+) -> Result<Vec<(std::net::IpAddr, String)>> {
+    use futures::stream::{self, StreamExt};
+    use ipnet::IpNet;
+    use trust_dns_resolver::TokioAsyncResolver;
+
+    let net: IpNet = cidr.parse().map_err(|e| anyhow!("invalid CIDR '{}': {}", cidr, e))?;
+    let resolver = TokioAsyncResolver::tokio_from_system_conf()?;
+
+    let ips: Vec<std::net::IpAddr> = net.hosts().collect();
+    eprintln!("[dns-reverse] scanning {} host(s) in {}", ips.len(), cidr);
+
+    let results: Vec<Option<(std::net::IpAddr, String)>> = stream::iter(ips.into_iter())
+        .map(|ip| {
+            let resolver = resolver.clone();
+            let cancel = Arc::clone(&cancel);
+            async move {
+                if cancel.load(Ordering::Relaxed) {
+                    return None;
+                }
+                match resolver.reverse_lookup(ip).await {
+                    Ok(rev) => rev
+                        .iter()
+                        .next()
+                        .map(|n| (ip, n.to_string().trim_end_matches('.').to_string())),
+                    Err(_) => None,
+                }
+            }
+        })
+        .buffer_unordered(parallel)
+        .collect()
+        .await;
+
+    let mut found: Vec<(std::net::IpAddr, String)> = results.into_iter().flatten().collect();
+    found.sort_by_key(|(ip, _)| ip.to_string());
     Ok(found)
 }

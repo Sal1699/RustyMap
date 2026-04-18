@@ -51,6 +51,10 @@ pub struct HostResult {
     pub elapsed: Duration,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub os: Option<crate::os_fp::OsGuess>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub device: Option<crate::device_fp::DeviceGuess>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mac: Option<[u8; 6]>,
 }
 
 pub async fn tcp_connect_scan(
@@ -153,5 +157,7 @@ pub async fn tcp_connect_scan(
         ports: ports_out,
         elapsed: start.elapsed(),
         os: None,
+        device: None,
+        mac: None,
     }
 }

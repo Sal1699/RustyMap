@@ -173,6 +173,14 @@ pub struct Cli {
     #[arg(long = "ip-ttl")]
     pub ip_ttl: Option<u8>,
 
+    /// Per-probe TTL jitter (±N). Randomizes IP TTL on every probe.
+    #[arg(long = "ttl-jitter", default_value_t = 0)]
+    pub ttl_jitter: u8,
+
+    /// Before sending decoys, warm the firewall with benign SYNs from each decoy to 80/443.
+    #[arg(long = "decoy-preping")]
+    pub decoy_preping: bool,
+
     /// Append N random bytes to probe packets (evasion)
     #[arg(long = "data-length", default_value_t = 0)]
     pub data_length: usize,
@@ -264,6 +272,10 @@ pub struct Cli {
     /// Wordlist file for --dns-enum (default: built-in ~100 words)
     #[arg(long = "dns-wordlist")]
     pub dns_wordlist: Option<String>,
+
+    /// Reverse-DNS sweep over CIDR (e.g. 10.0.0.0/24)
+    #[arg(long = "dns-reverse", value_name = "CIDR")]
+    pub dns_reverse: Option<String>,
 
     /// Network interface name for dns-sniff/dns-spoof
     #[arg(long = "iface")]

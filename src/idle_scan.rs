@@ -228,6 +228,8 @@ pub fn run_idle_scan(
                 ports: vec![],
                 elapsed: start.elapsed(),
                 os: None,
+                device: None,
+                mac: None,
             };
         }
     };
@@ -241,6 +243,8 @@ pub fn run_idle_scan(
                 ports: vec![],
                 elapsed: start.elapsed(),
                 os: None,
+                device: None,
+                mac: None,
             };
         }
     };
@@ -264,5 +268,7 @@ pub fn run_idle_scan(
         ports: results,
         elapsed: start.elapsed(),
         os: None,
+        device: None,
+        mac: None,
     }
 }

@@ -12,6 +12,9 @@
 ## {{ h.ip }}{% if h.hostname %} ({{ h.hostname }}){% endif %}
 
 {% if h.up %}Status: **Up** — latency {{ h.latency_secs | round(precision=3) }}s — {{ h.open_count }} open{% else %}Status: **Down**{% endif %}
+{% if h.device_class %}
+Device: **{{ h.device_class }}**{% if h.vendor %} · {{ h.vendor }}{% endif %}{% if h.device_confidence %} · confidence {{ h.device_confidence }}%{% endif %}
+{% endif %}
 
 {% if h.ports | length > 0 %}
 | Port | Proto | State | Service |

@@ -23,6 +23,9 @@ struct HostView {
     up: bool,
     latency_secs: f64,
     open_count: usize,
+    device_class: Option<&'static str>,
+    vendor: Option<String>,
+    device_confidence: Option<u8>,
     ports: Vec<PortView>,
 }
 
@@ -60,6 +63,9 @@ fn to_view(hosts: &[HostResult]) -> Vec<HostView> {
                 up: h.up,
                 latency_secs: h.elapsed.as_secs_f64(),
                 open_count,
+                device_class: h.device.as_ref().map(|d| d.class.as_str()),
+                vendor: h.device.as_ref().and_then(|d| d.vendor.clone()),
+                device_confidence: h.device.as_ref().map(|d| d.confidence),
                 ports,
             }
         })

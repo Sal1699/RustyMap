@@ -2,6 +2,7 @@ mod audit;
 mod cli;
 mod cve;
 mod db;
+mod device_fp;
 mod dns;
 mod discovery;
 mod evasion;
@@ -102,16 +103,57 @@ async fn main() -> Result<()> {
         let wordlist = args.dns_wordlist.clone();
         let parallel = args.parallel().min(100);
         let cancel_dns = Arc::clone(&cancel);
-        let found = dns::dns_enum(&domain, wordlist.as_deref(), parallel, cancel_dns).await?;
-        if found.is_empty() {
-            println!("No subdomains found for {}", domain);
+        let rep = dns::dns_enum(&domain, wordlist.as_deref(), parallel, cancel_dns).await?;
+
+        println!("\n== DNS enumeration for {} ==", domain);
+        if !rep.base_a.is_empty() {
+            let ips: Vec<String> = rep.base_a.iter().map(|i| i.to_string()).collect();
+            println!("A     : {}", ips.join(", "));
+        }
+        if !rep.ns.is_empty() {
+            println!("NS    : {}", rep.ns.join(", "));
+        }
+        if !rep.mx.is_empty() {
+            println!("MX    : {}", rep.mx.join(", "));
+        }
+        if let Some(soa) = &rep.soa {
+            println!("SOA   : {}", soa);
+        }
+        if !rep.txt.is_empty() {
+            for t in &rep.txt {
+                println!("TXT   : {}", t);
+            }
+        }
+        if !rep.wildcard_ips.is_empty() {
+            let ips: Vec<String> = rep.wildcard_ips.iter().map(|i| i.to_string()).collect();
+            println!("WILDCARD filtered: {}", ips.join(", "));
+        }
+
+        if rep.subdomains.is_empty() {
+            println!("\nNo subdomains found for {}", domain);
         } else {
-            println!("{:<40} {}", "SUBDOMAIN", "IPs");
-            for (sub, ips) in &found {
+            println!("\n{:<40} {}", "SUBDOMAIN", "IPs");
+            for (sub, ips) in &rep.subdomains {
                 let ips_s: Vec<String> = ips.iter().map(|i| i.to_string()).collect();
                 println!("{:<40} {}", sub, ips_s.join(", "));
             }
-            println!("\nFound {} subdomain(s)", found.len());
+            println!("\nFound {} subdomain(s)", rep.subdomains.len());
+        }
+        return Ok(());
+    }
+    if let Some(cidr) = &args.dns_reverse {
+        let cidr = cidr.clone();
+        let parallel = args.parallel().min(100);
+        let cancel_dns = Arc::clone(&cancel);
+        let found = dns::dns_reverse(&cidr, parallel, cancel_dns).await?;
+        if found.is_empty() {
+            println!("No PTR records found in {}", cidr);
+        } else {
+            println!("{:<20} {}", "IP", "PTR");
+            for (ip, name) in &found {
+                println!("{:<20} {}", ip.to_string(), name);
+            }
+            println!("\nFound {} PTR record(s)", found.len());
         }
         return Ok(());
     }
@@ -353,6 +395,18 @@ async fn main() -> Result<()> {
         for h in results.iter_mut() {
             if h.up {
                 h.os = Some(os_fp::fingerprint(h, timeout_dur));
+            }
+        }
+    }
+
+    // 4.7) Device classification (free — uses existing ports/banners/OS hint)
+    if !was_cancelled {
+        for h in results.iter_mut() {
+            if h.up {
+                let guess = device_fp::classify(h, h.mac.as_ref());
+                if guess.class != device_fp::DeviceClass::Unknown || guess.vendor.is_some() {
+                    h.device = Some(guess);
+                }
             }
         }
     }
@@ -685,7 +739,7 @@ fn build_evasion_config(args: &Cli) -> Result<evasion::EvasionConfig> {
     // Start from preset if provided, else default.
     let mut cfg = if let Some(name) = &args.evasion_preset {
         let preset = evasion::EvasionPreset::from_name(name)
-            .ok_or_else(|| anyhow!("unknown --evasion preset '{}' (stealth|aggressive|paranoid)", name))?;
+            .ok_or_else(|| anyhow!("unknown --evasion preset '{}' (stealth|aggressive|paranoid|ghost)", name))?;
         preset.to_config()
     } else {
         evasion::EvasionConfig::default()
@@ -740,6 +794,12 @@ fn build_evasion_config(args: &Cli) -> Result<evasion::EvasionConfig> {
     if let Some(ref s) = args.scanflags {
         let flags = evasion::parse_scanflags(s).map_err(|e| anyhow!("--scanflags: {}", e))?;
         cfg.custom_flags = Some(flags);
+    }
+    if args.ttl_jitter > 0 {
+        cfg.ttl_jitter = args.ttl_jitter;
+    }
+    if args.decoy_preping {
+        cfg.decoy_preping = true;
     }
 
     Ok(cfg)

@@ -103,6 +103,7 @@ pub enum EvasionPreset {
     Stealth,
     Aggressive,
     Paranoid,
+    Ghost,
 }
 
 impl EvasionPreset {
@@ -111,6 +112,7 @@ impl EvasionPreset {
             "stealth" | "s" => Some(Self::Stealth),
             "aggressive" | "a" => Some(Self::Aggressive),
             "paranoid" | "p" => Some(Self::Paranoid),
+            "ghost" | "g" => Some(Self::Ghost),
             _ => None,
         }
     }
@@ -146,6 +148,23 @@ impl EvasionPreset {
                 jitter: JitterMode::Gaussian(500),
                 rotate: true,
                 frag_overlap: true,
+                ..Default::default()
+            },
+            // Ghost: maximum anti-DPI — overlapping frags, TTL jitter,
+            // decoy pre-ping, rotation, Linux stack, uniform jitter. Slower
+            // than aggressive but less deterministic than paranoid.
+            Self::Ghost => EvasionConfig {
+                source_port: Some(443),
+                ip_ttl: 64,
+                ttl_jitter: 8,
+                data_length: 12,
+                fragment: true,
+                frag_mtu: 8,
+                frag_overlap: true,
+                stack_profile: StackProfile::Linux6,
+                jitter: JitterMode::Gaussian(120),
+                rotate: true,
+                decoy_preping: true,
                 ..Default::default()
             },
         }
@@ -205,6 +224,8 @@ pub struct EvasionConfig {
     pub source_port: Option<u16>,
     pub decoys: Vec<Ipv4Addr>,
     pub ip_ttl: u8,
+    /// Per-probe TTL jitter (±N). Independent of `rotate`.
+    pub ttl_jitter: u8,
     pub data_length: usize,
     pub fragment: bool,
     pub frag_mtu: u16,
@@ -219,6 +240,9 @@ pub struct EvasionConfig {
     pub frag_overlap: bool,
     // Custom TCP flags (technique 7 — protocol exceptions)
     pub custom_flags: Option<u8>,
+    /// Send a short dummy SYN from each decoy before the real probe,
+    /// confusing stateful firewalls that build connection tables.
+    pub decoy_preping: bool,
 }
 
 impl Default for EvasionConfig {
@@ -227,6 +251,7 @@ impl Default for EvasionConfig {
             source_port: None,
             decoys: Vec::new(),
             ip_ttl: 64,
+            ttl_jitter: 0,
             data_length: 0,
             fragment: false,
             frag_mtu: 8,
@@ -236,6 +261,7 @@ impl Default for EvasionConfig {
             rotate: false,
             frag_overlap: false,
             custom_flags: None,
+            decoy_preping: false,
         }
     }
 }
@@ -244,6 +270,7 @@ impl EvasionConfig {
     /// Whether we need a raw IP socket (Layer3) for full packet control.
     pub fn needs_layer3(&self) -> bool {
         self.ip_ttl != 64
+            || self.ttl_jitter > 0
             || self.fragment
             || !self.decoys.is_empty()
             || self.stack_profile != StackProfile::Default
@@ -255,6 +282,7 @@ impl EvasionConfig {
         self.source_port.is_some()
             || !self.decoys.is_empty()
             || self.ip_ttl != 64
+            || self.ttl_jitter > 0
             || self.data_length > 0
             || self.fragment
             || self.bad_checksum
@@ -263,6 +291,7 @@ impl EvasionConfig {
             || self.rotate
             || self.frag_overlap
             || self.custom_flags.is_some()
+            || self.decoy_preping
     }
 
     pub fn summary(&self) -> String {
@@ -275,6 +304,12 @@ impl EvasionConfig {
         }
         if self.ip_ttl != 64 {
             parts.push(format!("ttl={}", self.ip_ttl));
+        }
+        if self.ttl_jitter > 0 {
+            parts.push(format!("ttl-jitter=±{}", self.ttl_jitter));
+        }
+        if self.decoy_preping {
+            parts.push("decoy-preping".to_string());
         }
         if self.data_length > 0 {
             parts.push(format!("pad={}B", self.data_length));
@@ -322,6 +357,17 @@ impl EvasionConfig {
             c.source_port = Some(rng.gen_range(1024..65000));
         }
         c
+    }
+
+    /// Apply independent per-probe TTL jitter (±ttl_jitter). Used on every probe
+    /// even when `rotate` is off, so stateful scrubbers can't key on a fixed TTL.
+    pub fn jittered_ttl(&self) -> u8 {
+        if self.ttl_jitter == 0 {
+            return self.ip_ttl;
+        }
+        let j = self.ttl_jitter as i16;
+        let delta: i16 = rand::thread_rng().gen_range(-j..=j);
+        (self.ip_ttl as i16 + delta).clamp(1, 255) as u8
     }
 
     /// Effective TCP flags: custom_flags overrides scan-type flags.
@@ -509,6 +555,25 @@ pub fn send_with_decoys(
 ) -> bool {
     let mut rng = rand::thread_rng();
 
+    // Pre-ping: benign SYNs to port 80/443 from each decoy, to seed the
+    // firewall's connection table and blend the real probe into "normal" noise.
+    if cfg.decoy_preping {
+        for &decoy_ip in &cfg.decoys {
+            let warm_port = if rng.gen_bool(0.5) { 80 } else { 443 };
+            let warm_tcp = build_tcp_segment(
+                decoy_ip,
+                dst_ip,
+                warm_port,
+                TcpFlags::SYN,
+                rng.gen(),
+                rng.gen_range(40000..60000),
+                cfg,
+            );
+            let ip = build_ip_packet(decoy_ip, dst_ip, &warm_tcp, cfg.jittered_ttl());
+            let _ = send_ip_raw(tx, &ip, dst_ip, cfg);
+        }
+    }
+
     // Decoy probes (spoofed source IPs)
     for &decoy_ip in &cfg.decoys {
         let decoy_tcp = build_tcp_segment(
@@ -520,13 +585,13 @@ pub fn send_with_decoys(
             rng.gen_range(40000..60000),
             cfg,
         );
-        let ip = build_ip_packet(decoy_ip, dst_ip, &decoy_tcp, cfg.ip_ttl);
+        let ip = build_ip_packet(decoy_ip, dst_ip, &decoy_tcp, cfg.jittered_ttl());
         let _ = send_ip_raw(tx, &ip, dst_ip, cfg);
     }
 
     // Real probe
     let tcp = build_tcp_segment(src_ip, dst_ip, dst_port, flags, rng.gen(), src_port, cfg);
-    let ip = build_ip_packet(src_ip, dst_ip, &tcp, cfg.ip_ttl);
+    let ip = build_ip_packet(src_ip, dst_ip, &tcp, cfg.jittered_ttl());
     send_ip_raw(tx, &ip, dst_ip, cfg).is_ok()
 }
 
