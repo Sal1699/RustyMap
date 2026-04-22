@@ -26,7 +26,7 @@ fn ping_ttl(ip: IpAddr, timeout: Duration) -> Option<u8> {
             .output()
             .ok()?
     } else {
-        let secs = ((timeout_ms + 999) / 1000).max(1);
+        let secs = timeout_ms.div_ceil(1000).max(1);
         Command::new("ping")
             .args(["-c", "1", "-W", &secs.to_string(), &ip_s])
             .output()

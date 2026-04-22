@@ -8,6 +8,11 @@ pub struct Db {
     conn: Connection,
 }
 
+pub type ScanRow = (i64, String, String, String, String, f64, String);
+pub type HostRow = (i64, String, Option<String>, bool, f64);
+pub type PortRow = (u16, String, String, Option<String>);
+pub type TagRow = (String, Option<u16>, String, Option<String>, String);
+
 pub const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS scans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,7 +150,7 @@ impl Db {
         Ok(())
     }
 
-    pub fn list_scans(&self) -> Result<Vec<(i64, String, String, String, String, f64, String)>> {
+    pub fn list_scans(&self) -> Result<Vec<ScanRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, started_at, scan_type, target_spec, port_spec, elapsed_secs, status
              FROM scans ORDER BY id DESC LIMIT 200",
@@ -155,7 +160,7 @@ impl Db {
         Ok(rows)
     }
 
-    pub fn hosts_for_scan(&self, scan_id: i64) -> Result<Vec<(i64, String, Option<String>, bool, f64)>> {
+    pub fn hosts_for_scan(&self, scan_id: i64) -> Result<Vec<HostRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, ip, hostname, up, latency_secs FROM hosts WHERE scan_id = ? ORDER BY ip",
         )?;
@@ -166,7 +171,7 @@ impl Db {
         Ok(rows)
     }
 
-    pub fn ports_for_host(&self, host_id: i64) -> Result<Vec<(u16, String, String, Option<String>)>> {
+    pub fn ports_for_host(&self, host_id: i64) -> Result<Vec<PortRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT port, protocol, state, service FROM ports WHERE host_id = ? ORDER BY port",
         )?;
@@ -177,7 +182,7 @@ impl Db {
         Ok(rows)
     }
 
-    pub fn list_tags(&self, ip_filter: Option<&str>) -> Result<Vec<(String, Option<u16>, String, Option<String>, String)>> {
+    pub fn list_tags(&self, ip_filter: Option<&str>) -> Result<Vec<TagRow>> {
         let (sql, needs_param) = if ip_filter.is_some() {
             ("SELECT ip, port, tag, note, created_at FROM tags WHERE ip = ? ORDER BY ip, port", true)
         } else {

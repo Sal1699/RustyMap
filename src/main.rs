@@ -140,7 +140,7 @@ async fn main() -> Result<()> {
         if rep.subdomains.is_empty() {
             println!("\nNo subdomains found for {}", domain);
         } else {
-            println!("\n{:<40} {}", "SUBDOMAIN", "IPs");
+            println!("\n{:<40} IPs", "SUBDOMAIN");
             for (sub, ips) in &rep.subdomains {
                 let ips_s: Vec<String> = ips.iter().map(|i| i.to_string()).collect();
                 println!("{:<40} {}", sub, ips_s.join(", "));
@@ -157,7 +157,7 @@ async fn main() -> Result<()> {
         if found.is_empty() {
             println!("No PTR records found in {}", cidr);
         } else {
-            println!("{:<20} {}", "IP", "PTR");
+            println!("{:<20} PTR", "IP");
             for (ip, name) in &found {
                 println!("{:<20} {}", ip.to_string(), name);
             }
@@ -576,7 +576,7 @@ fn run_vault(args: &Cli) -> Result<()> {
     if args.vault_list {
         let rows = vault::list(&path, &pw)?;
         if rows.is_empty() { println!("(vault empty)"); return Ok(()); }
-        println!("{:<20} {:<18} {:<10} {}", "NAME", "USERNAME", "KIND", "NOTE");
+        println!("{:<20} {:<18} {:<10} NOTE", "NAME", "USERNAME", "KIND");
         for (n, e) in rows {
             println!("{:<20} {:<18} {:<10} {}", n, e.username, e.kind, e.note.unwrap_or_default());
         }
@@ -609,7 +609,7 @@ fn run_list_tags(args: &Cli) -> Result<()> {
         println!("(no tags)");
         return Ok(());
     }
-    println!("{:<18} {:<8} {:<20} {:<25} {}", "IP", "PORT", "TAG", "CREATED", "NOTE");
+    println!("{:<18} {:<8} {:<20} {:<25} NOTE", "IP", "PORT", "TAG", "CREATED");
     for (ip, port, tag, note, created) in rows {
         let port_s = port.map(|p| p.to_string()).unwrap_or_default();
         println!(
@@ -634,7 +634,7 @@ async fn probe_services(hosts: &mut [HostResult], timeout_dur: std::time::Durati
         let open_idx: Vec<usize> = h.ports.iter().enumerate()
             .filter(|(_, p)| p.state == PortState::Open)
             .map(|(i, _)| i).collect();
-        let concurrency = open_idx.len().min(32).max(4);
+        let concurrency = open_idx.len().clamp(4, 32);
         let infos: Vec<(usize, Option<service_probe::ServiceInfo>)> = stream::iter(open_idx.into_iter())
             .map(|i| {
                 let port = h.ports[i].port;
@@ -649,6 +649,7 @@ async fn probe_services(hosts: &mut [HostResult], timeout_dur: std::time::Durati
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_connect(
     targets: Vec<target::Target>,
     ports: Arc<Vec<u16>>,

@@ -57,6 +57,7 @@ pub struct HostResult {
     pub mac: Option<[u8; 6]>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn tcp_connect_scan(
     target: Target,
     ports: Arc<Vec<u16>>,
@@ -116,7 +117,6 @@ pub async fn tcp_connect_scan(
         stream::iter(ports.iter().copied())
             .map(|port| {
                 let cancel = Arc::clone(&cancel);
-                let scan_delay = scan_delay;
                 async move {
                 if !scan_delay.is_zero() { tokio::time::sleep(scan_delay).await; }
                 if cancel.load(Ordering::Relaxed) {

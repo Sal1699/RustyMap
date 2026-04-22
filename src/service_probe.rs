@@ -191,7 +191,7 @@ pub async fn probe(ip: IpAddr, port: u16, timeout_dur: Duration) -> Option<Servi
 async fn probe_once(addr: SocketAddr, p: &Probe, dur: Duration) -> Option<ServiceInfo> {
     let mut stream = timeout(dur, TcpStream::connect(addr)).await.ok()?.ok()?;
     if !p.payload.is_empty() {
-        let _ = timeout(dur, stream.write_all(p.payload)).await.ok()?.ok()?;
+        timeout(dur, stream.write_all(p.payload)).await.ok()?.ok()?;
     }
     let mut buf = vec![0u8; 2048];
     let n = match timeout(dur, stream.read(&mut buf)).await {

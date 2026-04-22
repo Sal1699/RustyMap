@@ -199,25 +199,20 @@ impl RawTcpScanner {
 
 fn receiver_loop(mut rx: TransportReceiver, pending: PendingMap) {
     let mut iter = tcp_packet_iter(&mut rx);
-    loop {
-        match iter.next() {
-            Ok((packet, addr)) => {
-                let remote_ip = match addr {
-                    IpAddr::V4(v4) => v4,
-                    IpAddr::V6(_) => continue,
-                };
-                let remote_port = packet.get_source();
-                let kind = classify(packet.get_flags());
+    while let Ok((packet, addr)) = iter.next() {
+        let remote_ip = match addr {
+            IpAddr::V4(v4) => v4,
+            IpAddr::V6(_) => continue,
+        };
+        let remote_port = packet.get_source();
+        let kind = classify(packet.get_flags());
 
-                let sender_opt = {
-                    let pend = pending.lock().unwrap();
-                    pend.get(&(remote_ip, remote_port)).cloned()
-                };
-                if let Some(s) = sender_opt {
-                    let _ = s.send(kind);
-                }
-            }
-            Err(_) => break,
+        let sender_opt = {
+            let pend = pending.lock().unwrap();
+            pend.get(&(remote_ip, remote_port)).cloned()
+        };
+        if let Some(s) = sender_opt {
+            let _ = s.send(kind);
         }
     }
 }

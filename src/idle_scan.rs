@@ -184,29 +184,24 @@ impl IdleScanner {
 
 fn receiver_loop(mut rx: TransportReceiver, pending: PendingMap, zombie_ip: Ipv4Addr) {
     let mut iter = ipv4_packet_iter(&mut rx);
-    loop {
-        match iter.next() {
-            Ok((ip_packet, addr)) => {
-                let src = match addr {
-                    IpAddr::V4(v4) => v4,
-                    IpAddr::V6(_) => continue,
-                };
-                if src != zombie_ip {
-                    continue;
-                }
-                let ip_id = ip_packet.get_identification();
-                if let Some(tcp) = TcpPacket::new(ip_packet.payload()) {
-                    let our_src_port = tcp.get_destination();
-                    let sender_opt = {
-                        let p = pending.lock().unwrap();
-                        p.get(&(src, our_src_port)).cloned()
-                    };
-                    if let Some(s) = sender_opt {
-                        let _ = s.send(ip_id);
-                    }
-                }
+    while let Ok((ip_packet, addr)) = iter.next() {
+        let src = match addr {
+            IpAddr::V4(v4) => v4,
+            IpAddr::V6(_) => continue,
+        };
+        if src != zombie_ip {
+            continue;
+        }
+        let ip_id = ip_packet.get_identification();
+        if let Some(tcp) = TcpPacket::new(ip_packet.payload()) {
+            let our_src_port = tcp.get_destination();
+            let sender_opt = {
+                let p = pending.lock().unwrap();
+                p.get(&(src, our_src_port)).cloned()
+            };
+            if let Some(s) = sender_opt {
+                let _ = s.send(ip_id);
             }
-            Err(_) => break,
         }
     }
 }

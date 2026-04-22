@@ -48,7 +48,7 @@ pub fn service_name(port: u16) -> Option<&'static str> {
         111 => Some("rpcbind"),
         123 => Some("ntp"),
         135 => Some("msrpc"),
-        137 | 138 | 139 => Some("netbios"),
+        137..=139 => Some("netbios"),
         143 => Some("imap"),
         161 | 162 => Some("snmp"),
         179 => Some("bgp"),

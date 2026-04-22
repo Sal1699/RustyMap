@@ -95,44 +95,39 @@ impl UdpScanner {
 
 fn icmp_listener(mut rx: TransportReceiver, pending: PendingMap) {
     let mut iter = icmp_packet_iter(&mut rx);
-    loop {
-        match iter.next() {
-            Ok((packet, _src)) => {
-                let icmp_type = packet.get_icmp_type();
-                if icmp_type != IcmpTypes::DestinationUnreachable {
-                    continue;
-                }
-                // Payload: 4 bytes of unused + original IPv4 header + first 8 bytes of UDP header
-                let payload = packet.payload();
-                if payload.len() < 4 + 20 + 8 {
-                    continue;
-                }
-                let code = packet.get_icmp_code().0;
-                let orig_ip_bytes = &payload[4..];
-                if let Some(ip_pkt) = Ipv4Packet::new(orig_ip_bytes) {
-                    let ihl = (ip_pkt.get_header_length() as usize) * 4;
-                    if orig_ip_bytes.len() < ihl + 8 {
-                        continue;
-                    }
-                    let orig_dst = ip_pkt.get_destination();
-                    let udp_bytes = &orig_ip_bytes[ihl..ihl + 8];
-                    let orig_dst_port = u16::from_be_bytes([udp_bytes[2], udp_bytes[3]]);
-
-                    let hint = if code == 3 {
-                        IcmpHint::PortUnreachable
-                    } else {
-                        IcmpHint::OtherUnreachable
-                    };
-                    let sender_opt = {
-                        let pend = pending.lock().unwrap();
-                        pend.get(&(orig_dst, orig_dst_port)).cloned()
-                    };
-                    if let Some(s) = sender_opt {
-                        let _ = s.send(hint);
-                    }
-                }
+    while let Ok((packet, _src)) = iter.next() {
+        let icmp_type = packet.get_icmp_type();
+        if icmp_type != IcmpTypes::DestinationUnreachable {
+            continue;
+        }
+        // Payload: 4 bytes of unused + original IPv4 header + first 8 bytes of UDP header
+        let payload = packet.payload();
+        if payload.len() < 4 + 20 + 8 {
+            continue;
+        }
+        let code = packet.get_icmp_code().0;
+        let orig_ip_bytes = &payload[4..];
+        if let Some(ip_pkt) = Ipv4Packet::new(orig_ip_bytes) {
+            let ihl = (ip_pkt.get_header_length() as usize) * 4;
+            if orig_ip_bytes.len() < ihl + 8 {
+                continue;
             }
-            Err(_) => break,
+            let orig_dst = ip_pkt.get_destination();
+            let udp_bytes = &orig_ip_bytes[ihl..ihl + 8];
+            let orig_dst_port = u16::from_be_bytes([udp_bytes[2], udp_bytes[3]]);
+
+            let hint = if code == 3 {
+                IcmpHint::PortUnreachable
+            } else {
+                IcmpHint::OtherUnreachable
+            };
+            let sender_opt = {
+                let pend = pending.lock().unwrap();
+                pend.get(&(orig_dst, orig_dst_port)).cloned()
+            };
+            if let Some(s) = sender_opt {
+                let _ = s.send(hint);
+            }
         }
     }
 }

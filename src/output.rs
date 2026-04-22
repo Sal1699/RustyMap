@@ -62,7 +62,7 @@ pub fn print_host(host: &HostResult, verbose: u8) {
         return;
     }
 
-    println!("{:<10} {:<10} {:<16} {}", "PORT", "STATE", "SERVICE", "VERSION");
+    println!("{:<10} {:<10} {:<16} VERSION", "PORT", "STATE", "SERVICE");
     for p in &host.ports {
         let port_s = format!("{}/tcp", p.port);
         let (state_s, colored_state) = match p.state {

@@ -174,7 +174,9 @@ impl EvasionPreset {
 // ── Jitter / Realistic Timing (technique 15) ─────────────────────
 
 #[derive(Debug, Clone, Copy)]
+#[derive(Default)]
 pub enum JitterMode {
+    #[default]
     None,
     /// Uniform random delay up to max_ms.
     Uniform(u64),
@@ -182,11 +184,6 @@ pub enum JitterMode {
     Gaussian(u64),
 }
 
-impl Default for JitterMode {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 /// Blocking sleep with jitter (for raw scanner threads).
 pub fn jitter_sleep(mode: &JitterMode) {
