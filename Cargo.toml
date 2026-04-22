@@ -1,6 +1,6 @@
 [package]
 name = "rustymap"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 description = "A Rust port of nmap for network exploration and security auditing"
 license = "MIT"

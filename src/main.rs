@@ -24,6 +24,7 @@ mod scanner;
 mod scripting;
 mod service_probe;
 mod shutdown;
+mod syn_emu;
 mod target;
 mod udp_scan;
 mod updater;
@@ -206,7 +207,12 @@ async fn main() -> Result<()> {
 
     let scan_type = args.scan_type();
     let needs_privilege = !matches!(scan_type, ScanType::Connect);
-    if needs_privilege {
+    // --sS can degrade to a driver-less SO_LINGER=0 emulation when raw
+    // sockets aren't available; explicit opt-in via --syn-emulated bypasses
+    // privilege/Npcap checks entirely.
+    let syn_emulated_active =
+        matches!(scan_type, ScanType::Syn) && (args.syn_emulated || !npcap::is_installed());
+    if needs_privilege && !syn_emulated_active {
         if !privilege::is_privileged() {
             return Err(anyhow!(
                 "scan type requires elevated privileges. {}",
@@ -215,6 +221,9 @@ async fn main() -> Result<()> {
         }
         #[cfg(windows)]
         npcap::ensure_available()?;
+    }
+    if syn_emulated_active && args.verbose > 0 {
+        eprintln!("[sS] using SYN-emulated path (no driver, full handshake + RST close)");
     }
 
     let scan_type_str = format!("{:?}", scan_type);
@@ -325,6 +334,19 @@ async fn main() -> Result<()> {
     let results: Vec<HostResult> = match scan_type {
         ScanType::Connect => {
             run_connect(
+                targets,
+                port_list.clone(),
+                timeout_dur,
+                parallel,
+                show_closed,
+                Arc::clone(&cancel),
+                limiter.clone(),
+                std::time::Duration::from_millis(args.scan_delay_ms),
+            )
+            .await
+        }
+        ScanType::Syn if syn_emulated_active => {
+            run_syn_emu(
                 targets,
                 port_list.clone(),
                 timeout_dur,
@@ -673,6 +695,47 @@ async fn run_connect(
             let limiter = limiter.clone();
             async move {
                 scanner::tcp_connect_scan(t, ports, timeout_dur, parallel, show_closed, cancel, limiter, scan_delay).await
+            }
+        })
+        .buffer_unordered(host_concurrency)
+        .collect()
+        .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_syn_emu(
+    targets: Vec<target::Target>,
+    ports: Arc<Vec<u16>>,
+    timeout_dur: std::time::Duration,
+    parallel: usize,
+    show_closed: bool,
+    cancel: Cancel,
+    limiter: Option<Arc<AdaptiveLimiter>>,
+    scan_delay: std::time::Duration,
+) -> Vec<HostResult> {
+    let host_concurrency = match targets.len() {
+        0..=1 => 1,
+        2..=10 => 4,
+        11..=50 => 8,
+        _ => 16,
+    };
+    stream::iter(targets.into_iter())
+        .map(|t| {
+            let ports = Arc::clone(&ports);
+            let cancel = Arc::clone(&cancel);
+            let limiter = limiter.clone();
+            async move {
+                syn_emu::run_syn_emulated(
+                    t,
+                    ports,
+                    timeout_dur,
+                    parallel,
+                    show_closed,
+                    cancel,
+                    limiter,
+                    scan_delay,
+                )
+                .await
             }
         })
         .buffer_unordered(host_concurrency)

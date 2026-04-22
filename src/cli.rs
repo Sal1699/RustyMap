@@ -257,6 +257,11 @@ pub struct Cli {
     #[arg(long = "install-npcap")]
     pub install_npcap: bool,
 
+    /// Force --sS to use the driver-less SO_LINGER=0 emulation path
+    /// (auto-selected on Windows when Npcap is missing).
+    #[arg(long = "syn-emulated")]
+    pub syn_emulated: bool,
+
     /// Sniff DNS queries/responses on local network (requires admin + Npcap)
     #[arg(long = "dns-sniff")]
     pub dns_sniff: bool,

@@ -32,7 +32,8 @@ pub fn print_guide() {
 
     section("TIPI DI SCAN");
     line("--sT                  TCP connect (3-way handshake, no privilegi)");
-    line("--sS                  TCP SYN half-open (richiede admin + Npcap)");
+    line("--sS                  TCP SYN half-open (admin + Npcap; auto-fallback driver-less)");
+    line("--syn-emulated        Forza --sS senza driver (SO_LINGER=0, no admin)");
     line("--sF                  TCP FIN scan");
     line("--sN                  TCP NULL scan (nessun flag)");
     line("--sX                  TCP Xmas scan (FIN+PSH+URG)");
