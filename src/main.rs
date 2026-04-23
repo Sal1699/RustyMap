@@ -564,6 +564,7 @@ async fn main() -> Result<()> {
     }
 
     // 6) Persist to DB and run diff
+    let mut diffs: std::collections::HashMap<String, db::PortDiff> = std::collections::HashMap::new();
     if let (Some(ref mut db), Some(sid)) = (db_handle.as_mut(), scan_id) {
         for h in &sorted {
             db.insert_host(sid, h)?;
@@ -572,13 +573,20 @@ async fn main() -> Result<()> {
         db.finalize_scan(sid, elapsed, status)?;
         audit.event("db_persisted", json!({ "scan_id": sid, "status": status }));
 
-        if args.show_diff {
+        // Always compute diffs when a previous scan exists — reports use them
+        // regardless of whether --diff was passed for stdout printing.
+        for h in &sorted {
+            let state: Vec<(u16, PortState)> =
+                h.ports.iter().map(|p| (p.port, p.state)).collect();
+            if let Some(d) = db::diff_host_vs_previous(db, sid, &h.target.ip.to_string(), &state)? {
+                diffs.insert(h.target.ip.to_string(), d);
+            }
+        }
+        if args.show_diff && !diffs.is_empty() {
             println!("\n-- Diff vs previous scan --");
             for h in &sorted {
-                let state: Vec<(u16, PortState)> =
-                    h.ports.iter().map(|p| (p.port, p.state)).collect();
-                if let Some(d) = db::diff_host_vs_previous(db, sid, &h.target.ip.to_string(), &state)? {
-                    print_diff(&h.target.display(), &d);
+                if let Some(d) = diffs.get(&h.target.ip.to_string()) {
+                    print_diff(&h.target.display(), d);
                 }
             }
         }
@@ -596,13 +604,13 @@ async fn main() -> Result<()> {
         json_out::write_json(p, &json)?;
     }
     if let Some(p) = &args.output_html {
-        report::write_html(p, &sorted, &scan_type_str, started_at, elapsed)?;
+        report::write_html(p, &sorted, &scan_type_str, started_at, elapsed, &diffs)?;
     }
     if let Some(p) = &args.output_markdown {
-        report::write_markdown(p, &sorted, &scan_type_str, started_at, elapsed)?;
+        report::write_markdown(p, &sorted, &scan_type_str, started_at, elapsed, &diffs)?;
     }
     if let (Some(tpl), Some(out)) = (&args.template_path, &args.output_template) {
-        report::write_custom(tpl, out, &sorted, &scan_type_str, started_at, elapsed)?;
+        report::write_custom(tpl, out, &sorted, &scan_type_str, started_at, elapsed, &diffs)?;
     } else if args.template_path.is_some() ^ args.output_template.is_some() {
         return Err(anyhow!("--template and --oT must be used together"));
     }

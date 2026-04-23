@@ -15,6 +15,13 @@
 {% if h.device_class %}
 Device: **{{ h.device_class }}**{% if h.vendor %} · {{ h.vendor }}{% endif %}{% if h.device_confidence %} · confidence {{ h.device_confidence }}%{% endif %}
 {% endif %}
+{% if h.diff %}
+**Diff vs previous scan:**
+{% if h.diff.new_open | length > 0 %}- newly open: `{{ h.diff.new_open | join(sep=", ") }}`
+{% endif %}{% if h.diff.closed_now | length > 0 %}- no longer open: `{{ h.diff.closed_now | join(sep=", ") }}`
+{% endif %}{% for c in h.diff.state_changes %}- port `{{ c[0] }}`: {{ c[1] }} → {{ c[2] }}
+{% endfor %}
+{% endif %}
 
 {% if h.ports | length > 0 %}
 | Port | Proto | State | Service |

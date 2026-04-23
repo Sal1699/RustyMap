@@ -1,7 +1,9 @@
+use crate::db::PortDiff;
 use crate::ports::service_name;
 use crate::scanner::HostResult;
 use anyhow::{Context, Result};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fs;
 use tera::{Context as TeraCtx, Tera};
 
@@ -17,6 +19,13 @@ struct PortView {
 }
 
 #[derive(Serialize)]
+struct DiffView {
+    new_open: Vec<u16>,
+    closed_now: Vec<u16>,
+    state_changes: Vec<(u16, String, String)>,
+}
+
+#[derive(Serialize)]
 struct HostView {
     ip: String,
     hostname: Option<String>,
@@ -27,6 +36,7 @@ struct HostView {
     vendor: Option<String>,
     device_confidence: Option<u8>,
     ports: Vec<PortView>,
+    diff: Option<DiffView>,
 }
 
 #[derive(Serialize)]
@@ -42,7 +52,7 @@ struct ReportCtx {
     hosts: Vec<HostView>,
 }
 
-fn to_view(hosts: &[HostResult]) -> Vec<HostView> {
+fn to_view(hosts: &[HostResult], diffs: &HashMap<String, PortDiff>) -> Vec<HostView> {
     hosts
         .iter()
         .map(|h| {
@@ -57,8 +67,14 @@ fn to_view(hosts: &[HostResult]) -> Vec<HostView> {
                 })
                 .collect();
             let open_count = ports.iter().filter(|p| p.state == "open").count();
+            let ip_s = h.target.ip.to_string();
+            let diff = diffs.get(&ip_s).map(|d| DiffView {
+                new_open: d.new_open.clone(),
+                closed_now: d.closed_now.clone(),
+                state_changes: d.state_changes.clone(),
+            });
             HostView {
-                ip: h.target.ip.to_string(),
+                ip: ip_s,
                 hostname: h.target.hostname.clone(),
                 up: h.up,
                 latency_secs: h.elapsed.as_secs_f64(),
@@ -67,6 +83,7 @@ fn to_view(hosts: &[HostResult]) -> Vec<HostView> {
                 vendor: h.device.as_ref().and_then(|d| d.vendor.clone()),
                 device_confidence: h.device.as_ref().map(|d| d.confidence),
                 ports,
+                diff,
             }
         })
         .collect()
@@ -77,8 +94,9 @@ fn build_ctx(
     scan_type: &str,
     started_at: chrono::DateTime<chrono::Local>,
     elapsed_secs: f64,
+    diffs: &HashMap<String, PortDiff>,
 ) -> ReportCtx {
-    let views = to_view(hosts);
+    let views = to_view(hosts, diffs);
     let hosts_up = views.iter().filter(|h| h.up).count();
     let open_ports_total = views.iter().map(|h| h.open_count).sum();
     ReportCtx {
@@ -117,8 +135,9 @@ pub fn write_html(
     scan_type: &str,
     started_at: chrono::DateTime<chrono::Local>,
     elapsed_secs: f64,
+    diffs: &HashMap<String, PortDiff>,
 ) -> Result<()> {
-    let ctx = build_ctx(hosts, scan_type, started_at, elapsed_secs);
+    let ctx = build_ctx(hosts, scan_type, started_at, elapsed_secs, diffs);
     let out = render(DEFAULT_HTML, &ctx, "report.html")?;
     fs::write(path, out)?;
     Ok(())
@@ -130,8 +149,9 @@ pub fn write_markdown(
     scan_type: &str,
     started_at: chrono::DateTime<chrono::Local>,
     elapsed_secs: f64,
+    diffs: &HashMap<String, PortDiff>,
 ) -> Result<()> {
-    let ctx = build_ctx(hosts, scan_type, started_at, elapsed_secs);
+    let ctx = build_ctx(hosts, scan_type, started_at, elapsed_secs, diffs);
     let out = render(DEFAULT_MD, &ctx, "report.md")?;
     fs::write(path, out)?;
     Ok(())
@@ -144,10 +164,11 @@ pub fn write_custom(
     scan_type: &str,
     started_at: chrono::DateTime<chrono::Local>,
     elapsed_secs: f64,
+    diffs: &HashMap<String, PortDiff>,
 ) -> Result<()> {
     let tpl = fs::read_to_string(template_path)
         .with_context(|| format!("failed to read template {}", template_path))?;
-    let ctx = build_ctx(hosts, scan_type, started_at, elapsed_secs);
+    let ctx = build_ctx(hosts, scan_type, started_at, elapsed_secs, diffs);
     let out = render(&tpl, &ctx, "custom")?;
     fs::write(out_path, out)?;
     Ok(())

@@ -22,6 +22,10 @@
   .state-unfiltered { color: #c084fc; }
   .summary { background: #1e293b; padding: 1em 1.25em; border-radius: 8px; margin-bottom: 1.5em; }
   .summary strong { color: #38bdf8; }
+  .diff { background: #0b1220; border-left: 3px solid #38bdf8; padding: 0.5em 0.8em; margin: 0.6em 0 0.4em; font-size: 0.85em; }
+  .diff .new { color: #4ade80; }
+  .diff .gone { color: #f87171; }
+  .diff .changed { color: #fbbf24; }
 </style>
 </head>
 <body>
@@ -46,6 +50,20 @@
     {% if h.device_class %}
     <div class="hostmeta">
       Device: <strong>{{ h.device_class }}</strong>{% if h.vendor %} &middot; {{ h.vendor }}{% endif %}{% if h.device_confidence %} &middot; confidence {{ h.device_confidence }}%{% endif %}
+    </div>
+    {% endif %}
+    {% if h.diff %}
+    <div class="diff">
+      <strong>Diff vs previous scan:</strong>
+      {% if h.diff.new_open | length > 0 %}<span class="new">+open: {{ h.diff.new_open | join(sep=", ") }}</span>{% endif %}
+      {% if h.diff.closed_now | length > 0 %} <span class="gone">−open: {{ h.diff.closed_now | join(sep=", ") }}</span>{% endif %}
+      {% if h.diff.state_changes | length > 0 %}
+        <ul>
+        {% for c in h.diff.state_changes %}
+          <li class="changed">port {{ c[0] }}: {{ c[1] }} → {{ c[2] }}</li>
+        {% endfor %}
+        </ul>
+      {% endif %}
     </div>
     {% endif %}
     {% if h.ports | length > 0 %}
