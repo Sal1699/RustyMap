@@ -47,6 +47,33 @@ fn host_to_map(h: &HostResult) -> Map {
                     "banner".into(),
                     svc.banner.clone().map(Dynamic::from).unwrap_or(Dynamic::UNIT),
                 );
+                if let Some(tls) = &svc.tls {
+                    let mut tm = Map::new();
+                    tm.insert(
+                        "negotiated".into(),
+                        tls.negotiated.clone().map(Dynamic::from).unwrap_or(Dynamic::UNIT),
+                    );
+                    tm.insert(
+                        "subject".into(),
+                        tls.subject.clone().map(Dynamic::from).unwrap_or(Dynamic::UNIT),
+                    );
+                    tm.insert(
+                        "issuer".into(),
+                        tls.issuer.clone().map(Dynamic::from).unwrap_or(Dynamic::UNIT),
+                    );
+                    tm.insert(
+                        "not_after".into(),
+                        tls.not_after.clone().map(Dynamic::from).unwrap_or(Dynamic::UNIT),
+                    );
+                    tm.insert("self_signed".into(), Dynamic::from(tls.self_signed));
+                    tm.insert("expired".into(), Dynamic::from(tls.expired));
+                    if let Some(b) = tls.key_bits {
+                        tm.insert("key_bits".into(), Dynamic::from(b as i64));
+                    }
+                    let sans: Array = tls.san.iter().cloned().map(Dynamic::from).collect();
+                    tm.insert("san".into(), Dynamic::from(sans));
+                    sm.insert("tls".into(), Dynamic::from(tm));
+                }
                 pm.insert("service".into(), Dynamic::from(sm));
             }
             Dynamic::from(pm)
