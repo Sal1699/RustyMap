@@ -13,6 +13,8 @@ pub struct ServiceInfo {
     pub version: Option<String>,
     pub extra: Option<String>,
     pub banner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tls: Option<crate::tls_probe::TlsInfo>,
 }
 
 impl ServiceInfo {
@@ -24,7 +26,7 @@ impl ServiceInfo {
         parts.join(" ")
     }
     pub fn is_empty(&self) -> bool {
-        self.product.is_none() && self.version.is_none() && self.banner.is_none()
+        self.product.is_none() && self.version.is_none() && self.banner.is_none() && self.tls.is_none()
     }
 }
 
@@ -166,7 +168,7 @@ fn match_signatures(data: &[u8]) -> Option<ServiceInfo> {
             let extra = s.extra_group.and_then(|g| c.get(g)).map(|m| m.as_str().trim().to_string())
                 .filter(|s| !s.is_empty());
             let banner = first_line(&text);
-            return Some(ServiceInfo { product, version, extra, banner });
+            return Some(ServiceInfo { product, version, extra, banner, tls: None });
         }
     }
     None
@@ -177,15 +179,30 @@ fn first_line(s: &str) -> Option<String> {
     if line.trim().is_empty() { None } else { Some(line) }
 }
 
-pub async fn probe(ip: IpAddr, port: u16, timeout_dur: Duration) -> Option<ServiceInfo> {
+pub async fn probe(
+    ip: IpAddr,
+    port: u16,
+    timeout_dur: Duration,
+    sni: Option<&str>,
+) -> Option<ServiceInfo> {
     let addr = SocketAddr::new(ip, port);
+    let mut best: Option<ServiceInfo> = None;
     for p in probes_for_port(port) {
-        let res = probe_once(addr, p, timeout_dur).await;
-        if let Some(info) = res {
-            if !info.is_empty() { return Some(info); }
+        if let Some(info) = probe_once(addr, p, timeout_dur).await {
+            if !info.is_empty() {
+                best = Some(info);
+                break;
+            }
         }
     }
-    None
+    if crate::tls_probe::likely_tls(port) {
+        if let Some(tls) = crate::tls_probe::probe(ip, port, timeout_dur, sni).await {
+            let mut info = best.unwrap_or_default();
+            info.tls = Some(tls);
+            return Some(info);
+        }
+    }
+    best
 }
 
 async fn probe_once(addr: SocketAddr, p: &Probe, dur: Duration) -> Option<ServiceInfo> {

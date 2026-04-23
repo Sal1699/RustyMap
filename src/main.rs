@@ -26,6 +26,7 @@ mod service_probe;
 mod shutdown;
 mod syn_emu;
 mod target;
+mod tls_probe;
 mod udp_scan;
 mod updater;
 mod vault;
@@ -699,6 +700,7 @@ async fn probe_services(hosts: &mut [HostResult], timeout_dur: std::time::Durati
     for h in hosts.iter_mut() {
         if !h.up { continue; }
         let ip = h.target.ip;
+        let hostname = h.target.hostname.clone();
         let open_idx: Vec<usize> = h.ports.iter().enumerate()
             .filter(|(_, p)| p.state == PortState::Open)
             .map(|(i, _)| i).collect();
@@ -706,7 +708,8 @@ async fn probe_services(hosts: &mut [HostResult], timeout_dur: std::time::Durati
         let infos: Vec<(usize, Option<service_probe::ServiceInfo>)> = stream::iter(open_idx.into_iter())
             .map(|i| {
                 let port = h.ports[i].port;
-                async move { (i, service_probe::probe(ip, port, probe_timeout).await) }
+                let host = hostname.clone();
+                async move { (i, service_probe::probe(ip, port, probe_timeout, host.as_deref()).await) }
             })
             .buffer_unordered(concurrency)
             .collect()

@@ -65,6 +65,7 @@ pub fn print_guide() {
 
     section("SERVICE & OS DETECTION");
     line("--sV                  Probe servizi/versione (banner + probe attivi)");
+    line("                      (su porte TLS aggancia anche cert + protocollo)");
     line("-O, --os              Fingerprinting OS (TTL + porte/banner)");
     line("                      (device-class auto: router/camera/printer/NAS/IoT…)");
     example("rustymap --sT --sV 10.0.0.5");

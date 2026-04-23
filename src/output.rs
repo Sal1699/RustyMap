@@ -76,6 +76,30 @@ pub fn print_host(host: &HostResult, verbose: u8) {
         let version = p.service.as_ref().map(|s| s.display()).unwrap_or_default();
         let _ = state_s;
         println!("{:<10} {:<10} {:<16} {}", port_s, colored_state, service, version);
+        if let Some(svc) = &p.service {
+            if let Some(tls) = &svc.tls {
+                let mut line = format!("           tls: {}", tls.summary());
+                if let Some(bits) = tls.key_bits {
+                    line.push_str(&format!(" {}-bit", bits));
+                }
+                if !tls.san.is_empty() {
+                    let preview: Vec<&str> = tls.san.iter().take(4).map(|s| s.as_str()).collect();
+                    line.push_str(&format!(" SAN={}", preview.join(",")));
+                    if tls.san.len() > 4 {
+                        line.push_str(&format!(" (+{} more)", tls.san.len() - 4));
+                    }
+                }
+                println!("{}", line);
+                if verbose > 0 {
+                    if let (Some(nb), Some(na)) = (&tls.not_before, &tls.not_after) {
+                        println!("           cert validity: {} → {}", nb, na);
+                    }
+                    if let Some(iss) = &tls.issuer {
+                        println!("           issuer: {}", iss);
+                    }
+                }
+            }
+        }
     }
 }
 
