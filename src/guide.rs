@@ -36,6 +36,9 @@ pub fn print_guide() {
     line("--syn-emulated        Forza --sS senza driver (SO_LINGER=0, no admin)");
     line("--ipv4-only           Scarta gli AAAA dopo la risoluzione DNS");
     line("--ipv6-only           Scarta gli A dopo la risoluzione DNS");
+    line("--traceroute          Traceroute via tracert/traceroute di sistema");
+    line("--trace-hops N        Hop massimi (default 20)");
+    line("--topology FILE       Scrive grafo Graphviz DOT della topologia");
     line("--sF                  TCP FIN scan");
     line("--sN                  TCP NULL scan (nessun flag)");
     line("--sX                  TCP Xmas scan (FIN+PSH+URG)");

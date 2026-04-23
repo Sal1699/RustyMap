@@ -27,6 +27,7 @@ mod shutdown;
 mod syn_emu;
 mod target;
 mod tls_probe;
+mod traceroute;
 mod udp_scan;
 mod updater;
 mod vault;
@@ -517,6 +518,36 @@ async fn main() -> Result<()> {
             }
             Err(e) => eprintln!("[!] CVE DB error: {}", e),
         }
+    }
+
+    // Traceroute + topology
+    if args.traceroute {
+        let mut traces = Vec::new();
+        println!("\n-- Traceroute --");
+        for h in sorted.iter().filter(|h| h.up) {
+            match traceroute::trace(&h.target, args.trace_hops).await {
+                Ok(tr) => {
+                    println!("{}:", h.target.display());
+                    for hop in &tr.hops {
+                        match hop.ip {
+                            Some(ip) => println!("  {:>2}  {}", hop.ttl, ip),
+                            None => println!("  {:>2}  *", hop.ttl),
+                        }
+                    }
+                    traces.push(tr);
+                }
+                Err(e) => eprintln!("[!] traceroute {}: {}", h.target.display(), e),
+            }
+        }
+        if let Some(path) = &args.topology {
+            let dot = traceroute::render_dot(&traces);
+            if let Err(e) = std::fs::write(path, dot) {
+                eprintln!("[!] failed to write topology to {}: {}", path, e);
+            } else {
+                println!("[topology] wrote {} (render with: dot -Tpng {} -o topology.png)", path, path);
+            }
+        }
+        audit.event("traceroute", json!({ "hosts": traces.len() }));
     }
 
     // Run Rhai scripts if requested

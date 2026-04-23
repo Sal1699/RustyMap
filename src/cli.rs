@@ -275,6 +275,18 @@ pub struct Cli {
     #[arg(long = "ipv6-only", conflicts_with = "ipv4_only")]
     pub ipv6_only: bool,
 
+    /// Run a traceroute against each up host (uses system tracert/traceroute)
+    #[arg(long = "traceroute")]
+    pub traceroute: bool,
+
+    /// Max hops for --traceroute (default 20)
+    #[arg(long = "trace-hops", default_value_t = 20)]
+    pub trace_hops: u8,
+
+    /// Write a Graphviz DOT topology file from traceroute results
+    #[arg(long = "topology", value_name = "FILE")]
+    pub topology: Option<String>,
+
     /// Sniff DNS queries/responses on local network (requires admin + Npcap)
     #[arg(long = "dns-sniff")]
     pub dns_sniff: bool,
