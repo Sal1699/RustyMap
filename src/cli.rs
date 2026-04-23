@@ -287,6 +287,10 @@ pub struct Cli {
     #[arg(long = "topology", value_name = "FILE")]
     pub topology: Option<String>,
 
+    /// Open a TUI results browser after the scan completes
+    #[arg(long = "tui")]
+    pub tui: bool,
+
     /// Sniff DNS queries/responses on local network (requires admin + Npcap)
     #[arg(long = "dns-sniff")]
     pub dns_sniff: bool,

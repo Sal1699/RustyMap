@@ -28,6 +28,7 @@ mod syn_emu;
 mod target;
 mod tls_probe;
 mod traceroute;
+mod tui;
 mod udp_scan;
 mod updater;
 mod vault;
@@ -624,6 +625,12 @@ async fn main() -> Result<()> {
             "cancelled": was_cancelled,
         }),
     );
+
+    if args.tui {
+        if let Err(e) = tui::run(&sorted) {
+            eprintln!("[!] TUI error: {}", e);
+        }
+    }
 
     if was_cancelled {
         eprintln!("[!] Scan aborted; partial results saved.");

@@ -39,6 +39,7 @@ pub fn print_guide() {
     line("--traceroute          Traceroute via tracert/traceroute di sistema");
     line("--trace-hops N        Hop massimi (default 20)");
     line("--topology FILE       Scrive grafo Graphviz DOT della topologia");
+    line("--tui                 Apre browser TUI dei risultati (q per uscire)");
     line("--sF                  TCP FIN scan");
     line("--sN                  TCP NULL scan (nessun flag)");
     line("--sX                  TCP Xmas scan (FIN+PSH+URG)");
