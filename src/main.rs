@@ -27,6 +27,7 @@ mod shutdown;
 mod syn_emu;
 mod target;
 mod tls_probe;
+mod top_ports;
 mod traceroute;
 mod tui;
 mod udp_scan;
@@ -63,6 +64,51 @@ async fn main() -> Result<()> {
         let p = profile::load(&profile_path)?;
         if let Some(name) = &p.name { eprintln!("[profile] loaded: {}", name); }
         profile::apply(&mut args, &p);
+    }
+
+    // -A: nmap-style aggressive shortcut. Implies -sV -O --traceroute, and
+    // auto-runs scripts/ if it exists in the cwd or alongside the binary.
+    if args.aggressive {
+        args.service_version = true;
+        args.os_fingerprint = true;
+        args.traceroute = true;
+        if args.script_path.is_none() {
+            for candidate in ["scripts", "/usr/share/rustymap/scripts"] {
+                if std::path::Path::new(candidate).is_dir() {
+                    args.script_path = Some(candidate.to_string());
+                    break;
+                }
+            }
+            if args.script_path.is_none() {
+                if let Ok(exe) = std::env::current_exe() {
+                    if let Some(dir) = exe.parent() {
+                        let p = dir.join("scripts");
+                        if p.is_dir() {
+                            args.script_path = Some(p.to_string_lossy().into_owned());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // -oA: expand into individual output paths if not already set.
+    if let Some(prefix) = args.output_all.clone() {
+        if args.output_normal.is_none() {
+            args.output_normal = Some(format!("{}.txt", prefix));
+        }
+        if args.output_grepable.is_none() {
+            args.output_grepable = Some(format!("{}.gnmap", prefix));
+        }
+        if args.output_json.is_none() {
+            args.output_json = Some(format!("{}.json", prefix));
+        }
+        if args.output_html.is_none() {
+            args.output_html = Some(format!("{}.html", prefix));
+        }
+        if args.output_markdown.is_none() {
+            args.output_markdown = Some(format!("{}.md", prefix));
+        }
     }
 
     if args.no_color {
@@ -293,6 +339,62 @@ async fn main() -> Result<()> {
     } else if args.ipv6_only {
         targets.retain(|t| t.ip.is_ipv6());
     }
+
+    // Exclusions: --exclude (comma-list ok, repeatable) + --exclude-file
+    let mut exclude_specs: Vec<String> = Vec::new();
+    for spec in &args.exclude {
+        for piece in spec.split(',') {
+            let s = piece.trim();
+            if !s.is_empty() {
+                exclude_specs.push(s.to_string());
+            }
+        }
+    }
+    if let Some(path) = &args.exclude_file {
+        let body = std::fs::read_to_string(path)
+            .map_err(|e| anyhow!("read {}: {}", path, e))?;
+        for line in body.lines() {
+            let s = line.trim();
+            if !s.is_empty() && !s.starts_with('#') {
+                exclude_specs.push(s.to_string());
+            }
+        }
+    }
+    if !exclude_specs.is_empty() {
+        let excluded = target::expand_targets(&exclude_specs, false).await?;
+        let excluded_ips: std::collections::HashSet<_> =
+            excluded.iter().map(|t| t.ip).collect();
+        let before = targets.len();
+        targets.retain(|t| !excluded_ips.contains(&t.ip));
+        if args.verbose > 0 {
+            println!("Excluded {} target(s)", before - targets.len());
+        }
+    }
+
+    // -R: force reverse DNS for each target so output shows hostnames.
+    if args.force_reverse_dns && !args.no_dns {
+        if let Ok(resolver) =
+            trust_dns_resolver::TokioAsyncResolver::tokio_from_system_conf()
+        {
+            for t in targets.iter_mut() {
+                if t.hostname.is_none() {
+                    if let Ok(rev) = resolver.reverse_lookup(t.ip).await {
+                        if let Some(name) = rev.iter().next() {
+                            t.hostname =
+                                Some(name.to_string().trim_end_matches('.').to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --randomize-hosts: shuffle target order
+    if args.randomize_hosts {
+        use rand::seq::SliceRandom;
+        targets.shuffle(&mut rand::thread_rng());
+    }
+
     if args.verbose > 0 {
         println!("Expanded {} target(s)", targets.len());
     }
@@ -342,7 +444,14 @@ async fn main() -> Result<()> {
     }
 
     // 3) Port scan
-    let mut port_vec = ports::parse_ports(&args.effective_ports())?;
+    let mut port_vec = if let Some(n) = args.top_ports {
+        if n == 0 {
+            return Err(anyhow!("--top-ports must be > 0"));
+        }
+        top_ports::top(n)
+    } else {
+        ports::parse_ports(&args.effective_ports())?
+    };
     if args.randomize_ports {
         use rand::seq::SliceRandom;
         port_vec.shuffle(&mut rand::thread_rng());
@@ -400,6 +509,7 @@ async fn main() -> Result<()> {
                 Arc::clone(&cancel),
                 limiter.clone(),
                 std::time::Duration::from_millis(args.scan_delay_ms),
+                std::time::Duration::from_secs(args.host_timeout_secs),
             )
             .await
         }
@@ -503,7 +613,7 @@ async fn main() -> Result<()> {
     let mut sorted = results;
     sorted.sort_by_key(|h| h.target.ip);
     for h in &sorted {
-        output::print_host(h, args.verbose);
+        output::print_host_with_reason(h, args.verbose, &scan_type_str, args.reason);
     }
 
     let elapsed = t_start.elapsed().as_secs_f64();
@@ -785,6 +895,7 @@ async fn run_connect(
     cancel: Cancel,
     limiter: Option<Arc<AdaptiveLimiter>>,
     scan_delay: std::time::Duration,
+    host_timeout: std::time::Duration,
 ) -> Vec<HostResult> {
     let host_concurrency = match targets.len() {
         0..=1 => 1,
@@ -798,7 +909,24 @@ async fn run_connect(
             let cancel = Arc::clone(&cancel);
             let limiter = limiter.clone();
             async move {
-                scanner::tcp_connect_scan(t, ports, timeout_dur, parallel, show_closed, cancel, limiter, scan_delay).await
+                let target_clone = t.clone();
+                let fut = scanner::tcp_connect_scan(t, ports, timeout_dur, parallel, show_closed, cancel, limiter, scan_delay);
+                if host_timeout.is_zero() {
+                    fut.await
+                } else {
+                    match tokio::time::timeout(host_timeout, fut).await {
+                        Ok(r) => r,
+                        Err(_) => HostResult {
+                            target: target_clone,
+                            up: false,
+                            ports: vec![],
+                            elapsed: host_timeout,
+                            os: None,
+                            device: None,
+                            mac: None,
+                        },
+                    }
+                }
             }
         })
         .buffer_unordered(host_concurrency)

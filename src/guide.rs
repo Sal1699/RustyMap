@@ -40,6 +40,15 @@ pub fn print_guide() {
     line("--trace-hops N        Hop massimi (default 20)");
     line("--topology FILE       Scrive grafo Graphviz DOT della topologia");
     line("--tui                 Apre browser TUI dei risultati (q per uscire)");
+    line("--exclude SPEC        Esclude IP/CIDR/range (ripetibile, virgole ok)");
+    line("--exclude-file FILE   File con un host/CIDR per riga da escludere");
+    line("-A, --aggressive      Combo: -sV -O --traceroute + scripts/ se presente");
+    line("--top-ports N         Scansiona le N porte più comuni (override -p)");
+    line("--reason              Mostra perché lo stato è quello (syn-ack, rst, …)");
+    line("--randomize-hosts     Randomizza l'ordine degli host");
+    line("--oA PREFIX           Scrive tutti i formati (txt/gnmap/json/html/md)");
+    line("-R                    Forza reverse DNS su ogni IP target");
+    line("--host-timeout SEC    Abbandona host dopo N secondi (solo --sT, 0=off)");
     line("--sF                  TCP FIN scan");
     line("--sN                  TCP NULL scan (nessun flag)");
     line("--sX                  TCP Xmas scan (FIN+PSH+URG)");

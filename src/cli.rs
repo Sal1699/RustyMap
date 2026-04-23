@@ -291,6 +291,42 @@ pub struct Cli {
     #[arg(long = "tui")]
     pub tui: bool,
 
+    /// Exclude these IPs/CIDRs/ranges from scanning (can repeat, comma-list ok)
+    #[arg(long = "exclude", value_name = "SPEC")]
+    pub exclude: Vec<String>,
+
+    /// File with one host/CIDR/range per line to exclude
+    #[arg(long = "exclude-file", value_name = "FILE")]
+    pub exclude_file: Option<String>,
+
+    /// Aggressive scan: implies --sV -O --traceroute and runs scripts/ if present
+    #[arg(short = 'A', long = "aggressive")]
+    pub aggressive: bool,
+
+    /// Scan the N most common ports (overrides -p when set)
+    #[arg(long = "top-ports", value_name = "N")]
+    pub top_ports: Option<usize>,
+
+    /// Annotate each port with the reason for its state (syn-ack, conn-refused, no-response…)
+    #[arg(long = "reason")]
+    pub reason: bool,
+
+    /// Randomize the host scan order
+    #[arg(long = "randomize-hosts")]
+    pub randomize_hosts: bool,
+
+    /// Write all output formats with this filename prefix (.txt .gnmap .json .html .md)
+    #[arg(long = "oA", value_name = "PREFIX")]
+    pub output_all: Option<String>,
+
+    /// Force reverse DNS lookup on every target IP (even those given as IPs)
+    #[arg(short = 'R', long = "force-reverse-dns")]
+    pub force_reverse_dns: bool,
+
+    /// Give up on a host after N seconds (0 = no timeout)
+    #[arg(long = "host-timeout", default_value_t = 0u64)]
+    pub host_timeout_secs: u64,
+
     /// Sniff DNS queries/responses on local network (requires admin + Npcap)
     #[arg(long = "dns-sniff")]
     pub dns_sniff: bool,

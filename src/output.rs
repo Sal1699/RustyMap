@@ -13,7 +13,33 @@ pub fn print_banner() {
     );
 }
 
+pub fn reason_for(scan_type: &str, state: PortState) -> &'static str {
+    match (scan_type, state) {
+        ("Connect", PortState::Open) => "conn-established",
+        ("Connect", PortState::Closed) => "conn-refused",
+        ("Syn", PortState::Open) => "syn-ack",
+        ("Syn", PortState::Closed) => "rst",
+        ("Fin" | "Null" | "Xmas", PortState::Closed) => "rst",
+        ("Fin" | "Null" | "Xmas", PortState::OpenFiltered) => "no-response",
+        ("Ack", PortState::Unfiltered) => "rst",
+        ("Udp", PortState::Open) => "udp-response",
+        ("Udp", PortState::Closed) => "icmp-port-unreach",
+        ("Udp", PortState::OpenFiltered) => "no-response",
+        (_, PortState::Filtered) => "no-response",
+        _ => "—",
+    }
+}
+
+pub fn print_host_with_reason(host: &HostResult, verbose: u8, scan_type: &str, show_reason: bool) {
+    print_host_inner(host, verbose, scan_type, show_reason);
+}
+
+#[allow(dead_code)]
 pub fn print_host(host: &HostResult, verbose: u8) {
+    print_host_inner(host, verbose, "Connect", false);
+}
+
+fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason: bool) {
     println!();
     println!(
         "RustyMap scan report for {}",
@@ -62,7 +88,11 @@ pub fn print_host(host: &HostResult, verbose: u8) {
         return;
     }
 
-    println!("{:<10} {:<10} {:<16} VERSION", "PORT", "STATE", "SERVICE");
+    if show_reason {
+        println!("{:<10} {:<10} {:<18} {:<16} VERSION", "PORT", "STATE", "REASON", "SERVICE");
+    } else {
+        println!("{:<10} {:<10} {:<16} VERSION", "PORT", "STATE", "SERVICE");
+    }
     for p in &host.ports {
         let port_s = format!("{}/tcp", p.port);
         let (state_s, colored_state) = match p.state {
@@ -75,7 +105,12 @@ pub fn print_host(host: &HostResult, verbose: u8) {
         let service = service_name(p.port).unwrap_or("unknown");
         let version = p.service.as_ref().map(|s| s.display()).unwrap_or_default();
         let _ = state_s;
-        println!("{:<10} {:<10} {:<16} {}", port_s, colored_state, service, version);
+        if show_reason {
+            let reason = reason_for(scan_type, p.state);
+            println!("{:<10} {:<10} {:<18} {:<16} {}", port_s, colored_state, reason, service, version);
+        } else {
+            println!("{:<10} {:<10} {:<16} {}", port_s, colored_state, service, version);
+        }
         if let Some(svc) = &p.service {
             if let Some(tls) = &svc.tls {
                 let mut line = format!("           tls: {}", tls.summary());
