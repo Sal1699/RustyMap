@@ -246,6 +246,26 @@ async fn main() -> Result<()> {
     if args.list_tags {
         return run_list_tags(&args);
     }
+    if args.list_scans {
+        let path = args.db_path.clone().unwrap_or_else(|| "rustymap.db".to_string());
+        let db = Db::open(&path)?;
+        let rows = db.list_scans()?;
+        if rows.is_empty() {
+            println!("No scans recorded in {}", path);
+        } else {
+            println!(
+                "{:<5} {:<25} {:<10} {:<10} {:>10}  TARGET / PORTS",
+                "ID", "STARTED", "TYPE", "STATUS", "ELAPSED"
+            );
+            for (id, started, stype, targets, ports, elapsed, status) in rows {
+                println!(
+                    "{:<5} {:<25} {:<10} {:<10} {:>9.2}s  {} [{}]",
+                    id, started, stype, status, elapsed, targets, ports
+                );
+            }
+        }
+        return Ok(());
+    }
 
     if !args.add_tags.is_empty() && args.targets.is_empty() {
         return run_add_tags(&args);
@@ -482,7 +502,36 @@ async fn main() -> Result<()> {
 
     let timeout_dur = args.timeout();
     let parallel = args.parallel();
-    let show_closed = args.verbose >= 2;
+    let show_closed = args.verbose >= 2 && !args.only_open;
+
+    // --stats-every: spawn a tick that prints elapsed time periodically.
+    let stats_handle: Option<(tokio::task::JoinHandle<()>, Arc<std::sync::atomic::AtomicBool>)> =
+        if args.stats_every_secs > 0 {
+            let interval = std::time::Duration::from_secs(args.stats_every_secs);
+            let stop: Arc<std::sync::atomic::AtomicBool> =
+                Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let stop_c = Arc::clone(&stop);
+            let scan_t = scan_type_str.clone();
+            let nhosts = targets.len();
+            let scan_started = std::time::Instant::now();
+            let h = tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(interval).await;
+                    if stop_c.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    eprintln!(
+                        "[stats] elapsed {:.1}s scanning {} ({} target(s))",
+                        scan_started.elapsed().as_secs_f64(),
+                        scan_t,
+                        nhosts
+                    );
+                }
+            });
+            Some((h, stop))
+        } else {
+            None
+        };
 
     let limiter: Option<Arc<AdaptiveLimiter>> = if args.adaptive {
         let min_p = (parallel / 10).max(4);
@@ -613,10 +662,19 @@ async fn main() -> Result<()> {
     let mut sorted = results;
     sorted.sort_by_key(|h| h.target.ip);
     for h in &sorted {
-        output::print_host_with_reason(h, args.verbose, &scan_type_str, args.reason);
+        let mut h_view = h.clone();
+        if args.only_open {
+            h_view.ports.retain(|p| p.state == PortState::Open);
+        }
+        output::print_host_with_reason(&h_view, args.verbose, &scan_type_str, args.reason);
     }
 
     let elapsed = t_start.elapsed().as_secs_f64();
+    if let Some((handle, stop)) = stats_handle {
+        stop.store(true, Ordering::Relaxed);
+        handle.abort();
+        let _ = handle.await;
+    }
     output::print_summary(&sorted, elapsed);
 
     // CVE correlation (requires -sV to have populated service info)
@@ -663,7 +721,15 @@ async fn main() -> Result<()> {
 
     // Run Rhai scripts if requested
     if let Some(sp) = &args.script_path {
-        match scripting::run_scripts(sp, &sorted) {
+        let parsed_args: Vec<(String, String)> = args
+            .script_args
+            .iter()
+            .filter_map(|spec| {
+                spec.split_once('=')
+                    .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+            })
+            .collect();
+        match scripting::run_scripts(sp, &sorted, &parsed_args) {
             Ok(f) => {
                 scripting::print_findings(&f);
                 audit.event("scripts_run", json!({ "count": f.len() }));
@@ -1087,6 +1153,23 @@ fn build_evasion_config(args: &Cli) -> Result<evasion::EvasionConfig> {
     }
     if args.data_length > 0 {
         cfg.data_length = args.data_length;
+    }
+    if let Some(s) = &args.data_string {
+        cfg.data_payload = s.as_bytes().to_vec();
+    }
+    if let Some(h) = &args.data_hex {
+        let cleaned: String = h.chars().filter(|c| !c.is_whitespace()).collect();
+        if cleaned.len() % 2 != 0 {
+            return Err(anyhow!("--data-hex needs an even number of hex digits"));
+        }
+        let mut bytes = Vec::with_capacity(cleaned.len() / 2);
+        for i in (0..cleaned.len()).step_by(2) {
+            bytes.push(
+                u8::from_str_radix(&cleaned[i..i + 2], 16)
+                    .map_err(|_| anyhow!("invalid hex byte at {}", i))?,
+            );
+        }
+        cfg.data_payload = bytes;
     }
     if args.fragment {
         cfg.fragment = true;

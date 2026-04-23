@@ -106,7 +106,11 @@ fn discover_scripts(path: &Path) -> Result<Vec<PathBuf>> {
     Ok(out)
 }
 
-pub fn run_scripts(scripts_path: &str, hosts: &[HostResult]) -> Result<Vec<Finding>> {
+pub fn run_scripts(
+    scripts_path: &str,
+    hosts: &[HostResult],
+    script_args: &[(String, String)],
+) -> Result<Vec<Finding>> {
     let path = Path::new(scripts_path);
     let scripts = discover_scripts(path)?;
     if scripts.is_empty() {
@@ -115,6 +119,10 @@ pub fn run_scripts(scripts_path: &str, hosts: &[HostResult]) -> Result<Vec<Findi
 
     let engine = Engine::new();
     let mut findings = Vec::new();
+    let args_map: Map = script_args
+        .iter()
+        .map(|(k, v)| (k.clone().into(), Dynamic::from(v.clone())))
+        .collect();
 
     for script_path in &scripts {
         let src = fs::read_to_string(script_path)
@@ -140,6 +148,7 @@ pub fn run_scripts(scripts_path: &str, hosts: &[HostResult]) -> Result<Vec<Findi
             let host_map = host_to_map(h);
             let mut scope = Scope::new();
             scope.push_dynamic("host", Dynamic::from(host_map));
+            scope.push_dynamic("args", Dynamic::from(args_map.clone()));
             scope.push_dynamic("findings", Dynamic::from(Array::new()));
 
             if let Err(e) = engine.run_ast_with_scope(&mut scope, &ast) {

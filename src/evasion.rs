@@ -224,6 +224,9 @@ pub struct EvasionConfig {
     /// Per-probe TTL jitter (±N). Independent of `rotate`.
     pub ttl_jitter: u8,
     pub data_length: usize,
+    /// Custom payload appended to probe packets. Overrides random padding
+    /// when set; takes precedence over `data_length`.
+    pub data_payload: Vec<u8>,
     pub fragment: bool,
     pub frag_mtu: u16,
     pub bad_checksum: bool,
@@ -250,6 +253,7 @@ impl Default for EvasionConfig {
             ip_ttl: 64,
             ttl_jitter: 0,
             data_length: 0,
+            data_payload: Vec::new(),
             fragment: false,
             frag_mtu: 8,
             bad_checksum: false,
@@ -388,7 +392,13 @@ pub fn build_tcp_segment(
     let options = cfg.stack_profile.tcp_options();
     let tcp_hdr_len = 20 + options.len();
     let data_offset = (tcp_hdr_len / 4) as u8;
-    let total = tcp_hdr_len + cfg.data_length;
+    // Custom payload (--data-string / --data-hex) wins over random padding.
+    let payload_len = if !cfg.data_payload.is_empty() {
+        cfg.data_payload.len()
+    } else {
+        cfg.data_length
+    };
+    let total = tcp_hdr_len + payload_len;
     let mut buf = vec![0u8; total];
 
     // Write TCP options into header space
@@ -396,8 +406,10 @@ pub fn build_tcp_segment(
         buf[20..20 + options.len()].copy_from_slice(&options);
     }
 
-    // Random padding bytes in payload area
-    if cfg.data_length > 0 {
+    // Payload area: explicit bytes if provided, else random padding.
+    if !cfg.data_payload.is_empty() {
+        buf[tcp_hdr_len..].copy_from_slice(&cfg.data_payload);
+    } else if cfg.data_length > 0 {
         rand::thread_rng().fill(&mut buf[tcp_hdr_len..]);
     }
 

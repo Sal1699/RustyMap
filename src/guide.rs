@@ -49,6 +49,12 @@ pub fn print_guide() {
     line("--oA PREFIX           Scrive tutti i formati (txt/gnmap/json/html/md)");
     line("-R                    Forza reverse DNS su ogni IP target");
     line("--host-timeout SEC    Abbandona host dopo N secondi (solo --sT, 0=off)");
+    line("--stats-every SEC     Stampa progress ogni N secondi durante lo scan");
+    line("--data-string STR     Payload ASCII custom sui pacchetti raw");
+    line("--data-hex HEX        Payload hex custom sui pacchetti raw");
+    line("--script-arg K=V      Argomento per gli script Rhai (ripetibile)");
+    line("--list-scans          Lista le scansioni nel db SQLite e esce");
+    line("--open                Mostra solo le porte aperte (anche con -v)");
     line("--sF                  TCP FIN scan");
     line("--sN                  TCP NULL scan (nessun flag)");
     line("--sX                  TCP Xmas scan (FIN+PSH+URG)");

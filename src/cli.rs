@@ -327,6 +327,30 @@ pub struct Cli {
     #[arg(long = "host-timeout", default_value_t = 0u64)]
     pub host_timeout_secs: u64,
 
+    /// Print scan progress every N seconds (0 = off)
+    #[arg(long = "stats-every", default_value_t = 0u64)]
+    pub stats_every_secs: u64,
+
+    /// Append this ASCII string as payload on probe packets (raw scans)
+    #[arg(long = "data-string", value_name = "STR")]
+    pub data_string: Option<String>,
+
+    /// Append this hex blob as payload on probe packets (e.g. deadbeef)
+    #[arg(long = "data-hex", value_name = "HEX")]
+    pub data_hex: Option<String>,
+
+    /// Pass an argument to Rhai scripts (e.g. --script-arg key=val, repeatable)
+    #[arg(long = "script-arg", value_name = "KEY=VAL")]
+    pub script_args: Vec<String>,
+
+    /// List recorded scans from the SQLite database and exit
+    #[arg(long = "list-scans")]
+    pub list_scans: bool,
+
+    /// Show only open ports (suppress closed/filtered even when -v is set)
+    #[arg(long = "open")]
+    pub only_open: bool,
+
     /// Sniff DNS queries/responses on local network (requires admin + Npcap)
     #[arg(long = "dns-sniff")]
     pub dns_sniff: bool,
