@@ -120,6 +120,10 @@ async fn main() -> Result<()> {
             let ips: Vec<String> = rep.base_a.iter().map(|i| i.to_string()).collect();
             println!("A     : {}", ips.join(", "));
         }
+        if !rep.base_aaaa.is_empty() {
+            let ips: Vec<String> = rep.base_aaaa.iter().map(|i| i.to_string()).collect();
+            println!("AAAA  : {}", ips.join(", "));
+        }
         if !rep.ns.is_empty() {
             println!("NS    : {}", rep.ns.join(", "));
         }
@@ -282,6 +286,11 @@ async fn main() -> Result<()> {
 
     // 1) Expand targets
     let mut targets = target::expand_targets(&args.targets, !args.no_dns).await?;
+    if args.ipv4_only {
+        targets.retain(|t| t.ip.is_ipv4());
+    } else if args.ipv6_only {
+        targets.retain(|t| t.ip.is_ipv6());
+    }
     if args.verbose > 0 {
         println!("Expanded {} target(s)", targets.len());
     }

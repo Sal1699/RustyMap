@@ -34,6 +34,8 @@ pub fn print_guide() {
     line("--sT                  TCP connect (3-way handshake, no privilegi)");
     line("--sS                  TCP SYN half-open (admin + Npcap; auto-fallback driver-less)");
     line("--syn-emulated        Forza --sS senza driver (SO_LINGER=0, no admin)");
+    line("--ipv4-only           Scarta gli AAAA dopo la risoluzione DNS");
+    line("--ipv6-only           Scarta gli A dopo la risoluzione DNS");
     line("--sF                  TCP FIN scan");
     line("--sN                  TCP NULL scan (nessun flag)");
     line("--sX                  TCP Xmas scan (FIN+PSH+URG)");

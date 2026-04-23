@@ -368,7 +368,8 @@ fn random_label() -> String {
 }
 
 pub struct DnsEnumReport {
-    pub base_a: Vec<std::net::IpAddr>,
+    pub base_a: Vec<std::net::Ipv4Addr>,
+    pub base_aaaa: Vec<std::net::Ipv6Addr>,
     pub ns: Vec<String>,
     pub mx: Vec<String>,
     pub txt: Vec<String>,
@@ -399,10 +400,15 @@ pub async fn dns_enum(
     };
 
     // ── Base domain records ────────────────────────────────
-    let base_a: Vec<std::net::IpAddr> = resolver
-        .lookup_ip(domain)
+    let base_a: Vec<std::net::Ipv4Addr> = resolver
+        .ipv4_lookup(domain)
         .await
-        .map(|l| l.iter().collect())
+        .map(|l| l.iter().map(|r| r.0).collect())
+        .unwrap_or_default();
+    let base_aaaa: Vec<std::net::Ipv6Addr> = resolver
+        .ipv6_lookup(domain)
+        .await
+        .map(|l| l.iter().map(|r| r.0).collect())
         .unwrap_or_default();
 
     let ns: Vec<String> = resolver
@@ -501,6 +507,7 @@ pub async fn dns_enum(
 
     Ok(DnsEnumReport {
         base_a,
+        base_aaaa,
         ns,
         mx,
         txt,
