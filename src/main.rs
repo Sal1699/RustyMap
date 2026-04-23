@@ -198,6 +198,37 @@ async fn main() -> Result<()> {
         return run_add_tags(&args);
     }
 
+    // ----- Resume an interrupted scan -----
+    let mut resumed_scan_id: Option<i64> = None;
+    if let Some(spec) = args.resume.clone() {
+        if args.no_db {
+            return Err(anyhow!("--resume requires the SQLite db; remove --no-db"));
+        }
+        let path = args.db_path.clone().unwrap_or_else(|| "rustymap.db".to_string());
+        let db = Db::open(&path)?;
+        let sid = if spec == "last" {
+            db.latest_incomplete()?
+                .ok_or_else(|| anyhow!("no in-progress scan to resume"))?
+        } else {
+            spec.parse::<i64>()
+                .map_err(|_| anyhow!("--resume expects integer or 'last', got '{}'", spec))?
+        };
+        let (_started, saved_type, target_spec, port_spec, status) = db
+            .scan_meta(sid)?
+            .ok_or_else(|| anyhow!("scan id {} not found in db", sid))?;
+        if status == "complete" {
+            return Err(anyhow!("scan #{} is already complete", sid));
+        }
+        eprintln!(
+            "[resume] scan #{} ({}, target={}, ports={})",
+            sid, saved_type, target_spec, port_spec
+        );
+        args.targets = target_spec.split(',').map(|s| s.to_string()).collect();
+        args.ports = port_spec;
+        apply_scan_type_str(&mut args, &saved_type)?;
+        resumed_scan_id = Some(sid);
+    }
+
     if args.targets.is_empty() {
         return Err(anyhow!("no targets specified. Use --help for usage."));
     }
@@ -254,6 +285,19 @@ async fn main() -> Result<()> {
         println!("Expanded {} target(s)", targets.len());
     }
 
+    // Resume: drop targets already persisted under the original scan id.
+    if let (Some(sid), Some(ref db)) = (resumed_scan_id, db_handle.as_ref()) {
+        let done = db.completed_hosts(sid)?;
+        let before = targets.len();
+        targets.retain(|t| !done.contains(&t.ip.to_string()));
+        eprintln!(
+            "[resume] {}/{} hosts already in db, {} remaining",
+            before - targets.len(),
+            before,
+            targets.len()
+        );
+    }
+
     // 2) Host discovery
     if !args.skip_discovery {
         let before = targets.len();
@@ -301,8 +345,10 @@ async fn main() -> Result<()> {
         );
     }
 
-    // 4) Begin DB scan record
-    let scan_id: Option<i64> = if let Some(ref mut db) = db_handle {
+    // 4) Begin DB scan record (or reuse the one we are resuming)
+    let scan_id: Option<i64> = if let Some(sid) = resumed_scan_id {
+        Some(sid)
+    } else if let Some(ref mut db) = db_handle {
         Some(db.begin_scan(
             &started_at.to_rfc3339(),
             &scan_type_str,
@@ -805,6 +851,28 @@ async fn run_udp(
         out.push(r);
     }
     out
+}
+
+fn apply_scan_type_str(args: &mut Cli, s: &str) -> Result<()> {
+    args.scan_connect = false;
+    args.scan_syn = false;
+    args.scan_fin = false;
+    args.scan_null = false;
+    args.scan_xmas = false;
+    args.scan_ack = false;
+    args.scan_udp = false;
+    match s {
+        "Connect" => args.scan_connect = true,
+        "Syn" => args.scan_syn = true,
+        "Fin" => args.scan_fin = true,
+        "Null" => args.scan_null = true,
+        "Xmas" => args.scan_xmas = true,
+        "Ack" => args.scan_ack = true,
+        "Udp" => args.scan_udp = true,
+        "Idle" => return Err(anyhow!("--resume not supported for Idle scans")),
+        other => return Err(anyhow!("unknown saved scan_type '{}'", other)),
+    }
+    Ok(())
 }
 
 fn build_evasion_config(args: &Cli) -> Result<evasion::EvasionConfig> {

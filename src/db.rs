@@ -182,6 +182,46 @@ impl Db {
         Ok(rows)
     }
 
+    /// Read scan metadata used to resume an interrupted scan.
+    /// Returns (started_at, scan_type, target_spec, port_spec, status).
+    pub fn scan_meta(&self, scan_id: i64) -> Result<Option<(String, String, String, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT started_at, scan_type, target_spec, port_spec, status
+             FROM scans WHERE id = ?",
+        )?;
+        let mut rows = stmt.query(params![scan_id])?;
+        if let Some(r) = rows.next()? {
+            Ok(Some((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Hosts already persisted under a scan. Resume skips these.
+    pub fn completed_hosts(&self, scan_id: i64) -> Result<std::collections::HashSet<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT ip FROM hosts WHERE scan_id = ?",
+        )?;
+        let mut out = std::collections::HashSet::new();
+        for ip in stmt.query_map(params![scan_id], |r| r.get::<_, String>(0))? {
+            out.insert(ip?);
+        }
+        Ok(out)
+    }
+
+    /// Most recent in-progress scan id, if any.
+    pub fn latest_incomplete(&self) -> Result<Option<i64>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id FROM scans WHERE status = 'in_progress' ORDER BY id DESC LIMIT 1",
+        )?;
+        let mut rows = stmt.query([])?;
+        if let Some(r) = rows.next()? {
+            Ok(Some(r.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn list_tags(&self, ip_filter: Option<&str>) -> Result<Vec<TagRow>> {
         let (sql, needs_param) = if ip_filter.is_some() {
             ("SELECT ip, port, tag, note, created_at FROM tags WHERE ip = ? ORDER BY ip, port", true)

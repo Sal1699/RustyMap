@@ -262,6 +262,11 @@ pub struct Cli {
     #[arg(long = "syn-emulated")]
     pub syn_emulated: bool,
 
+    /// Resume an interrupted scan by id (auto-loads original targets/ports/scan-type).
+    /// Use 'last' to pick the most recent in-progress scan.
+    #[arg(long = "resume", value_name = "ID|last")]
+    pub resume: Option<String>,
+
     /// Sniff DNS queries/responses on local network (requires admin + Npcap)
     #[arg(long = "dns-sniff")]
     pub dns_sniff: bool,
