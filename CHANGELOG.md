@@ -4,6 +4,13 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.18.0] - 2026-04-24
+- Safety rail: target lists larger than 4096 hosts are rejected unless
+  `--confirm-large` is passed. Prevents accidental `-p- /16` scans that
+  would eat hours.
+- Better DNS failure hints: distinguishes unreachable resolver,
+  NXDOMAIN, and missing A/AAAA, and suggests the right fix.
+
 ## [0.17.0] - 2026-04-24
 - `--examples`: new recipe book of 16 copy-paste starting points for
   common recon/pentest tasks.

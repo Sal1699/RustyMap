@@ -379,6 +379,10 @@ pub struct Cli {
     #[arg(long = "examples")]
     pub examples: bool,
 
+    /// Allow target lists larger than 4096 hosts without prompting
+    #[arg(long = "confirm-large")]
+    pub confirm_large: bool,
+
     /// Sniff DNS queries/responses on local network (requires admin + Npcap)
     #[arg(long = "dns-sniff")]
     pub dns_sniff: bool,

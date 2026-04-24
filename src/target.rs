@@ -69,8 +69,19 @@ async fn expand_one(
 
     // Hostname
     if let Some(r) = resolver {
-        let lookup = r.lookup_ip(spec).await
-            .map_err(|e| anyhow!("DNS lookup failed for '{}': {}", spec, e))?;
+        let lookup = r.lookup_ip(spec).await.map_err(|e| {
+            let raw = e.to_string();
+            let hint = if raw.contains("unreachable") || raw.contains("10051") {
+                " (DNS path unreachable — pass -n/--no-dns with IP targets, or check the resolver)"
+            } else if raw.contains("NXDomain") || raw.contains("no records found") {
+                " (domain does not exist)"
+            } else if raw.contains("no record") {
+                " (no A/AAAA records — try the FQDN, or check DNS)"
+            } else {
+                ""
+            };
+            anyhow!("DNS lookup failed for '{}': {}{}", spec, e, hint)
+        })?;
         let mut any = false;
         for ip in lookup.iter() {
             out.push(Target {
@@ -85,7 +96,10 @@ async fn expand_one(
         return Ok(());
     }
 
-    Err(anyhow!("Cannot parse target '{}' (DNS disabled)", spec))
+    Err(anyhow!(
+        "Cannot parse target '{}' (DNS disabled — drop -n/--no-dns or use an IP/CIDR)",
+        spec
+    ))
 }
 
 fn parse_ipv4_range(spec: &str) -> Option<Vec<Ipv4Addr>> {

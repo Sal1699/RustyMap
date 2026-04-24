@@ -441,6 +441,17 @@ async fn main() -> Result<()> {
         targets.shuffle(&mut rand::thread_rng());
     }
 
+    // Safety rail: require --confirm-large for multi-thousand-host scans.
+    // Accidental /16 or hostname-that-returns-many-IPs are the usual cause.
+    const LARGE_SCAN_THRESHOLD: usize = 4096;
+    if targets.len() > LARGE_SCAN_THRESHOLD && !args.confirm_large {
+        return Err(anyhow!(
+            "target list has {} hosts — pass --confirm-large to proceed, \
+             or narrow the scope with --exclude / --top-ports / smaller CIDR.",
+            targets.len()
+        ));
+    }
+
     if args.verbose > 0 {
         println!("Expanded {} target(s)", targets.len());
     }
