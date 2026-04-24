@@ -633,8 +633,26 @@ async fn main() -> Result<()> {
             if evasion_cfg.is_active() {
                 eprintln!("[evasion] {}", evasion_cfg.summary());
             }
+            if args.trace_raw {
+                raw_scan::set_trace(true);
+                eprintln!("[trace-raw] enabled — every tx/rx packet will be logged to stderr");
+            }
             let scanner = Arc::new(RawTcpScanner::new(evasion_cfg)?);
-            run_raw_tcp(targets, port_list.clone(), kind, scanner, timeout_dur, parallel).await
+            let result = run_raw_tcp(targets, port_list.clone(), kind, scanner, timeout_dur, parallel).await;
+            // Post-scan sanity check: if we sent packets but rx_count is 0,
+            // the kernel (or a firewall) is silently swallowing responses
+            // before they reach our raw socket.
+            if cfg!(target_os = "linux") && raw_scan::rx_count() == 0 && !result.is_empty() {
+                eprintln!(
+                    "[!] raw TCP scanner received zero packets. Common causes on Linux:\n    \
+                     - iptables/nftables dropping unsolicited SYN-ACK as INVALID\n    \
+                     - conntrack deciding the flow is unknown and dropping replies\n    \
+                     - interface has no routable path to the target\n    \
+                     Try `sudo iptables -I INPUT -p tcp --tcp-flags ALL SYN,ACK -j ACCEPT`\n    \
+                     or fall back to --sT (connect scan)."
+                );
+            }
+            result
         }
         ScanType::Udp => {
             let scanner = Arc::new(UdpScanner::new()?);

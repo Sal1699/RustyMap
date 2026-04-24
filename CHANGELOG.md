@@ -4,6 +4,18 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.21.0] - 2026-04-24
+- Linux --sS diagnostics: when the raw TCP scanner runs a full scan and
+  the receiver loop saw zero packets, print a platform-specific hint
+  about iptables/conntrack dropping unsolicited SYN-ACK as INVALID, the
+  exact `iptables -I INPUT ...` rule to allow it, and the --sT fallback.
+- `--trace-raw`: log every raw TCP send/receive to stderr. Useful for
+  confirming whether packets leave the NIC and whether replies come
+  back — answers "kernel or network" when --sS returns only filtered.
+- Privilege hint rewritten per-platform: Linux now surfaces the
+  `setcap cap_net_raw,cap_net_admin=eip` durable fix alongside sudo,
+  macOS explains BPF device ownership, Windows mentions --syn-emulated.
+
 ## [0.20.0] - 2026-04-24
 - Deep vendor/model/firmware probe: when --sV is on and an HTTP-ish
   port (80/8080/8000/8443/443/81/8081/8888) is open, does a short GET /

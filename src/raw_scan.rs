@@ -14,9 +14,22 @@ use pnet::transport::{
 use rand::Rng;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+
+/// Global trace toggle — flipped by `set_trace` from main when --trace-raw is on.
+static TRACE_ENABLED: AtomicBool = AtomicBool::new(false);
+static TRACE_RX_COUNT: AtomicU64 = AtomicU64::new(0);
+
+pub fn set_trace(on: bool) {
+    TRACE_ENABLED.store(on, Ordering::Relaxed);
+}
+
+pub fn rx_count() -> u64 {
+    TRACE_RX_COUNT.load(Ordering::Relaxed)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RawTcpKind {
@@ -170,6 +183,13 @@ impl RawTcpScanner {
             tx.send_to(pkt, IpAddr::V4(dst_ip)).is_ok()
         };
 
+        if TRACE_ENABLED.load(Ordering::Relaxed) {
+            eprintln!(
+                "[raw-tx] {}:{} flags=0x{:02x} src_port={} send_ok={}",
+                dst_ip, dst_port, flags, src_port, send_ok
+            );
+        }
+
         let state = if !send_ok {
             PortState::Filtered
         } else {
@@ -200,12 +220,23 @@ impl RawTcpScanner {
 fn receiver_loop(mut rx: TransportReceiver, pending: PendingMap) {
     let mut iter = tcp_packet_iter(&mut rx);
     while let Ok((packet, addr)) = iter.next() {
+        TRACE_RX_COUNT.fetch_add(1, Ordering::Relaxed);
         let remote_ip = match addr {
             IpAddr::V4(v4) => v4,
             IpAddr::V6(_) => continue,
         };
         let remote_port = packet.get_source();
         let kind = classify(packet.get_flags());
+
+        if TRACE_ENABLED.load(Ordering::Relaxed) {
+            eprintln!(
+                "[raw-rx] {}:{} flags=0x{:02x} kind={:?}",
+                remote_ip,
+                remote_port,
+                packet.get_flags(),
+                kind
+            );
+        }
 
         let sender_opt = {
             let pend = pending.lock().unwrap();

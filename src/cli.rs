@@ -388,6 +388,10 @@ pub struct Cli {
     #[arg(long = "completions", value_name = "SHELL")]
     pub completions: Option<Shell>,
 
+    /// Log every raw TCP send/recv (useful for debugging --sS on Linux)
+    #[arg(long = "trace-raw")]
+    pub trace_raw: bool,
+
     /// Sniff DNS queries/responses on local network (requires admin + Npcap)
     #[arg(long = "dns-sniff")]
     pub dns_sniff: bool,
