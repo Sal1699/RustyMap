@@ -1,4 +1,5 @@
 use clap::{Parser, ValueEnum};
+use clap_complete::Shell;
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -382,6 +383,10 @@ pub struct Cli {
     /// Allow target lists larger than 4096 hosts without prompting
     #[arg(long = "confirm-large")]
     pub confirm_large: bool,
+
+    /// Print shell completion script and exit (bash | zsh | fish | powershell | elvish)
+    #[arg(long = "completions", value_name = "SHELL")]
+    pub completions: Option<Shell>,
 
     /// Sniff DNS queries/responses on local network (requires admin + Npcap)
     #[arg(long = "dns-sniff")]

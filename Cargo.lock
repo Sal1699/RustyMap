@@ -428,6 +428,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap_complete"
+version = "4.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ff7a1dccbdd8b078c2bdebff47e404615151534d5043da397ec50286816f9cb"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clap_derive"
 version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2611,7 +2620,7 @@ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
 name = "rustymap"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2619,6 +2628,7 @@ dependencies = [
  "base64",
  "chrono",
  "clap",
+ "clap_complete",
  "colored",
  "crossterm",
  "ctrlc",

@@ -4,6 +4,11 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.19.0] - 2026-04-24
+- `--completions SHELL`: generate shell completion scripts (bash, zsh,
+  fish, powershell, elvish). Pipe into the matching rc file:
+  `rustymap --completions bash > /etc/bash_completion.d/rustymap`.
+
 ## [0.18.0] - 2026-04-24
 - Safety rail: target lists larger than 4096 hosts are rejected unless
   `--confirm-large` is passed. Prevents accidental `-p- /16` scans that

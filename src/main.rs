@@ -133,6 +133,13 @@ async fn main() -> Result<()> {
         examples::print();
         return Ok(());
     }
+    if let Some(shell) = args.completions {
+        use clap::CommandFactory;
+        let mut cmd = Cli::command();
+        let name = cmd.get_name().to_string();
+        clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
+        return Ok(());
+    }
 
     if args.check_update {
         return tokio::task::spawn_blocking(updater::check).await?;
