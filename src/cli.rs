@@ -351,6 +351,22 @@ pub struct Cli {
     #[arg(long = "open")]
     pub only_open: bool,
 
+    /// Read targets from a file (one per line, # comments ok)
+    #[arg(long = "iL", alias = "input-list", value_name = "FILE")]
+    pub input_list: Option<String>,
+
+    /// Write nmap-compatible XML output to file
+    #[arg(long = "oX", value_name = "FILE")]
+    pub output_xml: Option<String>,
+
+    /// Generate N random decoy source IPs (in addition to --decoys)
+    #[arg(long = "decoy-random", value_name = "N", default_value_t = 0)]
+    pub decoy_random: u8,
+
+    /// Cap probe throughput to N packets/sec (0 = unlimited)
+    #[arg(long = "max-rate", value_name = "PPS", default_value_t = 0)]
+    pub max_rate: u32,
+
     /// Sniff DNS queries/responses on local network (requires admin + Npcap)
     #[arg(long = "dns-sniff")]
     pub dns_sniff: bool,

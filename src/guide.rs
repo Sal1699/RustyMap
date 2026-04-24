@@ -55,6 +55,10 @@ pub fn print_guide() {
     line("--script-arg K=V      Argomento per gli script Rhai (ripetibile)");
     line("--list-scans          Lista le scansioni nel db SQLite e esce");
     line("--open                Mostra solo le porte aperte (anche con -v)");
+    line("--iL FILE             Legge target da file (uno per riga, # commenti)");
+    line("--oX FILE             Output XML compatibile nmap (zenmap/msf)");
+    line("--decoy-random N      Aggiunge N decoy IP casuali ai --decoys");
+    line("--max-rate PPS        Cap a PPS pacchetti/sec (per-host, via scan-delay)");
     line("--sF                  TCP FIN scan");
     line("--sN                  TCP NULL scan (nessun flag)");
     line("--sX                  TCP Xmas scan (FIN+PSH+URG)");

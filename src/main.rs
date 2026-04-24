@@ -32,6 +32,7 @@ mod traceroute;
 mod tui;
 mod udp_scan;
 mod updater;
+mod xml_out;
 mod vault;
 mod webui;
 mod win_console;
@@ -92,6 +93,11 @@ async fn main() -> Result<()> {
         }
     }
 
+    // --max-rate: approximate cap via per-host scan_delay (1000/rate ms).
+    if args.max_rate > 0 && args.scan_delay_ms == 0 {
+        args.scan_delay_ms = (1000 / args.max_rate).max(1) as u64;
+    }
+
     // -oA: expand into individual output paths if not already set.
     if let Some(prefix) = args.output_all.clone() {
         if args.output_normal.is_none() {
@@ -108,6 +114,9 @@ async fn main() -> Result<()> {
         }
         if args.output_markdown.is_none() {
             args.output_markdown = Some(format!("{}.md", prefix));
+        }
+        if args.output_xml.is_none() {
+            args.output_xml = Some(format!("{}.xml", prefix));
         }
     }
 
@@ -269,6 +278,18 @@ async fn main() -> Result<()> {
 
     if !args.add_tags.is_empty() && args.targets.is_empty() {
         return run_add_tags(&args);
+    }
+
+    // -iL: append targets from a file (one per line, # comments allowed).
+    if let Some(path) = args.input_list.clone() {
+        let body = std::fs::read_to_string(&path)
+            .map_err(|e| anyhow!("read {}: {}", path, e))?;
+        for line in body.lines() {
+            let s = line.trim();
+            if !s.is_empty() && !s.starts_with('#') {
+                args.targets.push(s.to_string());
+            }
+        }
     }
 
     // ----- Resume an interrupted scan -----
@@ -783,6 +804,10 @@ async fn main() -> Result<()> {
     if let Some(p) = &args.output_html {
         report::write_html(p, &sorted, &scan_type_str, started_at, elapsed, &diffs)?;
     }
+    if let Some(p) = &args.output_xml {
+        let args_line: String = std::env::args().collect::<Vec<_>>().join(" ");
+        xml_out::write_xml(p, &sorted, &scan_type_str, started_at, elapsed, &args_line)?;
+    }
     if let Some(p) = &args.output_markdown {
         report::write_markdown(p, &sorted, &scan_type_str, started_at, elapsed, &diffs)?;
     }
@@ -1153,6 +1178,25 @@ fn build_evasion_config(args: &Cli) -> Result<evasion::EvasionConfig> {
     }
     if args.data_length > 0 {
         cfg.data_length = args.data_length;
+    }
+    if args.decoy_random > 0 {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        for _ in 0..args.decoy_random {
+            // Random non-private RFC 6890 unicast IP, avoiding 10/8, 172.16/12,
+            // 192.168/16, 127/8, 0/8, 224/4, 240/4 to look like an external decoy.
+            loop {
+                let a: u8 = rng.gen_range(1..=223);
+                if matches!(a, 0 | 10 | 127 | 169 | 172 | 192 | 224..=255) {
+                    continue;
+                }
+                let b: u8 = rng.gen();
+                let c: u8 = rng.gen();
+                let d: u8 = rng.gen_range(1..=254);
+                cfg.decoys.push(std::net::Ipv4Addr::new(a, b, c, d));
+                break;
+            }
+        }
     }
     if let Some(s) = &args.data_string {
         cfg.data_payload = s.as_bytes().to_vec();
