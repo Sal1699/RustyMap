@@ -6,6 +6,7 @@ mod device_fp;
 mod dns;
 mod discovery;
 mod evasion;
+mod examples;
 mod guide;
 mod icmp_ping;
 mod idle_scan;
@@ -126,6 +127,10 @@ async fn main() -> Result<()> {
 
     if args.guide {
         guide::print_guide();
+        return Ok(());
+    }
+    if args.examples {
+        examples::print();
         return Ok(());
     }
 

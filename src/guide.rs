@@ -185,6 +185,7 @@ pub fn print_guide() {
     line("--cve-db FILE         Correla servizi a CVE (usa con --sV)");
     line("--no-builtin-scripts  Disabilita gli script Rhai baked nel binario");
     line("--no-builtin-cves     Disabilita il DB CVE baked nel binario");
+    line("--examples            Stampa 16 ricette pronte per casi comuni");
     example("rustymap --sT --sV --cve-db cves.json 10.0.0.5");
     example("rustymap --sT --script rules/ 10.0.0.5");
 

@@ -1,0 +1,148 @@
+# Changelog
+
+All notable changes to RustyMap are recorded here.
+Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
+functionality, PATCH fixes bugs or cleans up internals.
+
+## [0.17.0] - 2026-04-24
+- `--examples`: new recipe book of 16 copy-paste starting points for
+  common recon/pentest tasks.
+- `-D` alias for `--decoys` (nmap-standard short form).
+- CHANGELOG.md now shipped with the repo.
+
+## [0.16.0] - 2026-04-24
+- Embed `data/cves.json` and all six scripts from `scripts/` in the binary
+  via `include_str!`, so a fresh release works stand-alone with useful
+  defaults.
+- CVE correlation and built-in scripts now run automatically when the
+  user doesn't pass `--cve-db` / `--script`.
+- Opt-out flags: `--no-builtin-cves`, `--no-builtin-scripts`.
+- Drop the explicit `rustls-pki-types` dependency (re-exported by
+  `rustls::pki_types`).
+
+## [0.15.1] - 2026-04-24
+- Migrate `trust-dns-resolver` → `hickory-resolver 0.24` — closes
+  RUSTSEC-2024-0421 (idna Punycode advisory).
+- Add 30 unit tests covering `parse_ports`, `top_ports::top`,
+  `traceroute::parse_hop_line`, `xml_out::escape`, `output::reason_for`.
+- Fix: port 5101 duplicated in `TOP_200` (caught by the new test).
+- Clippy cleanup: `ScanMeta` type alias, suppress too-many-args on
+  `run_syn_emulated`, drop redundant `&ref` binding, switch to
+  `.is_multiple_of()`.
+
+## [0.15.0] - 2026-04-23
+- `--iL FILE`: read targets from a file (one per line, # comments ok).
+- `--oX FILE`: nmap-compatible XML output (subset of xmloutputversion
+  1.05 schema). `-oA` also writes `.xml`.
+- `--decoy-random N`: append N random non-private decoy IPs.
+- `--max-rate PPS`: approximate per-host packet cap via
+  `scan_delay = 1000/PPS ms` when no explicit delay was set.
+
+## [0.14.0] - 2026-04-23
+- `--stats-every SEC`: periodic scan progress events.
+- `--data-string STR` / `--data-hex HEX`: custom payload on raw probes
+  (overrides random padding from `--data-length`).
+- `--script-arg KEY=VAL`: repeatable arguments forwarded to Rhai scripts
+  as the global `args` map.
+- `--list-scans`: dump the SQLite scan history and exit.
+- `--open`: filter output to open ports only, even with `-v`.
+
+## [0.13.0] - 2026-04-23
+Major nmap parity batch:
+- `--exclude SPEC` / `--exclude-file FILE`: drop IPs/CIDRs from targets.
+- `-A` / `--aggressive`: shortcut for `--sV -O --traceroute` and
+  auto-loads `scripts/`.
+- `--top-ports N`: scan the N most common TCP ports.
+- `--reason`: per-port reason annotation (`syn-ack`, `rst`,
+  `conn-refused`, `no-response`, `icmp-port-unreach`, `udp-response`).
+- `--randomize-hosts`: shuffle target order.
+- `--oA PREFIX`: write all output formats with one flag.
+- `-R` / `--force-reverse-dns`: PTR every target IP.
+- `--host-timeout SEC`: per-host deadline (TCP connect path).
+
+## [0.12.0] - 2026-04-23
+- Rework `web/index.html`: live filter on scans list, colour-coded
+  status badges, per-scan summary stats, hosts sorted by # open ports,
+  mobile-friendly layout, HTML escaping on user-controlled fields.
+
+## [0.11.0] - 2026-04-23
+- `--tui`: two-pane ratatui results browser (host list + per-host
+  detail with ports, services, TLS info). Navigate with ↑↓/jk/PgUp/PgDn,
+  `q` or Esc to exit.
+
+## [0.10.0] - 2026-04-23
+- Surface scan diff in HTML/Markdown reports (`newly open`, `no-longer
+  open`, per-port state transitions). Custom Tera templates can read
+  `host.diff.{new_open, closed_now, state_changes}`.
+
+## [0.9.0] - 2026-04-23
+- `--traceroute`: shell out to system `tracert`/`traceroute`, parse the
+  hop table, print it inline.
+- `--topology FILE`: render all trace paths as a Graphviz DOT graph.
+- `--trace-hops N`: max TTL (default 20).
+
+## [0.8.0] - 2026-04-23
+- `DnsEnumReport.base_a` / `base_aaaa` split explicitly; AAAA shows up
+  in `--dns-enum` even when system routing hides v6.
+- `--ipv4-only` / `--ipv6-only`: filter resolved targets per family.
+- Connect-scan, service probe, and TLS probe were already
+  `IpAddr`-generic and work transparently over IPv6.
+
+## [0.7.0] - 2026-04-23
+- `data/cves.json`: 25 well-known CVEs with regex matching (Heartbleed,
+  Shellshock, vsftpd 2.3.4 backdoor, EternalBlue, BlueKeep, Log4Shell,
+  regreSSHion, Spring4Shell, ProxyLogon, FortiOS CVE-2024-21762, …).
+- `scripts/`: six rhai scripts — `smb-exposed`, `tls-deprecated`,
+  `tls-cert-issues`, `cleartext-protocols`, `default-cred-likely`,
+  `old-openssh`.
+- Rhai engine now exposes `service.tls.{negotiated, subject, issuer,
+  not_after, self_signed, expired, key_bits, san}` for cert-aware
+  scripts.
+
+## [0.6.0] - 2026-04-23
+- Real TLS handshake on TLS-likely ports (443, 465, 636, 853, 993, 995,
+  5061, 8443, 9443) via rustls, cert parsing via x509-parser. Surfaces
+  negotiated protocol version, subject DN, issuer, SANs, validity,
+  key bits, self-signed/expired flags.
+- SNI uses the target hostname when known so vhost-fronted servers
+  return their real cert.
+
+## [0.5.0] - 2026-04-22
+- `--resume <ID|last>`: pick up an interrupted scan from SQLite. Saved
+  scan-type/targets/ports are reapplied; hosts already persisted are
+  skipped; new results land under the same scan id.
+- DB additions: `scan_meta`, `completed_hosts`, `latest_incomplete`.
+
+## [0.4.0] - 2026-04-22
+- `--sS` driver-less fallback on Windows when Npcap is missing: uses
+  SO_LINGER=0 so `close()` emits RST instead of FIN/ACK teardown.
+- `--syn-emulated`: force the emulated path explicitly.
+
+## [0.3.1] - 2026-04-22
+- Clean up all 20 clippy warnings: type aliases in `db.rs`, while-let
+  conversions in raw packet receiver loops, `.clamp()` over
+  `.min().max()`, `Default` derive on `JitterMode`, allow attrs for
+  legitimately many-arg scan entry points.
+
+## [0.3.0] - 2026-04-18
+- Built-in self-updater: `--update` fetches the latest GitHub release,
+  verifies the archive, and replaces the current binary in place.
+- `--check-update`: read-only version check against the GitHub API.
+
+## [0.2.0] - 2026-04-18
+- Device classification (auto-detect routers, IP cameras, printers,
+  NAS, IoT) via MAC OUI + port patterns + banner heuristics.
+- DNS enum improvements: wildcard detection, AXFR, reverse DNS, CT
+  logs awareness.
+- Firewall evasion: TCP timestamps, decoy pre-ping, TTL jitter, new
+  `ghost` preset.
+
+## [0.1.1] - pre-0.2
+- Windows console fix: enable VT processing and UTF-8 codepage on
+  startup so colour output and unicode box-drawing render correctly.
+
+## [0.1.0] - initial
+Initial release: TCP connect, SYN (raw), FIN/NULL/Xmas, ACK, UDP,
+idle-scan, ICMP ping, service probes, OS fingerprinting, SQLite
+persistence, HTML/Markdown/JSON output, rhai scripting engine, CVE
+correlation framework, web dashboard, evasion preset system.

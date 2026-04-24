@@ -162,7 +162,7 @@ pub struct Cli {
     pub scan_delay_ms: u64,
 
     /// Comma-separated decoy source IPs for raw scans (e.g. 10.0.0.5,10.0.0.6)
-    #[arg(long = "decoys")]
+    #[arg(short = 'D', long = "decoys")]
     pub decoys: Option<String>,
 
     /// Fixed source port for raw scans (evasion, e.g. 53, 80, 88)
@@ -374,6 +374,10 @@ pub struct Cli {
     /// Skip the rhai scripts baked into the binary (only use --script)
     #[arg(long = "no-builtin-scripts")]
     pub no_builtin_scripts: bool,
+
+    /// Print common usage recipes and exit
+    #[arg(long = "examples")]
+    pub examples: bool,
 
     /// Sniff DNS queries/responses on local network (requires admin + Npcap)
     #[arg(long = "dns-sniff")]
