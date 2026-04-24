@@ -34,7 +34,7 @@ Options: `--prefix=<dir>` (sh) / `-Prefix <dir>` (ps1), `--version=v0.1.0` / `-V
 
 ### Requirements
 
-- **Windows**: [Npcap](https://npcap.com/) for raw/SYN scans. Install via `rustymap.exe --install-npcap` (admin).
+- **Windows**: [Npcap](https://npcap.com/) for real raw/SYN scans. Install via `rustymap.exe --install-npcap` (admin). `--sS` auto-falls-back to a SO_LINGER=0 emulation when Npcap is missing; force via `--syn-emulated`.
 - **Linux**: `libpcap` (most distros already include it). Raw scans need `sudo` or `CAP_NET_RAW`.
 - **macOS**: `libpcap` ships with the system. Raw scans need `sudo`.
 
@@ -69,30 +69,41 @@ rustymap --sI 192.168.1.250:80 10.0.0.5
 # DNS subdomain enumeration
 rustymap --dns-enum example.com
 
-# Full command reference with examples
+# Full command reference
 rustymap --guide
+
+# Copy-paste recipe book for common tasks
+rustymap --examples
 ```
 
 ---
 
 ## Features
 
-- **Scan types**: TCP connect (`--sT`), SYN (`--sS`), FIN (`--sF`), NULL (`--sN`), Xmas (`--sX`), ACK (`--sA`), UDP (`--sU`), Idle/Zombie (`--sI`)
-- **Host discovery**: ARP, ICMP echo, skip-discovery mode, ping-only mode
-- **Firewall evasion**: fragmentation (with overlap), decoys, custom TCP flags, stack profile emulation (Win11/Linux6/macOS/FreeBSD/Android14), jitter, per-probe rotation, bad checksum, padding
-- **Evasion presets**: `--evasion stealth|aggressive|paranoid`
-- **Service/version detection**: `--sV` with banner grab and active probes
-- **OS fingerprinting**: `-O` based on TTL + port/banner heuristics
-- **Output formats**: normal, grepable, JSON, HTML, Markdown, custom Tera templates
-- **Database**: SQLite history with scan diffing
+- **Scan types**: TCP connect (`--sT`), SYN (`--sS` + driver-less emulation fallback), FIN (`--sF`), NULL (`--sN`), Xmas (`--sX`), ACK (`--sA`), UDP (`--sU`), Idle/Zombie (`--sI`)
+- **Host discovery**: ARP, ICMP echo (`--PE`), skip-discovery (`--Pn`), ping-only (`--sn`)
+- **Firewall evasion**: fragmentation (with overlap), decoys (`-D`, `--decoy-random N`, `--decoy-preping`), custom TCP flags, stack profile emulation (Win11/Linux6/macOS/FreeBSD/Android14), jitter, per-probe rotation, bad checksum, padding, TTL jitter, custom payload (`--data-string`, `--data-hex`)
+- **Evasion presets**: `--evasion stealth|aggressive|paranoid|ghost`
+- **Service/version detection**: `--sV` with banner grab, active probes, and real TLS handshake (cert subject/issuer/SANs/expiry/key-bits on 443/465/636/853/993/995/5061/8443/9443)
+- **OS fingerprinting + device class**: `-O` based on TTL + port/banner heuristics; auto-detects routers, IP cameras, printers, NAS, IoT
+- **Output formats**: normal, grepable (`--oG`), JSON, HTML, Markdown, nmap-compatible XML (`--oX`), custom Tera templates; `-oA PREFIX` writes all six at once
+- **Per-port reason**: `--reason` annotates each state with why (`syn-ack`, `rst`, `conn-refused`, `no-response`, `icmp-port-unreach`, …)
+- **Database + diff**: SQLite history, `--diff` against previous scan, delta also embedded in HTML/Markdown reports
+- **Scan resume**: `--resume <ID|last>` picks up an interrupted scan from the DB
 - **Tags**: label hosts and ports for categorization
-- **CVE correlation**: match service banners against a CVE database JSON
-- **Scripting**: Rhai scripts for custom rules
-- **DNS tools**: enumeration (brute-force), sniffing, spoofing (admin + Npcap)
-- **Web UI**: `rustymap --serve` launches a local dashboard
+- **CVE correlation**: built-in 25-entry CVE regex DB baked into the binary; use `--cve-db` for custom; `--no-builtin-cves` to disable
+- **Rhai scripting**: six built-in scripts (cleartext-protocols, default-cred-likely, old-openssh, smb-exposed, tls-cert-issues, tls-deprecated); `--script` for custom, `--script-arg K=V` for args
+- **DNS tools**: enumeration with wildcard detection (`--dns-enum`), reverse sweep (`--dns-reverse`), sniffing (`--dns-sniff`), spoofing (`--dns-spoof`)
+- **IPv6**: connect-scan, service probe, and TLS probe all work over v6. `--ipv4-only` / `--ipv6-only` filter after DNS resolution.
+- **Traceroute + topology**: `--traceroute` wraps system tracert/traceroute; `--topology FILE` renders all paths as a Graphviz DOT graph
+- **TUI browser**: `--tui` opens a two-pane ratatui UI for walking through scan results
+- **Web UI**: `rustymap --serve` launches a local dashboard with scan history search
+- **Target controls**: `--iL FILE`, `--exclude`, `--exclude-file`, `--top-ports N`, `--randomize-hosts`, `-R`/force-reverse-dns, `--host-timeout`, `--confirm-large` safety rail
+- **Timing**: `-T0..T5` presets, `--max-rate PPS`, `--scan-delay`, `--adaptive` rate limiter, `--stats-every SEC` progress ticks
 - **Credentials vault**: encrypted storage for pentest credentials
 - **Scheduling**: `--every 1h` for recurring scans
 - **Audit log**: JSONL log of every action with timestamps
+- **Self-update**: `--check-update` / `--update` pulls the latest GitHub release
 
 ---
 
