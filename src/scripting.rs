@@ -106,6 +106,78 @@ fn discover_scripts(path: &Path) -> Result<Vec<PathBuf>> {
     Ok(out)
 }
 
+/// Scripts baked into the binary at build time. Returns (name, source) pairs.
+pub fn builtin_scripts() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("cleartext-protocols", include_str!("../scripts/cleartext-protocols.rhai")),
+        ("default-cred-likely", include_str!("../scripts/default-cred-likely.rhai")),
+        ("old-openssh", include_str!("../scripts/old-openssh.rhai")),
+        ("smb-exposed", include_str!("../scripts/smb-exposed.rhai")),
+        ("tls-cert-issues", include_str!("../scripts/tls-cert-issues.rhai")),
+        ("tls-deprecated", include_str!("../scripts/tls-deprecated.rhai")),
+    ]
+}
+
+/// Run a list of (name, source) scripts against a host set.
+pub fn run_inline(
+    scripts: &[(&str, &str)],
+    hosts: &[HostResult],
+    script_args: &[(String, String)],
+) -> Vec<Finding> {
+    if scripts.is_empty() {
+        return Vec::new();
+    }
+    let engine = Engine::new();
+    let args_map: Map = script_args
+        .iter()
+        .map(|(k, v)| (k.clone().into(), Dynamic::from(v.clone())))
+        .collect();
+    let mut findings = Vec::new();
+
+    for (name, src) in scripts {
+        let ast = match engine.compile(*src) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("[script {}] parse error: {}", name, e);
+                continue;
+            }
+        };
+        for h in hosts {
+            if !h.up {
+                continue;
+            }
+            let host_map = host_to_map(h);
+            let mut scope = Scope::new();
+            scope.push_dynamic("host", Dynamic::from(host_map));
+            scope.push_dynamic("args", Dynamic::from(args_map.clone()));
+            scope.push_dynamic("findings", Dynamic::from(Array::new()));
+            if let Err(e) = engine.run_ast_with_scope(&mut scope, &ast) {
+                eprintln!("[script {} host {}] runtime error: {}", name, h.target.ip, e);
+                continue;
+            }
+            if let Some(arr) = scope.get_value::<Array>("findings") {
+                for v in arr {
+                    if let Some(m) = v.try_cast::<Map>() {
+                        let sev = m.get("severity").and_then(|d| d.clone().into_string().ok())
+                            .unwrap_or_else(|| "info".into());
+                        let msg = m.get("message").and_then(|d| d.clone().into_string().ok())
+                            .unwrap_or_default();
+                        let port = m.get("port").and_then(|d| d.as_int().ok()).map(|i| i as u16);
+                        findings.push(Finding {
+                            script: name.to_string(),
+                            host: h.target.ip.to_string(),
+                            port,
+                            severity: sev,
+                            message: msg,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    findings
+}
+
 pub fn run_scripts(
     scripts_path: &str,
     hosts: &[HostResult],

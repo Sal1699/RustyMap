@@ -698,15 +698,27 @@ async fn main() -> Result<()> {
     }
     output::print_summary(&sorted, elapsed);
 
-    // CVE correlation (requires -sV to have populated service info)
-    if let Some(path) = &args.cve_db {
-        match cve::load_db(path) {
-            Ok(db) => {
-                let hits = cve::correlate(&db, &sorted);
-                cve::print_hits(&hits);
-                audit.event("cve_correlated", json!({ "hits": hits.len() }));
+    // CVE correlation (requires -sV to have populated service info).
+    // Use --cve-db when given, otherwise fall back to the built-in DB
+    // unless the user opts out with --no-builtin-cves.
+    {
+        let db = if let Some(path) = &args.cve_db {
+            match cve::load_db(path) {
+                Ok(d) => Some(d),
+                Err(e) => {
+                    eprintln!("[!] CVE DB error: {}", e);
+                    None
+                }
             }
-            Err(e) => eprintln!("[!] CVE DB error: {}", e),
+        } else if !args.no_builtin_cves {
+            Some(cve::builtin_db())
+        } else {
+            None
+        };
+        if let Some(d) = db {
+            let hits = cve::correlate(&d, &sorted);
+            cve::print_hits(&hits);
+            audit.event("cve_correlated", json!({ "hits": hits.len() }));
         }
     }
 
@@ -740,16 +752,25 @@ async fn main() -> Result<()> {
         audit.event("traceroute", json!({ "hosts": traces.len() }));
     }
 
-    // Run Rhai scripts if requested
+    // Run Rhai scripts: explicit --script first, then built-in scripts
+    // (unless the user passed --no-builtin-scripts).
+    let parsed_args: Vec<(String, String)> = args
+        .script_args
+        .iter()
+        .filter_map(|spec| {
+            spec.split_once('=')
+                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+        })
+        .collect();
+    if !args.no_builtin_scripts && args.script_path.is_none() {
+        let scripts = scripting::builtin_scripts();
+        let f = scripting::run_inline(&scripts, &sorted, &parsed_args);
+        scripting::print_findings(&f);
+        if !f.is_empty() {
+            audit.event("scripts_builtin_run", json!({ "count": f.len() }));
+        }
+    }
     if let Some(sp) = &args.script_path {
-        let parsed_args: Vec<(String, String)> = args
-            .script_args
-            .iter()
-            .filter_map(|spec| {
-                spec.split_once('=')
-                    .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
-            })
-            .collect();
         match scripting::run_scripts(sp, &sorted, &parsed_args) {
             Ok(f) => {
                 scripting::print_findings(&f);

@@ -64,6 +64,16 @@ pub fn load_db(path: &str) -> Result<Vec<Compiled>> {
     Ok(compile_db(entries))
 }
 
+/// Built-in CVE database baked into the binary at build time. Used when
+/// the user runs without --cve-db so the tool works stand-alone.
+pub fn builtin_db() -> Vec<Compiled> {
+    const RAW: &str = include_str!("../data/cves.json");
+    match serde_json::from_str::<Vec<CveEntry>>(RAW) {
+        Ok(entries) => compile_db(entries),
+        Err(_) => Vec::new(),
+    }
+}
+
 pub fn correlate(db: &[Compiled], hosts: &[HostResult]) -> Vec<CveHit> {
     let mut out = Vec::new();
     for h in hosts {

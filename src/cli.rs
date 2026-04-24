@@ -367,6 +367,14 @@ pub struct Cli {
     #[arg(long = "max-rate", value_name = "PPS", default_value_t = 0)]
     pub max_rate: u32,
 
+    /// Skip the CVE database baked into the binary (only use --cve-db)
+    #[arg(long = "no-builtin-cves")]
+    pub no_builtin_cves: bool,
+
+    /// Skip the rhai scripts baked into the binary (only use --script)
+    #[arg(long = "no-builtin-scripts")]
+    pub no_builtin_scripts: bool,
+
     /// Sniff DNS queries/responses on local network (requires admin + Npcap)
     #[arg(long = "dns-sniff")]
     pub dns_sniff: bool,
