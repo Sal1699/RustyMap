@@ -17,7 +17,7 @@ const TOP_200: &[u16] = &[
     311, 280, 254, 4000, 1761, 5003, 2002, 2005, 1998, 1032, 1050, 6112, 3690, 1521, 2161, 1080,
     6002, 2401, 902, 4045, 787, 7937, 1058, 2383, 32771, 1033, 1040, 1059, 50000, 5555, 10001,
     1494, 593, 2301, 3268, 7938, 1234, 1022, 1074, 8002, 1036, 1035, 9595, 9594, 9593, 16080,
-    480, 843, 1042, 5550, 2148, 12345, 1043, 9020, 5101, 9080, 9050,
+    480, 843, 1042, 5550, 2148, 12345, 1043, 9020, 9080, 9050, 9091, 5269, 7634, 4321, 5810,
 ];
 
 pub fn top(n: usize) -> Vec<u16> {
@@ -35,4 +35,42 @@ pub fn top(n: usize) -> Vec<u16> {
         return out;
     }
     TOP_200[..n].to_vec()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn top_zero_is_empty() {
+        assert!(top(0).is_empty());
+    }
+
+    #[test]
+    fn top_one_is_port_80() {
+        assert_eq!(top(1), vec![80]);
+    }
+
+    #[test]
+    fn top_n_returns_n() {
+        assert_eq!(top(50).len(), 50);
+        assert_eq!(top(100).len(), 100);
+    }
+
+    #[test]
+    fn top_above_200_extends() {
+        let v = top(500);
+        assert_eq!(v.len(), 500);
+        // First N must still be the curated top
+        assert_eq!(&v[..5], &TOP_200[..5]);
+    }
+
+    #[test]
+    fn top_no_duplicates() {
+        let v = top(500);
+        let mut sorted = v.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(v.len(), sorted.len());
+    }
 }

@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr};
-use trust_dns_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioAsyncResolver;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Target {

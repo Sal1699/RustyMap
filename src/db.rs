@@ -12,6 +12,8 @@ pub type ScanRow = (i64, String, String, String, String, f64, String);
 pub type HostRow = (i64, String, Option<String>, bool, f64);
 pub type PortRow = (u16, String, String, Option<String>);
 pub type TagRow = (String, Option<u16>, String, Option<String>, String);
+/// (started_at, scan_type, target_spec, port_spec, status) — used by --resume.
+pub type ScanMeta = (String, String, String, String, String);
 
 pub const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS scans (
@@ -184,7 +186,7 @@ impl Db {
 
     /// Read scan metadata used to resume an interrupted scan.
     /// Returns (started_at, scan_type, target_spec, port_spec, status).
-    pub fn scan_meta(&self, scan_id: i64) -> Result<Option<(String, String, String, String, String)>> {
+    pub fn scan_meta(&self, scan_id: i64) -> Result<Option<ScanMeta>> {
         let mut stmt = self.conn.prepare(
             "SELECT started_at, scan_type, target_spec, port_spec, status
              FROM scans WHERE id = ?",

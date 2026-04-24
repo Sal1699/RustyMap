@@ -415,7 +415,7 @@ async fn main() -> Result<()> {
     // -R: force reverse DNS for each target so output shows hostnames.
     if args.force_reverse_dns && !args.no_dns {
         if let Ok(resolver) =
-            trust_dns_resolver::TokioAsyncResolver::tokio_from_system_conf()
+            hickory_resolver::TokioAsyncResolver::tokio_from_system_conf()
         {
             for t in targets.iter_mut() {
                 if t.hostname.is_none() {
@@ -441,7 +441,7 @@ async fn main() -> Result<()> {
     }
 
     // Resume: drop targets already persisted under the original scan id.
-    if let (Some(sid), Some(ref db)) = (resumed_scan_id, db_handle.as_ref()) {
+    if let (Some(sid), Some(db)) = (resumed_scan_id, db_handle.as_ref()) {
         let done = db.completed_hosts(sid)?;
         let before = targets.len();
         targets.retain(|t| !done.contains(&t.ip.to_string()));
@@ -1203,7 +1203,7 @@ fn build_evasion_config(args: &Cli) -> Result<evasion::EvasionConfig> {
     }
     if let Some(h) = &args.data_hex {
         let cleaned: String = h.chars().filter(|c| !c.is_whitespace()).collect();
-        if cleaned.len() % 2 != 0 {
+        if !cleaned.len().is_multiple_of(2) {
             return Err(anyhow!("--data-hex needs an even number of hex digits"));
         }
         let mut bytes = Vec::with_capacity(cleaned.len() / 2);

@@ -19,6 +19,31 @@ fn escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escapes_xml_specials() {
+        assert_eq!(escape("a&b"), "a&amp;b");
+        assert_eq!(escape("<x>"), "&lt;x&gt;");
+        assert_eq!(escape("\"x\""), "&quot;x&quot;");
+        assert_eq!(escape("o'reilly"), "o&apos;reilly");
+    }
+
+    #[test]
+    fn escape_handles_combined() {
+        // & must be escaped first to avoid double-escaping the entity refs
+        assert_eq!(escape("a & <b> & \"c\""), "a &amp; &lt;b&gt; &amp; &quot;c&quot;");
+    }
+
+    #[test]
+    fn escape_is_identity_for_plain_text() {
+        assert_eq!(escape("hello world"), "hello world");
+        assert_eq!(escape("OpenSSH 7.4"), "OpenSSH 7.4");
+    }
+}
+
 pub fn write_xml(
     path: &str,
     hosts: &[HostResult],

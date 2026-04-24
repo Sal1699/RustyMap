@@ -76,6 +76,56 @@ fn parse_hop_line(line: &str) -> Option<Hop> {
     Some(Hop { ttl, ip })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_tracert_line() {
+        // Windows tracert numeric (-d) format
+        let h = parse_hop_line("  3   12 ms   11 ms   12 ms  10.0.0.1").unwrap();
+        assert_eq!(h.ttl, 3);
+        assert_eq!(h.ip, Some("10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn parses_traceroute_line() {
+        // Unix traceroute -n format
+        let h = parse_hop_line(" 1  10.0.0.1  0.412 ms  0.378 ms  0.345 ms").unwrap();
+        assert_eq!(h.ttl, 1);
+        assert_eq!(h.ip, Some("10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn handles_no_response_hop() {
+        let h = parse_hop_line(" 7  *  *  *").unwrap();
+        assert_eq!(h.ttl, 7);
+        assert!(h.ip.is_none());
+    }
+
+    #[test]
+    fn ignores_header_lines() {
+        assert!(parse_hop_line("traceroute to 1.1.1.1 (1.1.1.1), 30 hops max").is_none());
+        assert!(parse_hop_line("Tracing route to 1.1.1.1 over a maximum of 30 hops").is_none());
+    }
+
+    #[test]
+    fn render_dot_includes_scanner_node() {
+        let traces = vec![TraceResult {
+            target: "1.1.1.1".into(),
+            destination: Some("1.1.1.1".parse().unwrap()),
+            hops: vec![
+                Hop { ttl: 1, ip: Some("10.0.0.1".parse().unwrap()) },
+                Hop { ttl: 2, ip: Some("1.1.1.1".parse().unwrap()) },
+            ],
+        }];
+        let dot = render_dot(&traces);
+        assert!(dot.contains("digraph rustymap_topology"));
+        assert!(dot.contains("\"scanner\" -> \"10.0.0.1\""));
+        assert!(dot.contains("\"10.0.0.1\" -> \"1.1.1.1\""));
+    }
+}
+
 /// Render a list of trace results as a Graphviz DOT graph.
 pub fn render_dot(traces: &[TraceResult]) -> String {
     let mut out = String::new();

@@ -386,7 +386,7 @@ pub async fn dns_enum(
 ) -> Result<DnsEnumReport> {
     use futures::stream::{self, StreamExt};
     use std::collections::HashSet;
-    use trust_dns_resolver::TokioAsyncResolver;
+    use hickory_resolver::TokioAsyncResolver;
 
     let resolver = TokioAsyncResolver::tokio_from_system_conf()?;
     let words: Vec<String> = if let Some(path) = wordlist {
@@ -526,7 +526,7 @@ pub async fn dns_reverse(
 ) -> Result<Vec<(std::net::IpAddr, String)>> {
     use futures::stream::{self, StreamExt};
     use ipnet::IpNet;
-    use trust_dns_resolver::TokioAsyncResolver;
+    use hickory_resolver::TokioAsyncResolver;
 
     let net: IpNet = cidr.parse().map_err(|e| anyhow!("invalid CIDR '{}': {}", cidr, e))?;
     let resolver = TokioAsyncResolver::tokio_from_system_conf()?;

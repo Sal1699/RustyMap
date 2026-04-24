@@ -88,3 +88,73 @@ pub fn service_name(port: u16) -> Option<&'static str> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_single() {
+        assert_eq!(parse_ports("80").unwrap(), vec![80]);
+    }
+
+    #[test]
+    fn parse_list() {
+        assert_eq!(parse_ports("22,80,443").unwrap(), vec![22, 80, 443]);
+    }
+
+    #[test]
+    fn parse_range() {
+        assert_eq!(parse_ports("80-82").unwrap(), vec![80, 81, 82]);
+    }
+
+    #[test]
+    fn parse_open_range_dash() {
+        let v = parse_ports("-").unwrap();
+        assert_eq!(v.len(), 65535);
+        assert_eq!(v[0], 1);
+        assert_eq!(v[v.len() - 1], 65535);
+    }
+
+    #[test]
+    fn parse_dedup_and_sort() {
+        assert_eq!(parse_ports("80,22,80,443,22").unwrap(), vec![22, 80, 443]);
+    }
+
+    #[test]
+    fn parse_combined() {
+        assert_eq!(parse_ports("22,80-82,443").unwrap(), vec![22, 80, 81, 82, 443]);
+    }
+
+    #[test]
+    fn rejects_zero() {
+        assert!(parse_ports("0").is_err());
+    }
+
+    #[test]
+    fn rejects_overflow() {
+        assert!(parse_ports("70000").is_err());
+    }
+
+    #[test]
+    fn rejects_inverted_range() {
+        assert!(parse_ports("100-50").is_err());
+    }
+
+    #[test]
+    fn rejects_empty() {
+        assert!(parse_ports(",,").is_err());
+    }
+
+    #[test]
+    fn service_name_known() {
+        assert_eq!(service_name(443), Some("https"));
+        assert_eq!(service_name(22), Some("ssh"));
+        assert_eq!(service_name(137), Some("netbios"));
+    }
+
+    #[test]
+    fn service_name_unknown() {
+        assert_eq!(service_name(12345), None);
+    }
+}

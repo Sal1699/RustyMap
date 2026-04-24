@@ -1,6 +1,6 @@
 [package]
 name = "rustymap"
-version = "0.15.0"
+version = "0.15.1"
 edition = "2021"
 description = "A Rust port of nmap for network exploration and security auditing"
 license = "MIT"
@@ -18,7 +18,7 @@ path = "src/main.rs"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "process"] }
 clap = { version = "4", features = ["derive"] }
 ipnet = "2"
-trust-dns-resolver = "0.23"
+hickory-resolver = "0.24"
 futures = "0.3"
 anyhow = "1"
 colored = "2"

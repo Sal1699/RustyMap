@@ -76,6 +76,7 @@ async fn probe_one(ip: IpAddr, port: u16, t: Duration) -> (PortState, Duration, 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_syn_emulated(
     target: Target,
     ports: Arc<Vec<u16>>,
