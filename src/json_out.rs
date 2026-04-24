@@ -24,6 +24,10 @@ struct JsonHost {
     #[serde(skip_serializing_if = "Option::is_none")]
     vendor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    firmware: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     device_confidence: Option<u8>,
     ports: Vec<JsonPort>,
 }
@@ -57,6 +61,8 @@ pub fn to_json_string(
             latency_secs: h.elapsed.as_secs_f64(),
             device_class: h.device.as_ref().map(|d| d.class.as_str()),
             vendor: h.device.as_ref().and_then(|d| d.vendor.clone()),
+            model: h.device.as_ref().and_then(|d| d.model.clone()),
+            firmware: h.device.as_ref().and_then(|d| d.firmware.clone()),
             device_confidence: h.device.as_ref().map(|d| d.confidence),
             ports: h
                 .ports

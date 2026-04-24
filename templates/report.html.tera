@@ -49,7 +49,7 @@
     </div>
     {% if h.device_class %}
     <div class="hostmeta">
-      Device: <strong>{{ h.device_class }}</strong>{% if h.vendor %} &middot; {{ h.vendor }}{% endif %}{% if h.device_confidence %} &middot; confidence {{ h.device_confidence }}%{% endif %}
+      Device: <strong>{{ h.device_class }}</strong>{% if h.vendor %} &middot; {{ h.vendor }}{% endif %}{% if h.model %} {{ h.model }}{% endif %}{% if h.firmware %} &middot; firmware {{ h.firmware }}{% endif %}{% if h.device_confidence %} &middot; {{ h.device_confidence }}% conf{% endif %}
     </div>
     {% endif %}
     {% if h.diff %}

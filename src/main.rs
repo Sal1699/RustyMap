@@ -33,6 +33,7 @@ mod traceroute;
 mod tui;
 mod udp_scan;
 mod updater;
+mod vendor_probe;
 mod xml_out;
 mod vault;
 mod webui;
@@ -698,6 +699,39 @@ async fn main() -> Result<()> {
                 if guess.class != device_fp::DeviceClass::Unknown || guess.vendor.is_some() {
                     h.device = Some(guess);
                 }
+            }
+        }
+    }
+
+    // 4.8) Deep vendor probe: HTTP GET on any open HTTP-ish port, extract
+    // title/Server header and match against per-vendor model/firmware
+    // patterns. Active (one TCP connect + GET per host), so gated by
+    // --sV to keep the default scan fast.
+    if !was_cancelled && args.service_version {
+        let probe_t = timeout_dur.min(std::time::Duration::from_secs(3));
+        for h in results.iter_mut() {
+            if !h.up { continue; }
+            let open_ports: Vec<u16> = h
+                .ports
+                .iter()
+                .filter(|p| p.state == PortState::Open)
+                .map(|p| p.port)
+                .collect();
+            if open_ports.is_empty() { continue; }
+            if let Some(hint) = vendor_probe::probe(h.target.ip, &open_ports, probe_t).await {
+                let dev = h.device.get_or_insert(device_fp::DeviceGuess {
+                    class: device_fp::DeviceClass::Unknown,
+                    confidence: 0,
+                    vendor: None,
+                    model: None,
+                    firmware: None,
+                    hints: Vec::new(),
+                });
+                if let Some(v) = hint.vendor { dev.vendor.get_or_insert(v); }
+                if let Some(m) = hint.model { dev.model.get_or_insert(m); }
+                if let Some(f) = hint.firmware { dev.firmware.get_or_insert(f); }
+                if let Some(t) = hint.title { dev.hints.push(format!("title: {}", t)); }
+                if let Some(s) = hint.server { dev.hints.push(format!("Server: {}", s)); }
             }
         }
     }

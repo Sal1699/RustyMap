@@ -105,11 +105,17 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
     if let Some(dev) = &host.device {
         let vendor_s = dev.vendor.as_deref().map(|v| format!(" · {}", v)).unwrap_or_default();
         let model_s = dev.model.as_deref().map(|m| format!(" {}", m)).unwrap_or_default();
+        let fw_s = dev
+            .firmware
+            .as_deref()
+            .map(|f| format!(" · firmware {}", f))
+            .unwrap_or_default();
         println!(
-            "Device: {}{}{} (confidence {}%)",
+            "Device: {}{}{}{} (confidence {}%)",
             dev.class.as_str().bold(),
             vendor_s,
             model_s,
+            fw_s,
             dev.confidence
         );
         if verbose > 0 && !dev.hints.is_empty() {

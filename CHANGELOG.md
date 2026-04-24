@@ -4,6 +4,17 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.20.0] - 2026-04-24
+- Deep vendor/model/firmware probe: when --sV is on and an HTTP-ish
+  port (80/8080/8000/8443/443/81/8081/8888) is open, does a short GET /
+  and pattern-matches against 19 vendor rules — Hikvision, Dahua, Axis,
+  Reolink, Foscam, HP, Brother, Canon, Epson, MikroTik, Ubiquiti,
+  TP-Link, Netgear, ASUS, Synology, QNAP, Cisco, Fortinet, pfSense,
+  OPNsense. Extracts title, Server header, vendor name, model number,
+  firmware version.
+- `DeviceGuess.firmware` field added; surfaced in console output,
+  HTML/Markdown reports, and JSON schema.
+
 ## [0.19.0] - 2026-04-24
 - `--completions SHELL`: generate shell completion scripts (bash, zsh,
   fish, powershell, elvish). Pipe into the matching rc file:

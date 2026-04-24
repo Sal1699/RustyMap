@@ -57,6 +57,8 @@ pub struct DeviceGuess {
     pub vendor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub firmware: Option<String>,
     pub hints: Vec<String>,
 }
 
@@ -176,6 +178,7 @@ pub fn classify(host: &HostResult, mac: Option<&[u8; 6]>) -> DeviceGuess {
         confidence: 0,
         vendor: mac.and_then(vendor_from_mac).map(|s| s.to_string()),
         model: None,
+        firmware: None,
         hints: Vec::new(),
     };
 
