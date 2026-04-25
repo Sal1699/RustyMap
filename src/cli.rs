@@ -46,6 +46,18 @@ pub struct Cli {
     #[arg(long = "sA", group = "scan_type")]
     pub scan_ack: bool,
 
+    /// TCP Window scan — like ACK but examines RST window value
+    #[arg(long = "sW", group = "scan_type")]
+    pub scan_window: bool,
+
+    /// TCP Maimon scan — FIN+ACK probe (BSD-derived stacks)
+    #[arg(long = "sM", group = "scan_type")]
+    pub scan_maimon: bool,
+
+    /// List scan — resolve targets (with PTR/AAAA) and exit, no probing
+    #[arg(long = "sL", group = "scan_type")]
+    pub scan_list: bool,
+
     /// UDP scan
     #[arg(long = "sU", group = "scan_type")]
     pub scan_udp: bool,
@@ -396,6 +408,14 @@ pub struct Cli {
     #[arg(long = "ble-scan", value_name = "SECONDS")]
     pub ble_scan: Option<u64>,
 
+    /// List network interfaces (with route-to-target hint when target given) and exit
+    #[arg(long = "iflist")]
+    pub iflist: bool,
+
+    /// List built-in and user-provided rhai scripts with descriptions and exit
+    #[arg(long = "script-help")]
+    pub script_help: bool,
+
     /// Sniff DNS queries/responses on local network (requires admin + Npcap)
     #[arg(long = "dns-sniff")]
     pub dns_sniff: bool,
@@ -453,6 +473,9 @@ pub enum ScanType {
     Null,
     Xmas,
     Ack,
+    Window,
+    Maimon,
+    List,
     Udp,
     Idle,
 }
@@ -464,6 +487,9 @@ impl Cli {
         else if self.scan_null { ScanType::Null }
         else if self.scan_xmas { ScanType::Xmas }
         else if self.scan_ack { ScanType::Ack }
+        else if self.scan_window { ScanType::Window }
+        else if self.scan_maimon { ScanType::Maimon }
+        else if self.scan_list { ScanType::List }
         else if self.scan_udp { ScanType::Udp }
         else if self.scan_idle.is_some() { ScanType::Idle }
         else { ScanType::Connect }

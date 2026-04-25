@@ -106,6 +106,65 @@ fn discover_scripts(path: &Path) -> Result<Vec<PathBuf>> {
     Ok(out)
 }
 
+/// Extract the first non-empty comment line from a rhai script — used as
+/// the "description" in --script-help. Comments start with `//`.
+fn description_of(src: &str) -> String {
+    for line in src.lines() {
+        let l = line.trim();
+        if let Some(rest) = l.strip_prefix("//") {
+            let cleaned = rest.trim().trim_end_matches('.').to_string();
+            if !cleaned.is_empty() {
+                return cleaned;
+            }
+        } else if !l.is_empty() {
+            // First non-comment line — no description available.
+            return "(no description)".into();
+        }
+    }
+    "(no description)".into()
+}
+
+/// Print the catalog of built-in and (optionally) user scripts.
+pub fn print_help(user_path: Option<&str>) {
+    use colored::*;
+    println!(
+        "\n{}\n",
+        "RustyMap rhai scripts".bold().cyan()
+    );
+    println!("{}", "Built-in:".bold());
+    for (name, src) in builtin_scripts() {
+        println!(
+            "  {:<22} {}",
+            name.green().bold(),
+            description_of(src)
+        );
+    }
+    if let Some(path) = user_path {
+        let p = Path::new(path);
+        match discover_scripts(p) {
+            Ok(scripts) if !scripts.is_empty() => {
+                println!("\n{}", "User scripts:".bold());
+                for sp in scripts {
+                    let name = sp
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("script")
+                        .to_string();
+                    let desc = std::fs::read_to_string(&sp)
+                        .map(|src| description_of(&src))
+                        .unwrap_or_else(|_| "(unreadable)".into());
+                    println!("  {:<22} {}", name.yellow().bold(), desc);
+                }
+            }
+            _ => {}
+        }
+    }
+    println!(
+        "\n{}",
+        "Run with --script PATH (or rely on built-ins, --no-builtin-scripts to opt out).".dimmed()
+    );
+}
+
 /// Scripts baked into the binary at build time. Returns (name, source) pairs.
 pub fn builtin_scripts() -> Vec<(&'static str, &'static str)> {
     vec![

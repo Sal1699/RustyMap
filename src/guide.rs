@@ -66,6 +66,9 @@ pub fn print_guide() {
     line("--sN                  TCP NULL scan (nessun flag)");
     line("--sX                  TCP Xmas scan (FIN+PSH+URG)");
     line("--sA                  TCP ACK scan (mapping firewall)");
+    line("--sW                  TCP Window scan (RST window field → open/closed)");
+    line("--sM                  TCP Maimon scan (FIN+ACK, BSD-derived stacks)");
+    line("--sL                  List scan: risolve target con PTR e esce");
     line("--sU                  UDP scan");
     line("--sI ZOMBIE[:PORT]    Idle/zombie scan (spoof via host con IPID incrementale)");
     example("rustymap --sT 10.0.0.5");
@@ -202,6 +205,8 @@ pub fn print_guide() {
     line("--completions SHELL   Genera completion script (bash|zsh|fish|powershell)");
     line("--trace-raw           Logga ogni tx/rx pacchetto raw (debug --sS)");
     line("--ble-scan SECONDI    Scan Bluetooth LE per N secondi (phone/wearable/IoT)");
+    line("--iflist [TARGET]     Lista interfacce (con hint route-to-target)");
+    line("--script-help         Catalogo script Rhai (built-in + utente)");
     line("--confirm-large       Permette target list > 4096 host");
     example("rustymap --sT --sV --cve-db cves.json 10.0.0.5");
     example("rustymap --sT --script rules/ 10.0.0.5");

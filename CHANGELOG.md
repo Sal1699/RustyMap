@@ -4,6 +4,21 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.24.0] - 2026-04-25
+- `--sW` TCP Window scan: ACK probe; classifies open/closed by the RST
+  reply's TCP window value (open ports return non-zero on most stacks).
+- `--sM` TCP Maimon scan: FIN+ACK probe; BSD-derived stacks drop on
+  open ports and RST on closed.
+- `--sL` list scan: resolve targets with PTR + family annotation, no
+  probe traffic at all. Improves on nmap's `-sL` by also showing the
+  reverse-DNS line and IPv4/IPv6 family for each address.
+- `--iflist [TARGET]`: list local network interfaces with a route-to-
+  target arrow when a target is given. Better than nmap's flat list —
+  shows which adapter would be used for a specific destination.
+- `--script-help`: print the catalog of built-in (and user) rhai
+  scripts with the description parsed from each script's first comment
+  line.
+
 ## [0.23.0] - 2026-04-24
 - `--guide` reorganization: prepended a TOC and grouped all 16
   sections under 8 visual categories (ESSENTIALS, SCAN, EVASION &

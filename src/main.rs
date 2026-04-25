@@ -11,6 +11,7 @@ mod examples;
 mod guide;
 mod icmp_ping;
 mod idle_scan;
+mod iflist;
 mod json_out;
 mod net_util;
 mod npcap;
@@ -138,6 +139,18 @@ async fn main() -> Result<()> {
     if let Some(secs) = args.ble_scan {
         let dur = secs.clamp(1, 300);
         return ble::scan(dur).await;
+    }
+    if args.iflist {
+        let target_ip = args
+            .targets
+            .first()
+            .and_then(|s| s.parse::<std::net::IpAddr>().ok());
+        iflist::run(target_ip);
+        return Ok(());
+    }
+    if args.script_help {
+        scripting::print_help(args.script_path.as_deref());
+        return Ok(());
     }
     if let Some(shell) = args.completions {
         use clap::CommandFactory;
@@ -349,7 +362,7 @@ async fn main() -> Result<()> {
     output::print_banner();
 
     let scan_type = args.scan_type();
-    let needs_privilege = !matches!(scan_type, ScanType::Connect);
+    let needs_privilege = !matches!(scan_type, ScanType::Connect | ScanType::List);
     // --sS can degrade to a driver-less SO_LINGER=0 emulation when raw
     // sockets aren't available; explicit opt-in via --syn-emulated bypasses
     // privilege/Npcap checks entirely.
@@ -482,8 +495,8 @@ async fn main() -> Result<()> {
         );
     }
 
-    // 2) Host discovery
-    if !args.skip_discovery {
+    // 2) Host discovery (skipped for -sL list scan)
+    if !args.skip_discovery && !matches!(scan_type, ScanType::List) {
         let before = targets.len();
         targets = if args.ping_icmp {
             #[cfg(windows)]
@@ -510,6 +523,38 @@ async fn main() -> Result<()> {
             elapsed
         );
         audit.event("scan_end", json!({ "mode": "ping_only", "up": targets.len() }));
+        return Ok(());
+    }
+
+    // -sL: list scan — resolve targets (with PTR + AAAA where available)
+    // and print them, no probe traffic at all. Improves on nmap by
+    // surfacing OUI vendor when a MAC is known and showing IPv4/IPv6 mix.
+    if matches!(scan_type, ScanType::List) {
+        println!(
+            "\n{:<22} {:<6}  {:<22}  {}",
+            "ADDRESS", "FAM", "PTR", "HOSTNAME / NOTE"
+        );
+        let resolver = if !args.no_dns {
+            hickory_resolver::TokioAsyncResolver::tokio_from_system_conf().ok()
+        } else {
+            None
+        };
+        for t in &targets {
+            let fam = if t.ip.is_ipv4() { "ipv4" } else { "ipv6" };
+            let ptr = if let Some(r) = &resolver {
+                r.reverse_lookup(t.ip)
+                    .await
+                    .ok()
+                    .and_then(|l| l.iter().next().map(|n| n.to_string().trim_end_matches('.').to_string()))
+                    .unwrap_or_else(|| "-".into())
+            } else {
+                "-".into()
+            };
+            let hint = t.hostname.clone().unwrap_or_default();
+            println!("{:<22} {:<6}  {:<22}  {}", t.ip, fam, ptr, hint);
+        }
+        println!("\nResolved {} target(s) — no probes sent (-sL).", targets.len());
+        audit.event("scan_end", json!({ "mode": "list", "count": targets.len() }));
         return Ok(());
     }
 
@@ -625,13 +670,15 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        ScanType::Syn | ScanType::Fin | ScanType::Null | ScanType::Xmas | ScanType::Ack => {
+        ScanType::Syn | ScanType::Fin | ScanType::Null | ScanType::Xmas | ScanType::Ack | ScanType::Window | ScanType::Maimon => {
             let kind = match scan_type {
                 ScanType::Syn => RawTcpKind::Syn,
                 ScanType::Fin => RawTcpKind::Fin,
                 ScanType::Null => RawTcpKind::Null,
                 ScanType::Xmas => RawTcpKind::Xmas,
                 ScanType::Ack => RawTcpKind::Ack,
+                ScanType::Window => RawTcpKind::Window,
+                ScanType::Maimon => RawTcpKind::Maimon,
                 _ => unreachable!(),
             };
             let evasion_cfg = build_evasion_config(&args)?;
@@ -693,6 +740,7 @@ async fn main() -> Result<()> {
 
             run_idle(targets, port_list.clone(), scanner, zombie_port, timeout_dur).await
         }
+        ScanType::List => unreachable!("-sL is handled before the dispatch"),
     };
 
     let was_cancelled = cancel.load(Ordering::Relaxed);
@@ -1238,6 +1286,9 @@ fn apply_scan_type_str(args: &mut Cli, s: &str) -> Result<()> {
     args.scan_null = false;
     args.scan_xmas = false;
     args.scan_ack = false;
+    args.scan_window = false;
+    args.scan_maimon = false;
+    args.scan_list = false;
     args.scan_udp = false;
     match s {
         "Connect" => args.scan_connect = true,
@@ -1246,6 +1297,9 @@ fn apply_scan_type_str(args: &mut Cli, s: &str) -> Result<()> {
         "Null" => args.scan_null = true,
         "Xmas" => args.scan_xmas = true,
         "Ack" => args.scan_ack = true,
+        "Window" => args.scan_window = true,
+        "Maimon" => args.scan_maimon = true,
+        "List" => return Err(anyhow!("--resume not supported for list scans (-sL)")),
         "Udp" => args.scan_udp = true,
         "Idle" => return Err(anyhow!("--resume not supported for Idle scans")),
         other => return Err(anyhow!("unknown saved scan_type '{}'", other)),

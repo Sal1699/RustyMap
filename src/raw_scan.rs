@@ -38,6 +38,13 @@ pub enum RawTcpKind {
     Null,
     Xmas,
     Ack,
+    /// Window scan — like ACK, but examines TCP window of the RST reply.
+    /// Open ports return RST with non-zero window; closed return RST with
+    /// zero window on most stacks.
+    Window,
+    /// Maimon scan — FIN+ACK probe. BSD-derived stacks drop on open ports
+    /// and RST on closed; everywhere else behaves like generic ACK.
+    Maimon,
 }
 
 impl RawTcpKind {
@@ -48,6 +55,8 @@ impl RawTcpKind {
             RawTcpKind::Null => 0,
             RawTcpKind::Xmas => TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG,
             RawTcpKind::Ack => TcpFlags::ACK,
+            RawTcpKind::Window => TcpFlags::ACK,
+            RawTcpKind::Maimon => TcpFlags::FIN | TcpFlags::ACK,
         }
     }
 
@@ -59,6 +68,8 @@ impl RawTcpKind {
             RawTcpKind::Null => "NULL",
             RawTcpKind::Xmas => "Xmas",
             RawTcpKind::Ack => "ACK",
+            RawTcpKind::Window => "Window",
+            RawTcpKind::Maimon => "Maimon",
         }
     }
 }
@@ -66,7 +77,7 @@ impl RawTcpKind {
 #[derive(Debug, Clone, Copy)]
 enum Response {
     SynAck,
-    Rst,
+    Rst { window: u16 },
     Other,
 }
 
@@ -195,16 +206,26 @@ impl RawTcpScanner {
         } else {
             match receiver.recv_timeout(timeout) {
                 Ok(Response::SynAck) => PortState::Open,
-                Ok(Response::Rst) => match kind {
+                Ok(Response::Rst { window }) => match kind {
                     RawTcpKind::Syn => PortState::Closed,
                     RawTcpKind::Fin | RawTcpKind::Null | RawTcpKind::Xmas => PortState::Closed,
                     RawTcpKind::Ack => PortState::Unfiltered,
+                    // Window scan: open ports return RST with non-zero
+                    // window on most stacks (Linux post-2.6, BSD, Solaris).
+                    RawTcpKind::Window => {
+                        if window > 0 { PortState::Open } else { PortState::Closed }
+                    }
+                    // Maimon (FIN+ACK): RST → closed; drop → open|filtered.
+                    // Treat any RST as closed.
+                    RawTcpKind::Maimon => PortState::Closed,
                 },
                 Ok(Response::Other) => PortState::Filtered,
                 Err(_) => match kind {
                     RawTcpKind::Syn => PortState::Filtered,
                     RawTcpKind::Fin | RawTcpKind::Null | RawTcpKind::Xmas => PortState::OpenFiltered,
                     RawTcpKind::Ack => PortState::Filtered,
+                    RawTcpKind::Window => PortState::Filtered,
+                    RawTcpKind::Maimon => PortState::OpenFiltered,
                 },
             }
         };
@@ -226,7 +247,7 @@ fn receiver_loop(mut rx: TransportReceiver, pending: PendingMap) {
             IpAddr::V6(_) => continue,
         };
         let remote_port = packet.get_source();
-        let kind = classify(packet.get_flags());
+        let kind = classify(packet.get_flags(), packet.get_window());
 
         if TRACE_ENABLED.load(Ordering::Relaxed) {
             eprintln!(
@@ -248,9 +269,9 @@ fn receiver_loop(mut rx: TransportReceiver, pending: PendingMap) {
     }
 }
 
-fn classify(flags: u8) -> Response {
+fn classify(flags: u8, window: u16) -> Response {
     if flags & TcpFlags::RST != 0 {
-        Response::Rst
+        Response::Rst { window }
     } else if flags & TcpFlags::SYN != 0 && flags & TcpFlags::ACK != 0 {
         Response::SynAck
     } else {
