@@ -591,8 +591,8 @@ async fn main() -> Result<()> {
     // surfacing OUI vendor when a MAC is known and showing IPv4/IPv6 mix.
     if matches!(scan_type, ScanType::List) {
         println!(
-            "\n{:<22} {:<6}  {:<22}  {}",
-            "ADDRESS", "FAM", "PTR", "HOSTNAME / NOTE"
+            "\n{:<22} {:<6}  {:<22}  HOSTNAME / NOTE",
+            "ADDRESS", "FAM", "PTR"
         );
         let resolver = if !args.no_dns {
             hickory_resolver::TokioAsyncResolver::tokio_from_system_conf().ok()

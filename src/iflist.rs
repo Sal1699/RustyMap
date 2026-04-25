@@ -64,15 +64,11 @@ pub fn run(target_for_route: Option<IpAddr>) {
         );
     }
 
-    if target_for_route.is_some() && route_iface.is_some() {
+    if let (Some(t), Some(_)) = (target_for_route, route_iface) {
         println!();
         println!(
             "{}",
-            format!(
-                "→ packets to {} would leave via the interface marked ←",
-                target_for_route.unwrap()
-            )
-            .dimmed()
+            format!("→ packets to {} would leave via the interface marked ←", t).dimmed()
         );
     }
 

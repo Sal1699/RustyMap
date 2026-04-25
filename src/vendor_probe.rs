@@ -89,7 +89,7 @@ static FW_RULES: Lazy<Vec<FwRule>> = Lazy::new(|| {
             vendor: "Foscam",
             vendor_marker: Regex::new(r"(?i)foscam").unwrap(),
             firmware: Some(Regex::new(r"(?i)firmware[:=\s]+v?([\d.]+)").unwrap()),
-            model: Some(None::<Regex>.unwrap_or_else(|| Regex::new(r"(?i)(FI[0-9A-Z-]+)").unwrap())),
+            model: Some(Regex::new(r"(?i)(FI[0-9A-Z-]+)").unwrap()),
         },
         // HP printers / iLO
         FwRule {
@@ -205,14 +205,13 @@ fn first_match(re: &Regex, body: &str) -> Option<String> {
 }
 
 fn parse_response(body: &str) -> VendorHint {
-    let mut hint = VendorHint::default();
-
-    // Generic response metadata first
-    hint.title = first_match(&TITLE_RE, body);
-    hint.server = first_match(&SERVER_RE, body);
-    if hint.server.is_none() {
-        hint.server = first_match(&POWERED_RE, body);
-    }
+    let title = first_match(&TITLE_RE, body);
+    let server = first_match(&SERVER_RE, body).or_else(|| first_match(&POWERED_RE, body));
+    let mut hint = VendorHint {
+        title,
+        server,
+        ..Default::default()
+    };
 
     // Vendor-specific matching. First rule to match vendor_marker wins.
     for rule in FW_RULES.iter() {

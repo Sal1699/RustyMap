@@ -4,6 +4,14 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.27.1] - 2026-04-25
+- Clippy cleanup: drop redundant `unwrap()` after `is_some` guard in
+  iflist; replace `None::<Regex>.unwrap_or_else(|| ...)` with the
+  direct regex in vendor_probe (Foscam model rule); use VendorHint
+  initializer instead of mutating after `Default::default()`; fix
+  `print_literal` in -sL header.
+- No behavior change. Build remains warning-free.
+
 ## [0.27.0] - 2026-04-25
 - `-sO`: IP protocol scan. New `ip_proto_scan` module probes 15
   IANA-listed protocols (TCP/UDP/ICMP/IGMP/GRE/ESP/AH/OSPF/PIM/SCTP
