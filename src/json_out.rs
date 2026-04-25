@@ -2,6 +2,7 @@ use crate::ports::service_name;
 use crate::scanner::HostResult;
 use anyhow::Result;
 use serde::Serialize;
+#[allow(unused_imports)]
 use std::fs::File;
 use std::io::Write;
 
@@ -93,7 +94,7 @@ pub fn to_json_string(
 }
 
 pub fn write_json(path: &str, json: &str) -> Result<()> {
-    let mut f = File::create(path)?;
+    let mut f = crate::file_out::open(path)?;
     f.write_all(json.as_bytes())?;
     Ok(())
 }

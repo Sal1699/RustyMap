@@ -1,8 +1,8 @@
+use crate::file_out;
 use crate::ports::service_name;
 use crate::scanner::{HostResult, PortState};
 use anyhow::Result;
 use colored::*;
-use std::fs::File;
 use std::io::Write;
 
 pub fn print_banner() {
@@ -193,7 +193,7 @@ pub fn print_summary(hosts: &[HostResult], elapsed_sec: f64) {
 }
 
 pub fn write_normal(path: &str, hosts: &[HostResult], elapsed_sec: f64) -> Result<()> {
-    let mut f = File::create(path)?;
+    let mut f = file_out::open(path)?;
     writeln!(
         f,
         "# RustyMap {} scan at {}",
@@ -236,7 +236,7 @@ pub fn write_normal(path: &str, hosts: &[HostResult], elapsed_sec: f64) -> Resul
 }
 
 pub fn write_grepable(path: &str, hosts: &[HostResult]) -> Result<()> {
-    let mut f = File::create(path)?;
+    let mut f = file_out::open(path)?;
     writeln!(f, "# RustyMap grepable output")?;
     for h in hosts {
         let status = if h.up { "Up" } else { "Down" };

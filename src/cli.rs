@@ -127,6 +127,34 @@ pub struct Cli {
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
     pub verbose: u8,
 
+    /// Debug output level (-d, -dd, -ddd). Tagged by category: [net]/[probe]/[parse]/[scan]
+    #[arg(short = 'd', long = "debug", action = clap::ArgAction::Count)]
+    pub debug: u8,
+
+    /// Trace rhai script execution as JSON Lines (pipe into jq for filtering)
+    #[arg(long = "script-trace")]
+    pub script_trace: bool,
+
+    /// Append to output files instead of overwriting
+    #[arg(long = "append-output")]
+    pub append_output: bool,
+
+    /// Retry filtered/no-response ports up to N times before giving up
+    #[arg(long = "max-retries", default_value_t = 0u8)]
+    pub max_retries: u8,
+
+    /// IP protocol scan — discover which IP protocols (TCP/UDP/ICMP/GRE/…) the target supports
+    #[arg(long = "sO", group = "scan_type")]
+    pub scan_ipproto: bool,
+
+    /// Spoof source IP on raw scans (warn if IP is not locally reachable)
+    #[arg(short = 'S', long = "source-ip", value_name = "IP")]
+    pub source_spoof: Option<String>,
+
+    /// IPv4 options: record-route | timestamp | lsrr IP1,IP2,... | ssrr IP1,... | hex 070C04...
+    #[arg(long = "ip-options", value_name = "SPEC")]
+    pub ip_options: Option<String>,
+
     /// Write normal output to file
     #[arg(long = "oN")]
     pub output_normal: Option<String>,
@@ -511,6 +539,7 @@ pub enum ScanType {
     List,
     Udp,
     Idle,
+    IpProto,
 }
 
 impl Cli {
@@ -525,6 +554,7 @@ impl Cli {
         else if self.scan_list { ScanType::List }
         else if self.scan_udp { ScanType::Udp }
         else if self.scan_idle.is_some() { ScanType::Idle }
+        else if self.scan_ipproto { ScanType::IpProto }
         else { ScanType::Connect }
     }
 

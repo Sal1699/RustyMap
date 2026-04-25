@@ -9,11 +9,13 @@ mod dns;
 mod discovery;
 mod evasion;
 mod examples;
+mod file_out;
 mod guide;
 mod icmp_ping;
 mod idle_scan;
 mod iflist;
 mod json_out;
+mod log;
 mod net_util;
 mod npcap;
 mod os_fp;
@@ -128,6 +130,15 @@ async fn main() -> Result<()> {
     if args.no_color {
         control::set_override(false);
     }
+
+    // -d/-dd/-ddd: category-tagged debug logging.
+    log::set_level(args.debug);
+    // --script-trace: emit JSON Lines per script-host execution.
+    scripting::set_trace(args.script_trace);
+    // --append-output: writers in output/report/json_out/xml_out use this.
+    file_out::set_append(args.append_output);
+    // --max-retries: connect-scan retries filtered ports up to N times.
+    scanner::set_max_retries(args.max_retries);
 
     if args.guide {
         guide::print_guide();

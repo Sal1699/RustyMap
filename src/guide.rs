@@ -210,6 +210,10 @@ pub fn print_guide() {
     line("--examples            Stampa 16 ricette pronte per casi comuni");
     line("--completions SHELL   Genera completion script (bash|zsh|fish|powershell)");
     line("--trace-raw           Logga ogni tx/rx pacchetto raw (debug --sS)");
+    line("-d, --debug           Debug log (-d, -dd, -ddd) con tag [net]/[probe]/…");
+    line("--script-trace        Trace script Rhai come JSON Lines (pipe in jq)");
+    line("--append-output       Appendi ai file output invece di sovrascrivere");
+    line("--max-retries N       Riprova porte filtered fino a N volte (connect)");
     line("--ble-scan SECONDI    Scan Bluetooth LE per N secondi (phone/wearable/IoT)");
     line("--iflist [TARGET]     Lista interfacce (con hint route-to-target)");
     line("--script-help         Catalogo script Rhai (built-in + utente)");

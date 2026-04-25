@@ -8,7 +8,6 @@
 use crate::ports::service_name;
 use crate::scanner::{HostResult, PortState};
 use anyhow::Result;
-use std::fs;
 use std::fmt::Write;
 
 fn escape(s: &str) -> String {
@@ -178,6 +177,6 @@ pub fn write_xml(
     writeln!(out, "  </runstats>")?;
     writeln!(out, "</nmaprun>")?;
 
-    fs::write(path, out)?;
+    crate::file_out::write(path, out.as_bytes())?;
     Ok(())
 }

@@ -177,6 +177,29 @@ pub fn builtin_scripts() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+static SCRIPT_TRACE: AtomicBool = AtomicBool::new(false);
+
+pub fn set_trace(on: bool) {
+    SCRIPT_TRACE.store(on, Ordering::Relaxed);
+}
+
+fn trace_event(script: &str, host: &str, status: &str, detail: &str) {
+    if !SCRIPT_TRACE.load(Ordering::Relaxed) {
+        return;
+    }
+    // JSON Lines so the user can pipe stderr into jq.
+    let now = chrono::Utc::now().to_rfc3339();
+    eprintln!(
+        "{{\"ts\":\"{}\",\"script\":\"{}\",\"host\":\"{}\",\"status\":\"{}\",\"detail\":{}}}",
+        now,
+        script,
+        host,
+        status,
+        serde_json::to_string(detail).unwrap_or_else(|_| "\"\"".into())
+    );
+}
+
 /// Run a list of (name, source) scripts against a host set.
 pub fn run_inline(
     scripts: &[(&str, &str)],
@@ -198,6 +221,7 @@ pub fn run_inline(
             Ok(a) => a,
             Err(e) => {
                 eprintln!("[script {}] parse error: {}", name, e);
+                trace_event(name, "-", "parse_error", &e.to_string());
                 continue;
             }
         };
@@ -210,10 +234,14 @@ pub fn run_inline(
             scope.push_dynamic("host", Dynamic::from(host_map));
             scope.push_dynamic("args", Dynamic::from(args_map.clone()));
             scope.push_dynamic("findings", Dynamic::from(Array::new()));
+            let host_s = h.target.ip.to_string();
+            trace_event(name, &host_s, "start", "");
             if let Err(e) = engine.run_ast_with_scope(&mut scope, &ast) {
                 eprintln!("[script {} host {}] runtime error: {}", name, h.target.ip, e);
+                trace_event(name, &host_s, "runtime_error", &e.to_string());
                 continue;
             }
+            let mut emitted = 0usize;
             if let Some(arr) = scope.get_value::<Array>("findings") {
                 for v in arr {
                     if let Some(m) = v.try_cast::<Map>() {
@@ -224,14 +252,16 @@ pub fn run_inline(
                         let port = m.get("port").and_then(|d| d.as_int().ok()).map(|i| i as u16);
                         findings.push(Finding {
                             script: name.to_string(),
-                            host: h.target.ip.to_string(),
+                            host: host_s.clone(),
                             port,
                             severity: sev,
                             message: msg,
                         });
+                        emitted += 1;
                     }
                 }
             }
+            trace_event(name, &host_s, "done", &format!("{} finding(s)", emitted));
         }
     }
     findings

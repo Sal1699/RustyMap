@@ -4,6 +4,18 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.26.0] - 2026-04-25
+- `-d` / `--debug` (repeatable): tagged debug logging. Each line is
+  prefixed with a category — `[net]`, `[probe]`, `[parse]`, `[scan]`,
+  `[evasion]`, `[script]` — so you can filter with `2>&1 | rg '^\[probe\]'`.
+- `--script-trace`: emit one JSON Line per script-host execution
+  (start / done / parse_error / runtime_error). Pipeable into `jq`.
+- `--append-output`: writers (`-oN`/`-oG`/`-oJ`/`-oH`/`-oMd`/`-oX`)
+  append instead of truncating. Useful for cron-driven scans that
+  build a single rolling artifact.
+- `--max-retries N`: connect-scan retries filtered ports up to N times.
+  Only reissues on Filtered (timeouts) — Open and Closed are terminal.
+
 ## [0.25.0] - 2026-04-25
 - `-F` / `--fast`: alias for `--top-ports 100`. Trivial nmap-compat.
 - `-r` / `--no-randomize-ports`: explicit override that disables port

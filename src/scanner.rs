@@ -3,11 +3,18 @@ use crate::target::Target;
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
+
+/// Global retry budget for the connect-scan path. Set by main from --max-retries.
+static MAX_RETRIES: AtomicU8 = AtomicU8::new(0);
+
+pub fn set_max_retries(n: u8) {
+    MAX_RETRIES.store(n, Ordering::Relaxed);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -124,18 +131,29 @@ pub async fn tcp_connect_scan(
                 }
                 let addr = SocketAddr::new(ip, port);
                 let t0 = Instant::now();
-                let res = timeout(timeout_dur, TcpStream::connect(addr)).await;
-                let rtt = t0.elapsed();
-                let state = match res {
-                    Ok(Ok(_stream)) => PortState::Open,
-                    Ok(Err(e)) => {
-                        match e.kind() {
-                            std::io::ErrorKind::ConnectionRefused => PortState::Closed,
-                            _ => PortState::Filtered,
+                // Retry only on Filtered (timeout) up to MAX_RETRIES — closed
+                // and open are terminal. Total attempts = 1 + MAX_RETRIES.
+                let max_retries = MAX_RETRIES.load(Ordering::Relaxed);
+                let mut attempt = 0u8;
+                let mut state;
+                loop {
+                    let res = timeout(timeout_dur, TcpStream::connect(addr)).await;
+                    state = match res {
+                        Ok(Ok(_stream)) => PortState::Open,
+                        Ok(Err(e)) => {
+                            match e.kind() {
+                                std::io::ErrorKind::ConnectionRefused => PortState::Closed,
+                                _ => PortState::Filtered,
+                            }
                         }
+                        Err(_) => PortState::Filtered,
+                    };
+                    if state != PortState::Filtered || attempt >= max_retries {
+                        break;
                     }
-                    Err(_) => PortState::Filtered,
-                };
+                    attempt += 1;
+                }
+                let rtt = t0.elapsed();
                 PortResult { port, state, rtt, service: None }
                 }
             })

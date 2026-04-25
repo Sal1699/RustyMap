@@ -143,7 +143,7 @@ pub fn write_html(
 ) -> Result<()> {
     let ctx = build_ctx(hosts, scan_type, started_at, elapsed_secs, diffs);
     let out = render(DEFAULT_HTML, &ctx, "report.html")?;
-    fs::write(path, out)?;
+    crate::file_out::write(path, out.as_bytes())?;
     Ok(())
 }
 
@@ -157,7 +157,7 @@ pub fn write_markdown(
 ) -> Result<()> {
     let ctx = build_ctx(hosts, scan_type, started_at, elapsed_secs, diffs);
     let out = render(DEFAULT_MD, &ctx, "report.md")?;
-    fs::write(path, out)?;
+    crate::file_out::write(path, out.as_bytes())?;
     Ok(())
 }
 
@@ -174,6 +174,6 @@ pub fn write_custom(
         .with_context(|| format!("failed to read template {}", template_path))?;
     let ctx = build_ctx(hosts, scan_type, started_at, elapsed_secs, diffs);
     let out = render(&tpl, &ctx, "custom")?;
-    fs::write(out_path, out)?;
+    crate::file_out::write(out_path, out.as_bytes())?;
     Ok(())
 }
