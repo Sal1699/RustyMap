@@ -74,6 +74,7 @@ pub fn print_guide() {
     line("--sL                  List scan: risolve target con PTR e esce");
     line("--sU                  UDP scan");
     line("--sI ZOMBIE[:PORT]    Idle/zombie scan (spoof via host con IPID incrementale)");
+    line("--sO                  IP protocol scan (TCP/UDP/ICMP/GRE/OSPF/SCTP…)");
     example("rustymap --sT 10.0.0.5");
     example("rustymap --sS -p 1-65535 10.0.0.5");
     example("rustymap --sU -p 53,123,161 10.0.0.5");
@@ -214,6 +215,8 @@ pub fn print_guide() {
     line("--script-trace        Trace script Rhai come JSON Lines (pipe in jq)");
     line("--append-output       Appendi ai file output invece di sovrascrivere");
     line("--max-retries N       Riprova porte filtered fino a N volte (connect)");
+    line("-S IP                 Spoof source IP per raw scans (warn se non routable)");
+    line("--ip-options SPEC     IPv4 options: record-route|timestamp|lsrr IP,IP|ssrr|hex");
     line("--ble-scan SECONDI    Scan Bluetooth LE per N secondi (phone/wearable/IoT)");
     line("--iflist [TARGET]     Lista interfacce (con hint route-to-target)");
     line("--script-help         Catalogo script Rhai (built-in + utente)");

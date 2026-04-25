@@ -4,6 +4,23 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.27.0] - 2026-04-25
+- `-sO`: IP protocol scan. New `ip_proto_scan` module probes 15
+  IANA-listed protocols (TCP/UDP/ICMP/IGMP/GRE/ESP/AH/OSPF/PIM/SCTP
+  /L2TP/IPv6 etc.). Each result row includes the protocol name,
+  RFC, and a one-line common-usage hint — turns a router scan into
+  a quick reference.
+- `-S IP` / `--source-ip`: source-address spoofing on raw scans.
+  Improvement vs nmap: warns (does not error) when the spoofed IP
+  is not in any local subnet — replies will go to that IP and
+  never reach us, so it's only useful for blind probes / decoy
+  padding.
+- `--ip-options SPEC`: insert IPv4 options into the raw header.
+  Accepts named forms (`record-route`, `timestamp`, `lsrr IP1,IP2`,
+  `ssrr IP1,IP2`) plus raw hex. NOP-padded to a 4-byte boundary;
+  IHL bumped automatically. EvasionConfig.is_active /
+  needs_layer3 now also true when these are set.
+
 ## [0.26.0] - 2026-04-25
 - `-d` / `--debug` (repeatable): tagged debug logging. Each line is
   prefixed with a category — `[net]`, `[probe]`, `[parse]`, `[scan]`,

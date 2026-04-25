@@ -14,6 +14,7 @@ mod guide;
 mod icmp_ping;
 mod idle_scan;
 mod iflist;
+mod ip_proto_scan;
 mod json_out;
 mod log;
 mod net_util;
@@ -855,6 +856,25 @@ async fn main() -> Result<()> {
             run_idle(targets, port_list.clone(), scanner, zombie_port, timeout_dur).await
         }
         ScanType::List => unreachable!("-sL is handled before the dispatch"),
+        ScanType::IpProto => {
+            // IP protocol scan operates per host (not per port) — run a
+            // dedicated scanner and short-circuit the rest of the pipeline.
+            for t in &targets {
+                let v4 = match t.ip {
+                    std::net::IpAddr::V4(v) => v,
+                    std::net::IpAddr::V6(_) => {
+                        eprintln!("[!] -sO: skipping IPv6 target {} (not yet supported)", t.ip);
+                        continue;
+                    }
+                };
+                match ip_proto_scan::scan(v4, timeout_dur) {
+                    Ok(rows) => ip_proto_scan::print_report(v4, &rows),
+                    Err(e) => eprintln!("[!] -sO {}: {}", v4, e),
+                }
+            }
+            audit.event("scan_end", json!({ "mode": "ip_proto", "hosts": targets.len() }));
+            return Ok(());
+        }
     };
 
     let was_cancelled = cancel.load(Ordering::Relaxed);
@@ -1397,6 +1417,80 @@ async fn run_udp(
     out
 }
 
+/// Parse an IPv4-options spec into raw bytes for the IP header options field.
+/// Accepted forms:
+///   - `record-route`     → option type 7 with 39-byte buffer
+///   - `timestamp`        → option type 68 with default flags
+///   - `lsrr 10.0.0.1,…`  → loose source routing (option 131)
+///   - `ssrr 10.0.0.1,…`  → strict source routing (option 137)
+///   - hex string `0704...` (any length, will be NOP-padded to multiple of 4)
+fn parse_ip_options(spec: &str) -> Result<Vec<u8>> {
+    let s = spec.trim().to_lowercase();
+    let mut bytes: Vec<u8> = if let Some(rest) = s.strip_prefix("lsrr ") {
+        build_source_route(0x83, rest)?
+    } else if let Some(rest) = s.strip_prefix("ssrr ") {
+        build_source_route(0x89, rest)?
+    } else if s == "record-route" || s == "rr" {
+        // Type 7, length 39, pointer 4 — 9 slots of 4 bytes each
+        let mut v = vec![0u8; 39];
+        v[0] = 0x07;
+        v[1] = 39;
+        v[2] = 4;
+        v
+    } else if s == "timestamp" || s == "ts" {
+        // Type 68, length 36, pointer 5, oflw=0/flag=0
+        let mut v = vec![0u8; 36];
+        v[0] = 68;
+        v[1] = 36;
+        v[2] = 5;
+        v[3] = 0;
+        v
+    } else {
+        // Raw hex
+        let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+        if !cleaned.len().is_multiple_of(2) {
+            return Err(anyhow!("--ip-options hex needs even length"));
+        }
+        (0..cleaned.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&cleaned[i..i + 2], 16))
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|_| anyhow!("--ip-options: invalid hex"))?
+    };
+    // IP header IHL is in 32-bit words — pad with NOP (0x01) to multiple of 4.
+    while !bytes.len().is_multiple_of(4) {
+        bytes.push(0x01);
+    }
+    if bytes.len() > 40 {
+        return Err(anyhow!("--ip-options: max 40 bytes (IPv4 limit)"));
+    }
+    Ok(bytes)
+}
+
+fn build_source_route(opt_type: u8, ip_csv: &str) -> Result<Vec<u8>> {
+    let ips: Vec<std::net::Ipv4Addr> = ip_csv
+        .split(',')
+        .map(|s| s.trim().parse::<std::net::Ipv4Addr>())
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| anyhow!("--ip-options src-route: invalid IP ({})", e))?;
+    if ips.is_empty() {
+        return Err(anyhow!("--ip-options src-route needs at least one IP"));
+    }
+    let length = 3 + ips.len() * 4;
+    if length > 40 {
+        return Err(anyhow!("--ip-options src-route: too many hops (max 9)"));
+    }
+    let mut out = vec![0u8; length];
+    out[0] = opt_type;
+    out[1] = length as u8;
+    out[2] = 4; // pointer to first IP
+    for (i, ip) in ips.iter().enumerate() {
+        let off = 3 + i * 4;
+        out[off..off + 4].copy_from_slice(&ip.octets());
+    }
+    Ok(out)
+}
+
 fn apply_scan_type_str(args: &mut Cli, s: &str) -> Result<()> {
     args.scan_connect = false;
     args.scan_syn = false;
@@ -1420,6 +1514,7 @@ fn apply_scan_type_str(args: &mut Cli, s: &str) -> Result<()> {
         "List" => return Err(anyhow!("--resume not supported for list scans (-sL)")),
         "Udp" => args.scan_udp = true,
         "Idle" => return Err(anyhow!("--resume not supported for Idle scans")),
+        "IpProto" => return Err(anyhow!("--resume not supported for -sO scans")),
         other => return Err(anyhow!("unknown saved scan_type '{}'", other)),
     }
     Ok(())
@@ -1487,6 +1582,31 @@ fn build_evasion_config(args: &Cli) -> Result<evasion::EvasionConfig> {
             );
         }
         cfg.data_payload = bytes;
+    }
+    if let Some(s) = &args.source_spoof {
+        let ip: std::net::Ipv4Addr = s
+            .parse()
+            .map_err(|_| anyhow!("--source-ip wants an IPv4 address, got '{}'", s))?;
+        // Improvement over nmap: warn (not error) if the spoofed IP is
+        // not reachable from any local interface, since replies will be
+        // delivered to that IP and never seen by us.
+        let routable = pnet::datalink::interfaces().iter().any(|iface| {
+            iface.ips.iter().any(|n| match n {
+                pnet::ipnetwork::IpNetwork::V4(net) => net.contains(ip),
+                _ => false,
+            })
+        });
+        if !routable {
+            eprintln!(
+                "[!] -S {}: spoofed IP not in any local subnet — replies will be lost. \
+                 Useful only for blind probes or decoy padding.",
+                ip
+            );
+        }
+        cfg.source_spoof_ip = Some(ip);
+    }
+    if let Some(spec) = &args.ip_options {
+        cfg.ip_options = parse_ip_options(spec)?;
     }
     if args.fragment {
         cfg.fragment = true;

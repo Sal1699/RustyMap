@@ -227,6 +227,13 @@ pub struct EvasionConfig {
     /// Custom payload appended to probe packets. Overrides random padding
     /// when set; takes precedence over `data_length`.
     pub data_payload: Vec<u8>,
+    /// IPv4 source address spoof (-S). When set, raw scans use this as
+    /// the IP src field instead of the host's interface IP. Replies will
+    /// be sent to this address, not us — useful only for blind probes.
+    pub source_spoof_ip: Option<Ipv4Addr>,
+    /// Raw IPv4 options bytes (--ip-options). Inserted between the fixed
+    /// 20-byte IP header and the payload; IHL is bumped accordingly.
+    pub ip_options: Vec<u8>,
     pub fragment: bool,
     pub frag_mtu: u16,
     pub bad_checksum: bool,
@@ -254,6 +261,8 @@ impl Default for EvasionConfig {
             ttl_jitter: 0,
             data_length: 0,
             data_payload: Vec::new(),
+            source_spoof_ip: None,
+            ip_options: Vec::new(),
             fragment: false,
             frag_mtu: 8,
             bad_checksum: false,
@@ -277,6 +286,8 @@ impl EvasionConfig {
             || self.stack_profile != StackProfile::Default
             || self.custom_flags.is_some()
             || self.rotate // rotation varies TTL → needs IP header control
+            || self.source_spoof_ip.is_some()
+            || !self.ip_options.is_empty()
     }
 
     pub fn is_active(&self) -> bool {
@@ -292,6 +303,8 @@ impl EvasionConfig {
             || self.rotate
             || self.frag_overlap
             || self.custom_flags.is_some()
+            || self.source_spoof_ip.is_some()
+            || !self.ip_options.is_empty()
             || self.decoy_preping
     }
 
@@ -443,13 +456,28 @@ pub fn build_ip_packet(
     tcp_bytes: &[u8],
     ttl: u8,
 ) -> Vec<u8> {
-    let total = 20 + tcp_bytes.len();
+    build_ip_packet_with_opts(src_ip, dst_ip, tcp_bytes, ttl, &[])
+}
+
+/// Same as `build_ip_packet` but inserts raw IPv4 options between the
+/// fixed 20-byte header and the payload. `options` must be a multiple
+/// of 4 bytes (NOP-padded) and ≤ 40 bytes; IHL is bumped accordingly.
+pub fn build_ip_packet_with_opts(
+    src_ip: Ipv4Addr,
+    dst_ip: Ipv4Addr,
+    tcp_bytes: &[u8],
+    ttl: u8,
+    options: &[u8],
+) -> Vec<u8> {
+    let opts_len = options.len();
+    let header_len = 20 + opts_len;
+    let total = header_len + tcp_bytes.len();
     let mut buf = vec![0u8; total];
 
     {
         let mut ip = MutableIpv4Packet::new(&mut buf).unwrap();
         ip.set_version(4);
-        ip.set_header_length(5);
+        ip.set_header_length((header_len / 4) as u8);
         ip.set_total_length(total as u16);
         ip.set_identification(rand::thread_rng().gen());
         ip.set_flags(0x02); // DF
@@ -457,11 +485,20 @@ pub fn build_ip_packet(
         ip.set_next_level_protocol(IpNextHeaderProtocols::Tcp);
         ip.set_source(src_ip);
         ip.set_destination(dst_ip);
-        ip.set_payload(tcp_bytes);
+    }
+    // pnet 0.34 doesn't expose set_options_raw; write the option bytes
+    // directly into the buffer between the fixed header and the payload.
+    if !options.is_empty() {
+        buf[20..20 + opts_len].copy_from_slice(options);
+    }
+    // Copy payload past the options
+    buf[header_len..header_len + tcp_bytes.len()].copy_from_slice(tcp_bytes);
+    // Recompute checksum over the whole header (incl. options)
+    {
+        let mut ip = MutableIpv4Packet::new(&mut buf).unwrap();
         let cs = ipv4::checksum(&ip.to_immutable());
         ip.set_checksum(cs);
     }
-
     buf
 }
 
@@ -598,9 +635,11 @@ pub fn send_with_decoys(
         let _ = send_ip_raw(tx, &ip, dst_ip, cfg);
     }
 
-    // Real probe
-    let tcp = build_tcp_segment(src_ip, dst_ip, dst_port, flags, rng.gen(), src_port, cfg);
-    let ip = build_ip_packet(src_ip, dst_ip, &tcp, cfg.jittered_ttl());
+    // Real probe — substitute src with -S spoof IP if set, and inject any
+    // --ip-options requested.
+    let real_src = cfg.source_spoof_ip.unwrap_or(src_ip);
+    let tcp = build_tcp_segment(real_src, dst_ip, dst_port, flags, rng.gen(), src_port, cfg);
+    let ip = build_ip_packet_with_opts(real_src, dst_ip, &tcp, cfg.jittered_ttl(), &cfg.ip_options);
     send_ip_raw(tx, &ip, dst_ip, cfg).is_ok()
 }
 
