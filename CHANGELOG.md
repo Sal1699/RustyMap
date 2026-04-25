@@ -4,6 +4,14 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.23.0] - 2026-04-24
+- `--guide` reorganization: prepended a TOC and grouped all 16
+  sections under 8 visual categories (ESSENTIALS, SCAN, EVASION &
+  STEALTH, OUTPUT & PERSISTENCE, DNS & NETWORK INSPECTION,
+  AUTOMATION & TOOLING, EXTENSIONS, MAINTENANCE) so 50+ flags are
+  easier to navigate.
+- TOC also surfaces a "rustymap --examples" tip at the top.
+
 ## [0.22.0] - 2026-04-24
 - `--ble-scan SECONDS`: discover nearby Bluetooth LE devices and report
   address / RSSI / inferred class (phone, wearable, HID, …) / advertised

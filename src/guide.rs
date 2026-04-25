@@ -14,7 +14,9 @@ const HL_TEXT: (u8, u8, u8) = (220, 220, 210);
 
 pub fn print_guide() {
     banner();
+    toc();
 
+    category("ESSENTIALS");
     section("TARGET");
     line("<TARGET>              IP, hostname, CIDR, range o più target separati");
     example("rustymap 192.168.1.1");
@@ -30,6 +32,7 @@ pub fn print_guide() {
     example("rustymap -p 1-1000 10.0.0.5");
     example("rustymap -p - 10.0.0.5              # tutte le 65535");
 
+    category("SCAN");
     section("TIPI DI SCAN");
     line("--sT                  TCP connect (3-way handshake, no privilegi)");
     line("--sS                  TCP SYN half-open (admin + Npcap; auto-fallback driver-less)");
@@ -101,6 +104,7 @@ pub fn print_guide() {
     example("rustymap --sT --sV 10.0.0.5");
     example("rustymap --sS --sV -O 10.0.0.5");
 
+    category("EVASION & STEALTH");
     section("EVASIONE FIREWALL / IDS");
     line("--evasion PRESET          stealth | aggressive | paranoid | ghost");
     line("--stack-profile NOME      windows11 | linux6 | macos | freebsd | android14");
@@ -124,6 +128,7 @@ pub fn print_guide() {
     example("rustymap --sS --decoys 10.0.0.1,10.0.0.2 --decoy-preping 10.0.0.5");
     example("rustymap --sS --ttl-jitter 8 --rotate-evasion 10.0.0.0/24");
 
+    category("OUTPUT & PERSISTENCE");
     section("OUTPUT");
     line("--oN FILE             Output testuale");
     line("--oG FILE             Output grepable");
@@ -152,6 +157,7 @@ pub fn print_guide() {
     example("rustymap --tag 10.0.0.5:22=prod-ssh");
     example("rustymap --list-tags --tag-ip 10.0.0.5");
 
+    category("DNS & NETWORK INSPECTION");
     section("DNS");
     line("--dns-enum DOMINIO    Brute-force sottodomini (+ NS/MX/TXT/SOA + wildcard-filter)");
     line("--dns-wordlist FILE   Wordlist custom per --dns-enum");
@@ -165,6 +171,7 @@ pub fn print_guide() {
     example("rustymap --dns-sniff --iface Ethernet");
     example("rustymap --dns-spoof example.com=10.0.0.5 --iface Ethernet");
 
+    category("AUTOMATION & TOOLING");
     section("VAULT (credenziali cifrate)");
     line("--vault FILE          Path vault (default rustymap-vault.json)");
     line("--vault-add SPEC      Aggiungi: name=user:secret:kind[:note]");
@@ -185,6 +192,7 @@ pub fn print_guide() {
     example("rustymap --serve");
     example("rustymap --serve --serve-addr 0.0.0.0:9090 --db lab.db");
 
+    category("EXTENSIONS");
     section("SCRIPTING & CVE");
     line("--script PATH         Esegui script Rhai (file o directory *.rhai)");
     line("--cve-db FILE         Correla servizi a CVE (usa con --sV)");
@@ -198,6 +206,7 @@ pub fn print_guide() {
     example("rustymap --sT --sV --cve-db cves.json 10.0.0.5");
     example("rustymap --sT --script rules/ 10.0.0.5");
 
+    category("MAINTENANCE");
     section("AUDIT & INSTALL");
     line("--audit-log FILE      JSONL con tutte le azioni (timestamped)");
     line("--install-npcap       Installa runtime Npcap (Windows admin)");
@@ -277,6 +286,48 @@ fn footer() {
             .italic(),
     );
     println!("{}", bar.truecolor(HL_ORANGE.0, HL_ORANGE.1, HL_ORANGE.2));
+}
+
+fn toc() {
+    println!();
+    println!(
+        "  {}",
+        "INDICE".truecolor(HL_AMBER.0, HL_AMBER.1, HL_AMBER.2).bold()
+    );
+    let entries: &[(&str, &[&str])] = &[
+        ("ESSENTIALS", &["TARGET", "PORTE"]),
+        ("SCAN", &["TIPI DI SCAN", "HOST DISCOVERY", "TIMING & PERFORMANCE", "SERVICE & OS DETECTION"]),
+        ("EVASION & STEALTH", &["EVASIONE FIREWALL / IDS"]),
+        ("OUTPUT & PERSISTENCE", &["OUTPUT", "DATABASE & DIFF", "TAG"]),
+        ("DNS & NETWORK INSPECTION", &["DNS"]),
+        ("AUTOMATION & TOOLING", &["VAULT", "PROFILI & SCHEDULAZIONE", "WEB UI"]),
+        ("EXTENSIONS", &["SCRIPTING & CVE"]),
+        ("MAINTENANCE", &["AUDIT & INSTALL", "ALTRO"]),
+    ];
+    for (cat, sects) in entries {
+        println!(
+            "    {} {}  {}",
+            "■".truecolor(HL_ORANGE.0, HL_ORANGE.1, HL_ORANGE.2),
+            cat.truecolor(HL_AMBER.0, HL_AMBER.1, HL_AMBER.2).bold(),
+            sects.join(" · ").truecolor(HL_DIM.0, HL_DIM.1, HL_DIM.2),
+        );
+    }
+    println!(
+        "\n  {}",
+        "Tip: rustymap --examples per ricette pronte all'uso"
+            .truecolor(HL_DIM.0, HL_DIM.1, HL_DIM.2),
+    );
+}
+
+fn category(name: &str) {
+    println!();
+    println!();
+    println!(
+        "  {}",
+        format!("══ {} ══", name)
+            .truecolor(HL_ORANGE.0, HL_ORANGE.1, HL_ORANGE.2)
+            .bold(),
+    );
 }
 
 fn section(name: &str) {
