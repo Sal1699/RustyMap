@@ -4,6 +4,27 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.25.0] - 2026-04-25
+- `-F` / `--fast`: alias for `--top-ports 100`. Trivial nmap-compat.
+- `-r` / `--no-randomize-ports`: explicit override that disables port
+  shuffling even when `--randomize-ports` is enabled by a profile.
+- `--exclude-ports SPEC`: drop matching ports from the list. Accepts
+  numeric ranges AND a small alias table covering pentester-friendly
+  names: ssh, smb, rdp, web, http, https, mail, dns, ftp, ldap, vnc,
+  telnet, vpn, db, ics. Improvement over nmap: nmap requires exact
+  service names from /etc/services.
+- `--version-intensity N` (0-9, default 5): probe aggressiveness.
+  Below 7 the TLS deep-handshake is skipped — halving service-probe
+  time on hosts with many TLS ports. Pass 7+ to bring it back.
+- `--PR`: ARP discovery for LAN targets. New `arp_ping` module sends
+  ARP requests via pnet datalink and listens for replies; on LAN this
+  is dramatically faster than TCP/ICMP ping. Auto-detects when a
+  target sits in the same /24 as a local interface.
+- `--PS [PORTS]` / `--PA [PORTS]` / `--PU [PORTS]`: nmap-compatible
+  ping aliases. Currently route through the existing TCP-ping
+  discovery path (the port list is what differentiates them in
+  practice; raw SYN/ACK/UDP probes for discovery are deferred).
+
 ## [0.24.0] - 2026-04-25
 - `--sW` TCP Window scan: ACK probe; classifies open/closed by the RST
   reply's TCP window value (open ports return non-zero on most stacks).

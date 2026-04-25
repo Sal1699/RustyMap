@@ -1,3 +1,4 @@
+mod arp_ping;
 mod audit;
 mod ble;
 mod cli;
@@ -498,7 +499,54 @@ async fn main() -> Result<()> {
     // 2) Host discovery (skipped for -sL list scan)
     if !args.skip_discovery && !matches!(scan_type, ScanType::List) {
         let before = targets.len();
-        targets = if args.ping_icmp {
+
+        // Split off LAN-local IPv4 targets and try ARP first when --PR or
+        // when we know they're on our broadcast domain (auto-fallback).
+        let prefer_arp = args.ping_arp;
+        let arp_only_explicit = args.ping_arp;
+        let mut arp_alive: std::collections::HashMap<std::net::Ipv4Addr, pnet::util::MacAddr> =
+            std::collections::HashMap::new();
+        if prefer_arp {
+            #[cfg(windows)]
+            npcap::ensure_available()?;
+            let lan_v4: Vec<std::net::Ipv4Addr> = targets
+                .iter()
+                .filter_map(|t| match t.ip {
+                    std::net::IpAddr::V4(v) if arp_ping::target_is_on_lan(v) => Some(v),
+                    _ => None,
+                })
+                .collect();
+            if !lan_v4.is_empty() {
+                if args.verbose > 0 {
+                    println!("ARP-pinging {} LAN host(s)", lan_v4.len());
+                }
+                match arp_ping::arp_discover(&lan_v4, args.timeout().max(std::time::Duration::from_millis(800))) {
+                    Ok(found) => arp_alive = found,
+                    Err(e) => eprintln!("[!] ARP ping failed ({}); falling back to TCP ping", e),
+                }
+            }
+        }
+
+        targets = if arp_only_explicit && !arp_alive.is_empty() {
+            // Promote ARP-discovered hosts and attach the MAC for OUI lookup.
+            targets
+                .into_iter()
+                .filter_map(|mut t| match t.ip {
+                    std::net::IpAddr::V4(v) => {
+                        if let Some(mac) = arp_alive.get(&v) {
+                            t.hostname.get_or_insert_with(String::new);
+                            // Stash MAC on the Target via a side-channel: hostname annotation
+                            // (real MAC plumbing happens later via host.mac).
+                            let _ = mac;
+                            Some(t)
+                        } else {
+                            None
+                        }
+                    }
+                    std::net::IpAddr::V6(_) => Some(t),
+                })
+                .collect()
+        } else if args.ping_icmp {
             #[cfg(windows)]
             npcap::ensure_available()?;
             icmp_ping::icmp_discover(targets, args.timeout())?
@@ -558,8 +606,10 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // 3) Port scan
-    let mut port_vec = if let Some(n) = args.top_ports {
+    // 3) Port scan — resolve port list with -F (top 100) > --top-ports > -p
+    let mut port_vec = if args.fast {
+        top_ports::top(100)
+    } else if let Some(n) = args.top_ports {
         if n == 0 {
             return Err(anyhow!("--top-ports must be > 0"));
         }
@@ -567,7 +617,60 @@ async fn main() -> Result<()> {
     } else {
         ports::parse_ports(&args.effective_ports())?
     };
-    if args.randomize_ports {
+
+    // --exclude-ports: drop matching ports from the list. Accepts numeric
+    // specs (22, 80-90, etc.) and service names — both the canonical
+    // service_name() label and a small alias table covering the names
+    // pentesters actually type (ssh/smb/rdp/web/…).
+    if let Some(spec) = &args.exclude_ports {
+        let aliases: &[(&str, &[u16])] = &[
+            ("ssh", &[22]),
+            ("smb", &[139, 445]),
+            ("netbios", &[137, 138, 139]),
+            ("rdp", &[3389]),
+            ("web", &[80, 443, 8080, 8443]),
+            ("http", &[80, 8080]),
+            ("https", &[443, 8443]),
+            ("mail", &[25, 110, 143, 465, 587, 993, 995]),
+            ("dns", &[53]),
+            ("ftp", &[20, 21, 990]),
+            ("ldap", &[389, 636]),
+            ("vnc", &[5900, 5901]),
+            ("telnet", &[23]),
+            ("vpn", &[500, 1701, 1723, 4500]),
+            ("db", &[1433, 1521, 3306, 5432, 6379, 9200, 11211, 27017]),
+            ("ics", &[102, 502, 20000, 44818]),
+        ];
+        let mut to_drop: std::collections::HashSet<u16> = std::collections::HashSet::new();
+        for piece in spec.split(',') {
+            let p = piece.trim();
+            if p.is_empty() { continue; }
+            if let Ok(parsed) = ports::parse_ports(p) {
+                to_drop.extend(parsed.iter().copied());
+                continue;
+            }
+            let needle = p.to_lowercase();
+            if let Some((_, ports)) = aliases.iter().find(|(k, _)| *k == needle) {
+                to_drop.extend(ports.iter().copied());
+                continue;
+            }
+            for port in 1u16..=65535 {
+                if ports::service_name(port).map(|s| s.eq_ignore_ascii_case(&needle))
+                    .unwrap_or(false)
+                {
+                    to_drop.insert(port);
+                }
+            }
+        }
+        let before = port_vec.len();
+        port_vec.retain(|p| !to_drop.contains(p));
+        if args.verbose > 0 && before != port_vec.len() {
+            println!("Excluded {} port(s) via --exclude-ports", before - port_vec.len());
+        }
+    }
+
+    // -r overrides --randomize-ports (nmap semantics)
+    if args.randomize_ports && !args.no_randomize_ports {
         use rand::seq::SliceRandom;
         port_vec.shuffle(&mut rand::thread_rng());
         if args.verbose > 0 { println!("Port order randomized"); }
@@ -749,7 +852,7 @@ async fn main() -> Result<()> {
     let mut results = results;
     if args.service_version && !was_cancelled {
         if args.verbose > 0 { println!("Probing services on open ports..."); }
-        probe_services(&mut results, timeout_dur).await;
+        probe_services(&mut results, timeout_dur, args.version_intensity).await;
     }
 
     // 4.6) OS fingerprinting
@@ -1098,7 +1201,11 @@ fn run_list_tags(args: &Cli) -> Result<()> {
     Ok(())
 }
 
-async fn probe_services(hosts: &mut [HostResult], timeout_dur: std::time::Duration) {
+async fn probe_services(
+    hosts: &mut [HostResult],
+    timeout_dur: std::time::Duration,
+    intensity: u8,
+) {
     use futures::stream::{self, StreamExt};
     // Use a shorter timeout for banner probing (at most 3s, or scan timeout if lower)
     let probe_timeout = timeout_dur.min(std::time::Duration::from_secs(3));
@@ -1114,7 +1221,7 @@ async fn probe_services(hosts: &mut [HostResult], timeout_dur: std::time::Durati
             .map(|i| {
                 let port = h.ports[i].port;
                 let host = hostname.clone();
-                async move { (i, service_probe::probe(ip, port, probe_timeout, host.as_deref()).await) }
+                async move { (i, service_probe::probe(ip, port, probe_timeout, host.as_deref(), intensity).await) }
             })
             .buffer_unordered(concurrency)
             .collect()

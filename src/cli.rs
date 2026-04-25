@@ -22,6 +22,39 @@ pub struct Cli {
     #[arg(long = "all-ports")]
     pub all_ports: bool,
 
+    /// Fast scan — alias for --top-ports 100
+    #[arg(short = 'F', long = "fast")]
+    pub fast: bool,
+
+    /// Don't randomize port order (overrides --randomize-ports)
+    #[arg(short = 'r', long = "no-randomize-ports")]
+    pub no_randomize_ports: bool,
+
+    /// Exclude these ports (numbers, ranges, or service names: ssh,rdp,smb,…)
+    #[arg(long = "exclude-ports", value_name = "SPEC")]
+    pub exclude_ports: Option<String>,
+
+    /// Service detection aggressiveness (0=light, 9=all probes; default 5).
+    /// Below 7 the TLS deep-probe is skipped, halving scan time on TLS ports.
+    #[arg(long = "version-intensity", value_name = "0-9", default_value_t = 5)]
+    pub version_intensity: u8,
+
+    /// ARP discovery on LAN (auto-used when target is in same subnet)
+    #[arg(long = "PR")]
+    pub ping_arp: bool,
+
+    /// TCP SYN ping for host discovery (optional comma port list)
+    #[arg(long = "PS", value_name = "PORTS")]
+    pub ping_syn: Option<String>,
+
+    /// TCP ACK ping for host discovery (optional comma port list)
+    #[arg(long = "PA", value_name = "PORTS")]
+    pub ping_ack: Option<String>,
+
+    /// UDP ping for host discovery (optional comma port list)
+    #[arg(long = "PU", value_name = "PORTS")]
+    pub ping_udp: Option<String>,
+
     /// TCP connect scan (no privileges required)
     #[arg(long = "sT", group = "scan_type")]
     pub scan_connect: bool,

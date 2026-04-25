@@ -27,6 +27,9 @@ pub fn print_guide() {
     section("PORTE");
     line("-p, --ports SPEC      Porte da scansionare (default: 1-1000)");
     line("--all-ports           Alias per -p-");
+    line("-F, --fast            Top 100 porte (alias --top-ports 100)");
+    line("-r                    Non randomizzare l'ordine porte (override)");
+    line("--exclude-ports SPEC  Escludi porte (numeri/range/alias: ssh,smb,rdp,web,db…)");
     example("rustymap -p 22 10.0.0.5");
     example("rustymap -p 22,80,443 10.0.0.5");
     example("rustymap -p 1-1000 10.0.0.5");
@@ -80,6 +83,8 @@ pub fn print_guide() {
     line("-Pn                   Salta discovery (tratta tutti i host come up)");
     line("--sn                  Solo ping, niente port scan");
     line("--PE                  ICMP echo ping (raw, admin)");
+    line("--PR                  ARP discovery (LAN only; auto-detect same /24)");
+    line("--PS, --PA, --PU      Variant ping types (alias)");
     example("rustymap --sn 10.0.0.0/24           # ping sweep");
     example("rustymap -Pn --sT 10.0.0.5          # scan forzato");
     example("rustymap --PE --sn 10.0.0.0/24      # ICMP ping sweep");
@@ -96,6 +101,7 @@ pub fn print_guide() {
 
     section("SERVICE & OS DETECTION");
     line("--sV                  Probe servizi/versione (banner + probe attivi)");
+    line("--version-intensity N Aggressività 0-9 (default 5; ≥7 attiva probe TLS)");
     line("                      (su porte TLS aggancia anche cert + protocollo;");
     line("                       con HTTP aperto estrae vendor/model/firmware");
     line("                       per Hikvision, Dahua, Axis, Reolink, Foscam,");

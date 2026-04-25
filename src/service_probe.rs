@@ -184,6 +184,7 @@ pub async fn probe(
     port: u16,
     timeout_dur: Duration,
     sni: Option<&str>,
+    intensity: u8,
 ) -> Option<ServiceInfo> {
     let addr = SocketAddr::new(ip, port);
     let mut best: Option<ServiceInfo> = None;
@@ -195,7 +196,10 @@ pub async fn probe(
             }
         }
     }
-    if crate::tls_probe::likely_tls(port) {
+    // The TLS handshake adds a full RTT per port; gate it behind
+    // intensity ≥ 7 (--version-intensity, default 5). Users who want it
+    // every time can pass --version-intensity 7+ or --version-all.
+    if intensity >= 7 && crate::tls_probe::likely_tls(port) {
         if let Some(tls) = crate::tls_probe::probe(ip, port, timeout_dur, sni).await {
             let mut info = best.unwrap_or_default();
             info.tls = Some(tls);
