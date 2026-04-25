@@ -4,6 +4,19 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.22.0] - 2026-04-24
+- `--ble-scan SECONDS`: discover nearby Bluetooth LE devices and report
+  address / RSSI / inferred class (phone, wearable, HID, …) / advertised
+  services. Cross-platform: bluez D-Bus on Linux, WinRT on Windows,
+  Core Bluetooth on macOS. Catches phones, smart watches, fitness
+  trackers, and BLE IoT gadgets that never appear on the IP layer.
+- Mobile device detection on the IP layer: 24 mobile-vendor OUIs
+  (Xiaomi, Huawei, Motorola, Google Pixel, OnePlus, Oppo, Vivo, Nokia,
+  NVIDIA Shield) classify hosts as `MobileDevice` when no typical
+  desktop/server ports are open.
+- ADB on port 5555 is now flagged as Android debug port (high
+  confidence MobileDevice class).
+
 ## [0.21.0] - 2026-04-24
 - Linux --sS diagnostics: when the raw TCP scanner runs a full scan and
   the receiver loop saw zero packets, print a platform-specific hint

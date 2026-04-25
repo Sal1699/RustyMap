@@ -392,6 +392,10 @@ pub struct Cli {
     #[arg(long = "trace-raw")]
     pub trace_raw: bool,
 
+    /// Bluetooth LE scan: listen for BLE advertisements for N seconds and exit
+    #[arg(long = "ble-scan", value_name = "SECONDS")]
+    pub ble_scan: Option<u64>,
+
     /// Sniff DNS queries/responses on local network (requires admin + Npcap)
     #[arg(long = "dns-sniff")]
     pub dns_sniff: bool,

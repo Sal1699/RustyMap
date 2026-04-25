@@ -1,4 +1,5 @@
 mod audit;
+mod ble;
 mod cli;
 mod cve;
 mod db;
@@ -133,6 +134,10 @@ async fn main() -> Result<()> {
     if args.examples {
         examples::print();
         return Ok(());
+    }
+    if let Some(secs) = args.ble_scan {
+        let dur = secs.clamp(1, 300);
+        return ble::scan(dur).await;
     }
     if let Some(shell) = args.completions {
         use clap::CommandFactory;

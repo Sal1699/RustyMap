@@ -193,6 +193,7 @@ pub fn print_guide() {
     line("--examples            Stampa 16 ricette pronte per casi comuni");
     line("--completions SHELL   Genera completion script (bash|zsh|fish|powershell)");
     line("--trace-raw           Logga ogni tx/rx pacchetto raw (debug --sS)");
+    line("--ble-scan SECONDI    Scan Bluetooth LE per N secondi (phone/wearable/IoT)");
     line("--confirm-large       Permette target list > 4096 host");
     example("rustymap --sT --sV --cve-db cves.json 10.0.0.5");
     example("rustymap --sT --script rules/ 10.0.0.5");

@@ -141,6 +141,45 @@ const OUI_TABLE: &[([u8; 3], &str)] = &[
     ([0xE4, 0x5F, 0x01], "Raspberry Pi"),
 ];
 
+/// Mobile-focused vendor OUIs, kept separate from the main table because
+/// their vendors also ship non-mobile hardware. The classifier uses this
+/// list to promote a host to `MobileDevice` class when the OUI matches
+/// AND no typical desktop/server ports are open.
+const MOBILE_OUI_TABLE: &[([u8; 3], &str)] = &[
+    ([0x0C, 0x1D, 0xAF], "Xiaomi"),
+    ([0x10, 0x2A, 0xB3], "Xiaomi"),
+    ([0x14, 0xF6, 0x5A], "Xiaomi"),
+    ([0x28, 0x6C, 0x07], "Xiaomi"),
+    ([0x64, 0x09, 0x80], "Xiaomi"),
+    ([0x78, 0x02, 0xF8], "Xiaomi"),
+    ([0x94, 0x65, 0x2D], "Xiaomi"),
+    ([0x00, 0xE0, 0xFC], "Huawei"),
+    ([0x00, 0x9A, 0xCD], "Huawei"),
+    ([0x28, 0x31, 0x52], "Huawei"),
+    ([0x54, 0x89, 0x98], "Huawei"),
+    ([0x64, 0x3E, 0x8C], "Huawei"),
+    ([0x70, 0x72, 0x3C], "Huawei"),
+    ([0x00, 0x04, 0x4B], "NVIDIA"),
+    ([0x00, 0x1F, 0x3C], "Motorola"),
+    ([0x40, 0x78, 0x6A], "Motorola"),
+    ([0x3C, 0x5A, 0xB4], "Google"),
+    ([0xF8, 0xFF, 0xC2], "Google"),
+    ([0x60, 0x38, 0x0E], "OnePlus"),
+    ([0x94, 0x65, 0x9C], "OnePlus"),
+    ([0x94, 0xE9, 0x79], "Oppo"),
+    ([0xD4, 0x97, 0x0B], "Vivo"),
+    ([0x00, 0x23, 0x15], "Nokia"),
+    ([0x24, 0x76, 0x7D], "Nokia"),
+];
+
+pub fn is_mobile_oui(mac: &[u8; 6]) -> Option<&'static str> {
+    let prefix = [mac[0], mac[1], mac[2]];
+    MOBILE_OUI_TABLE
+        .iter()
+        .find(|(p, _)| *p == prefix)
+        .map(|(_, v)| *v)
+}
+
 pub fn vendor_from_mac(mac: &[u8; 6]) -> Option<&'static str> {
     let prefix = [mac[0], mac[1], mac[2]];
     OUI_TABLE
@@ -173,10 +212,12 @@ fn open_ports(host: &HostResult) -> Vec<u16> {
 }
 
 pub fn classify(host: &HostResult, mac: Option<&[u8; 6]>) -> DeviceGuess {
+    let main_oui = mac.and_then(vendor_from_mac);
+    let mobile_oui = mac.and_then(is_mobile_oui);
     let mut g = DeviceGuess {
         class: DeviceClass::Unknown,
         confidence: 0,
-        vendor: mac.and_then(vendor_from_mac).map(|s| s.to_string()),
+        vendor: main_oui.or(mobile_oui).map(|s| s.to_string()),
         model: None,
         firmware: None,
         hints: Vec::new(),
@@ -190,6 +231,27 @@ pub fn classify(host: &HostResult, mac: Option<&[u8; 6]>) -> DeviceGuess {
     let has = |p: u16| ports.contains(&p);
     let banner = banners(host);
     let contains = |needle: &str| banner.contains(needle);
+
+    // ── Mobile devices (phones / tablets) ──
+    // OUI is from a mobile-only vendor AND no typical endpoint ports are
+    // open (no SSH/SMB/RDP/HTTP-admin). Phones occasionally expose ADB
+    // (5555) so flag that explicitly too.
+    if let Some(brand) = mobile_oui {
+        let has_endpoint_ports =
+            has(22) || has(135) || has(139) || has(445) || has(3389) || has(8080);
+        if !has_endpoint_ports {
+            g.bump(DeviceClass::MobileDevice, 70, "mobile-only vendor OUI + no desktop ports");
+            g.vendor.get_or_insert_with(|| brand.to_string());
+        }
+        if has(5555) {
+            g.bump(DeviceClass::MobileDevice, 90, "ADB exposed on 5555 (Android debug)");
+            g.vendor.get_or_insert_with(|| brand.to_string());
+        }
+    }
+    // Even without a known mobile OUI, ADB on 5555 is a strong mobile signal
+    if has(5555) && g.class == DeviceClass::Unknown {
+        g.bump(DeviceClass::MobileDevice, 80, "ADB exposed on 5555 (Android debug)");
+    }
 
     // ── Virtualization / Hypervisors (MAC-based, strong signal) ──
     if matches!(

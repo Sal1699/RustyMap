@@ -1,6 +1,6 @@
 [package]
 name = "rustymap"
-version = "0.21.0"
+version = "0.22.0"
 edition = "2021"
 description = "A Rust port of nmap for network exploration and security auditing"
 license = "MIT"
@@ -47,6 +47,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "logg
 x509-parser = "0.16"
 ratatui = "0.28"
 crossterm = "0.28"
+btleplug = "0.11"
+uuid = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
