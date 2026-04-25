@@ -4,6 +4,32 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.28.0] - 2026-04-25
+Final nmap-parity batch — eight features:
+- `--version-light` / `--version-all`: aliases for `--version-intensity 2`
+  and `9` respectively.
+- `--PP`: ICMP timestamp ping (type 13). Used as a fallback when `--PE`
+  echo is filtered. Combine: `--PE --PP` tries echo then timestamp.
+- `-e` / `--iface-scan`: bind scan to a specific NIC (used by `--PR` ARP
+  and `--spoof-mac`).
+- `--script-args-file FILE`: load `key=val` pairs from a file (one per
+  line, `#` comments). Pairs append to anything from `--script-arg`.
+- `--osscan-limit`: skip `-O` on hosts with no Open/Closed/Unfiltered
+  ports — saves time on heavily-firewalled silent hosts.
+- `--max-scan-delay MS`: clamps `--scan-delay` to a ceiling.
+- `--proxies socks5://h:p,http://h:p,…`: tunnel every TCP-connect probe
+  through a chain. New `proxy` module implements SOCKS5 (with SOCKS5h
+  semantics — DNS resolution at the proxy, no leak from the scanner)
+  and HTTP CONNECT. Hops walked in order; each tunnels to the next.
+- `--spoof-mac MAC|VENDOR`: change the NIC's MAC before scanning. New
+  `spoof_mac` module accepts a literal MAC, `random` (locally-administered),
+  or a vendor alias (`vmware`/`vbox`/`qemu`/`apple`/`samsung`/`cisco`/
+  `huawei`/`hp`/`intel`/`raspberry`) which generates a random MAC inside
+  that vendor's OUI. Linux uses `ip link`, macOS uses `ifconfig`,
+  Windows returns a clear error pointing at the registry workaround.
+
+8 new unit tests (4 spoof_mac + 3 proxy + 1 retry path) → 42/42 green.
+
 ## [0.27.1] - 2026-04-25
 - Clippy cleanup: drop redundant `unwrap()` after `is_some` guard in
   iflist; replace `None::<Regex>.unwrap_or_else(|| ...)` with the

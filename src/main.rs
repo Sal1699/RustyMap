@@ -24,6 +24,7 @@ mod output;
 mod ports;
 mod profile;
 mod privilege;
+mod proxy;
 mod rate;
 mod raw_scan;
 mod report;
@@ -31,6 +32,7 @@ mod scanner;
 mod scripting;
 mod service_probe;
 mod shutdown;
+mod spoof_mac;
 mod syn_emu;
 mod target;
 mod tls_probe;
@@ -105,6 +107,47 @@ async fn main() -> Result<()> {
     if args.max_rate > 0 && args.scan_delay_ms == 0 {
         args.scan_delay_ms = (1000 / args.max_rate).max(1) as u64;
     }
+    // --max-scan-delay: clamp any computed scan_delay to this ceiling.
+    if args.max_scan_delay_ms > 0 && args.scan_delay_ms > args.max_scan_delay_ms {
+        args.scan_delay_ms = args.max_scan_delay_ms;
+    }
+
+    // --spoof-mac: apply BEFORE any scan so subsequent raw probes use it.
+    // Needs --iface-scan or default interface.
+    if let Some(spec) = args.spoof_mac.clone() {
+        let mac = spoof_mac::resolve(&spec)?;
+        let iface = args.iface_scan.clone().or_else(|| {
+            // Pick first non-loopback up interface with an IPv4
+            pnet::datalink::interfaces()
+                .into_iter()
+                .find(|i| i.is_up() && !i.is_loopback() && !i.ips.is_empty())
+                .map(|i| i.name)
+        }).ok_or_else(|| anyhow!("--spoof-mac needs -e/--iface-scan or a default interface"))?;
+        match spoof_mac::apply(&iface, &mac) {
+            Ok(applied) => eprintln!("[spoof-mac] {} now uses {}", iface, applied),
+            Err(e) => return Err(e),
+        }
+    }
+
+    // --version-light / --version-all → fold into version_intensity.
+    if args.version_light {
+        args.version_intensity = 2;
+    } else if args.version_all {
+        args.version_intensity = 9;
+    }
+
+    // --script-args-file: load extra `key=val` pairs and prepend to script_args.
+    if let Some(path) = &args.script_args_file {
+        let body = std::fs::read_to_string(path)
+            .map_err(|e| anyhow!("read {}: {}", path, e))?;
+        for line in body.lines() {
+            let l = line.trim();
+            if l.is_empty() || l.starts_with('#') {
+                continue;
+            }
+            args.script_args.push(l.to_string());
+        }
+    }
 
     // -oA: expand into individual output paths if not already set.
     if let Some(prefix) = args.output_all.clone() {
@@ -140,6 +183,15 @@ async fn main() -> Result<()> {
     file_out::set_append(args.append_output);
     // --max-retries: connect-scan retries filtered ports up to N times.
     scanner::set_max_retries(args.max_retries);
+    // --proxies: parse and install the chain. Errors out early so users
+    // don't waste a long scan over a misconfigured chain.
+    if let Some(spec) = &args.proxies {
+        let chain = proxy::parse_chain(spec)?;
+        if args.verbose > 0 {
+            eprintln!("[proxies] {} hop(s) configured for connect-scan", chain.len());
+        }
+        scanner::set_proxy_chain(chain);
+    }
 
     if args.guide {
         guide::print_guide();
@@ -558,10 +610,10 @@ async fn main() -> Result<()> {
                     std::net::IpAddr::V6(_) => Some(t),
                 })
                 .collect()
-        } else if args.ping_icmp {
+        } else if args.ping_icmp || args.ping_timestamp {
             #[cfg(windows)]
             npcap::ensure_available()?;
-            icmp_ping::icmp_discover(targets, args.timeout())?
+            icmp_ping::icmp_discover_kind(targets, args.timeout(), args.ping_timestamp)?
         } else {
             discovery::discover_hosts(targets, args.timeout(), args.parallel()).await
         };
@@ -890,9 +942,18 @@ async fn main() -> Result<()> {
     if args.os_fingerprint && !was_cancelled {
         if args.verbose > 0 { println!("Fingerprinting OS..."); }
         for h in results.iter_mut() {
-            if h.up {
-                h.os = Some(os_fp::fingerprint(h, timeout_dur));
+            if !h.up { continue; }
+            // --osscan-limit: skip hosts whose ports are all Filtered (no
+            // TTL/banner signal to fingerprint from). Saves time on
+            // firewalled targets where -O would just guess.
+            if args.osscan_limit {
+                let has_signal = h.ports.iter().any(|p| matches!(
+                    p.state,
+                    PortState::Open | PortState::Closed | PortState::Unfiltered
+                ));
+                if !has_signal { continue; }
             }
+            h.os = Some(os_fp::fingerprint(h, timeout_dur));
         }
     }
 

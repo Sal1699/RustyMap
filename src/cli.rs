@@ -155,6 +155,42 @@ pub struct Cli {
     #[arg(long = "ip-options", value_name = "SPEC")]
     pub ip_options: Option<String>,
 
+    /// Light service-version probing (alias for --version-intensity 2)
+    #[arg(long = "version-light", conflicts_with = "version_all")]
+    pub version_light: bool,
+
+    /// All service-version probes including TLS handshake (alias for --version-intensity 9)
+    #[arg(long = "version-all", conflicts_with = "version_light")]
+    pub version_all: bool,
+
+    /// ICMP timestamp ping (type 13) — useful when ICMP echo is filtered
+    #[arg(long = "PP")]
+    pub ping_timestamp: bool,
+
+    /// Bind scan to a specific network interface
+    #[arg(short = 'e', long = "iface-scan", value_name = "IFACE")]
+    pub iface_scan: Option<String>,
+
+    /// Read --script-arg pairs from FILE (one key=val per line, # comments ok)
+    #[arg(long = "script-args-file", value_name = "FILE")]
+    pub script_args_file: Option<String>,
+
+    /// Only run -O on hosts with at least one open or closed port (skip silent hosts)
+    #[arg(long = "osscan-limit")]
+    pub osscan_limit: bool,
+
+    /// Cap adaptive scan delay growth at MS milliseconds
+    #[arg(long = "max-scan-delay", default_value_t = 0u64)]
+    pub max_scan_delay_ms: u64,
+
+    /// Tunnel TCP-connect probes through proxies (socks5://host:port,http://host:port,…)
+    #[arg(long = "proxies", value_name = "URLS")]
+    pub proxies: Option<String>,
+
+    /// Spoof MAC address. Accepts XX:XX:XX:XX:XX:XX or vendor name (vmware|apple|samsung|cisco|random)
+    #[arg(long = "spoof-mac", value_name = "MAC|VENDOR")]
+    pub spoof_mac: Option<String>,
+
     /// Write normal output to file
     #[arg(long = "oN")]
     pub output_normal: Option<String>,

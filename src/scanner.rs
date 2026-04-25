@@ -7,13 +7,39 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
-use tokio::time::timeout;
 
 /// Global retry budget for the connect-scan path. Set by main from --max-retries.
 static MAX_RETRIES: AtomicU8 = AtomicU8::new(0);
 
 pub fn set_max_retries(n: u8) {
     MAX_RETRIES.store(n, Ordering::Relaxed);
+}
+
+/// Optional proxy chain (--proxies). When set, every TCP connect probe
+/// walks this chain before reaching the final target.
+static PROXY_CHAIN: once_cell::sync::OnceCell<Vec<crate::proxy::ProxyKind>> =
+    once_cell::sync::OnceCell::new();
+
+pub fn set_proxy_chain(chain: Vec<crate::proxy::ProxyKind>) {
+    let _ = PROXY_CHAIN.set(chain);
+}
+
+async fn dial(addr: SocketAddr, dur: Duration) -> Result<TcpStream, std::io::Error> {
+    if let Some(chain) = PROXY_CHAIN.get() {
+        let target = format!("{}:{}", addr.ip(), addr.port());
+        crate::proxy::connect_via_chain(chain, &target, dur)
+            .await
+            .map_err(|e| std::io::Error::other(e.to_string()))
+    } else {
+        match tokio::time::timeout(dur, TcpStream::connect(addr)).await {
+            Ok(Ok(s)) => Ok(s),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "connect timeout",
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,15 +127,15 @@ pub async fn tcp_connect_scan(
                 }
                 let addr = SocketAddr::new(ip, port);
                 let t0 = Instant::now();
-                let res = timeout(timeout_dur, TcpStream::connect(addr)).await;
+                let res = dial(addr, timeout_dur).await;
                 let rtt = t0.elapsed();
                 let (state, timed_out) = match res {
-                    Ok(Ok(_s)) => (PortState::Open, false),
-                    Ok(Err(e)) => (match e.kind() {
-                        std::io::ErrorKind::ConnectionRefused => PortState::Closed,
-                        _ => PortState::Filtered,
-                    }, false),
-                    Err(_) => (PortState::Filtered, true),
+                    Ok(_s) => (PortState::Open, false),
+                    Err(e) => match e.kind() {
+                        std::io::ErrorKind::ConnectionRefused => (PortState::Closed, false),
+                        std::io::ErrorKind::TimedOut => (PortState::Filtered, true),
+                        _ => (PortState::Filtered, false),
+                    },
                 };
                 lim_task.record(timed_out, rtt);
                 PortResult { port, state, rtt, service: None }
@@ -137,16 +163,13 @@ pub async fn tcp_connect_scan(
                 let mut attempt = 0u8;
                 let mut state;
                 loop {
-                    let res = timeout(timeout_dur, TcpStream::connect(addr)).await;
+                    let res = dial(addr, timeout_dur).await;
                     state = match res {
-                        Ok(Ok(_stream)) => PortState::Open,
-                        Ok(Err(e)) => {
-                            match e.kind() {
-                                std::io::ErrorKind::ConnectionRefused => PortState::Closed,
-                                _ => PortState::Filtered,
-                            }
-                        }
-                        Err(_) => PortState::Filtered,
+                        Ok(_stream) => PortState::Open,
+                        Err(e) => match e.kind() {
+                            std::io::ErrorKind::ConnectionRefused => PortState::Closed,
+                            _ => PortState::Filtered,
+                        },
                     };
                     if state != PortState::Filtered || attempt >= max_retries {
                         break;

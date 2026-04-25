@@ -86,6 +86,7 @@ pub fn print_guide() {
     line("--PE                  ICMP echo ping (raw, admin)");
     line("--PR                  ARP discovery (LAN only; auto-detect same /24)");
     line("--PS, --PA, --PU      Variant ping types (alias)");
+    line("--PP                  ICMP timestamp ping (type 13, fallback per --PE)");
     example("rustymap --sn 10.0.0.0/24           # ping sweep");
     example("rustymap -Pn --sT 10.0.0.5          # scan forzato");
     example("rustymap --PE --sn 10.0.0.0/24      # ICMP ping sweep");
@@ -103,6 +104,9 @@ pub fn print_guide() {
     section("SERVICE & OS DETECTION");
     line("--sV                  Probe servizi/versione (banner + probe attivi)");
     line("--version-intensity N Aggressività 0-9 (default 5; ≥7 attiva probe TLS)");
+    line("--version-light       Alias di --version-intensity 2");
+    line("--version-all         Alias di --version-intensity 9");
+    line("--osscan-limit        -O solo su host con almeno una porta open/closed");
     line("                      (su porte TLS aggancia anche cert + protocollo;");
     line("                       con HTTP aperto estrae vendor/model/firmware");
     line("                       per Hikvision, Dahua, Axis, Reolink, Foscam,");
@@ -213,10 +217,15 @@ pub fn print_guide() {
     line("--trace-raw           Logga ogni tx/rx pacchetto raw (debug --sS)");
     line("-d, --debug           Debug log (-d, -dd, -ddd) con tag [net]/[probe]/…");
     line("--script-trace        Trace script Rhai come JSON Lines (pipe in jq)");
+    line("--script-args-file F  Carica --script-arg da file (key=val per riga)");
     line("--append-output       Appendi ai file output invece di sovrascrivere");
     line("--max-retries N       Riprova porte filtered fino a N volte (connect)");
     line("-S IP                 Spoof source IP per raw scans (warn se non routable)");
     line("--ip-options SPEC     IPv4 options: record-route|timestamp|lsrr IP,IP|ssrr|hex");
+    line("-e, --iface-scan IF   Bind scan a interfaccia (anche per --PR e --spoof-mac)");
+    line("--spoof-mac MAC|VEND  Spoofing MAC: indirizzo o vendor (vmware|apple|cisco|random)");
+    line("--proxies URLS        Tunnel TCP-connect via SOCKS5/HTTP chain (DNS via proxy)");
+    line("--max-scan-delay MS   Cap massimo per --scan-delay");
     line("--ble-scan SECONDI    Scan Bluetooth LE per N secondi (phone/wearable/IoT)");
     line("--iflist [TARGET]     Lista interfacce (con hint route-to-target)");
     line("--script-help         Catalogo script Rhai (built-in + utente)");
