@@ -22,6 +22,8 @@ pub struct VendorHint {
     pub firmware: Option<String>,
     pub title: Option<String>,
     pub server: Option<String>,
+    /// Web technologies detected via web_fp (CMS, framework, JS lib, CDN…)
+    pub web_techs: Vec<crate::web_fp::WebHit>,
 }
 
 impl VendorHint {
@@ -31,6 +33,7 @@ impl VendorHint {
             || self.firmware.is_some()
             || self.title.is_some()
             || self.server.is_some()
+            || !self.web_techs.is_empty()
     }
 }
 
@@ -289,7 +292,8 @@ pub async fn probe(ip: IpAddr, open_ports: &[u16], dur: Duration) -> Option<Vend
             continue;
         }
         if let Some(body) = fetch_once(ip, *p, dur).await {
-            let hint = parse_response(&body);
+            let mut hint = parse_response(&body);
+            hint.web_techs = crate::web_fp::detect(&body);
             if hint.is_useful() {
                 return Some(hint);
             }

@@ -112,7 +112,9 @@ pub fn print_guide() {
     line("                       per Hikvision, Dahua, Axis, Reolink, Foscam,");
     line("                       HP/Brother/Canon/Epson, MikroTik, Ubiquiti,");
     line("                       TP-Link, Netgear, ASUS, Synology, QNAP,");
-    line("                       Cisco, Fortinet, pfSense, OPNsense)");
+    line("                       Cisco, Fortinet, pfSense, OPNsense");
+    line("                       + web tech Wappalyzer-style: CMS, framework,");
+    line("                       JS lib, CDN, cloud, WAF — con versione)");
     line("-O, --os              Fingerprinting OS (TTL + porte/banner)");
     line("                      (device-class auto: router/camera/printer/NAS/IoT…)");
     example("rustymap --sT --sV 10.0.0.5");

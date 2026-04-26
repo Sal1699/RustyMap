@@ -4,6 +4,24 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.29.0] - 2026-04-26
+- Web technology fingerprinting (Wappalyzer-style). New `web_fp`
+  module re-examines the HTTP body+headers fetched by `vendor_probe`
+  against ~30 detection rules covering:
+  - **CMS**: WordPress, Drupal, Joomla, Magento, Shopify, Ghost
+  - **Frameworks**: Next.js, Express, Django, Laravel, Rails, Spring
+  - **JS libraries**: jQuery, React, Vue.js, Angular, Bootstrap (with
+    version when extractable)
+  - **CDN**: Cloudflare, Akamai, Fastly, AWS CloudFront
+  - **Cloud / hosting**: AWS, Azure, Google Cloud
+  - **Web servers**: Apache Tomcat, OpenResty, Caddy, Lighttpd
+  - **Analytics**: Google Analytics, Matomo
+  - **WAF**: ModSecurity, Sucuri
+  Surfaces as a single `tech: …` line in `device.hints` so the
+  console/HTML/JSON reports get a Wappalyzer-equivalent readout next
+  to the cert and vendor info.
+- 5 new web_fp tests → 47/47.
+
 ## [0.28.0] - 2026-04-25
 Final nmap-parity batch — eight features:
 - `--version-light` / `--version-all`: aliases for `--version-intensity 2`

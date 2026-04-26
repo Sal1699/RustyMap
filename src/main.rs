@@ -42,6 +42,7 @@ mod tui;
 mod udp_scan;
 mod updater;
 mod vendor_probe;
+mod web_fp;
 mod xml_out;
 mod vault;
 mod webui;
@@ -998,6 +999,11 @@ async fn main() -> Result<()> {
                 if let Some(f) = hint.firmware { dev.firmware.get_or_insert(f); }
                 if let Some(t) = hint.title { dev.hints.push(format!("title: {}", t)); }
                 if let Some(s) = hint.server { dev.hints.push(format!("Server: {}", s)); }
+                // Surface web tech as a single comma-joined hint line.
+                if !hint.web_techs.is_empty() {
+                    let techs: Vec<String> = hint.web_techs.iter().map(|h| h.label()).collect();
+                    dev.hints.push(format!("tech: {}", techs.join(" · ")));
+                }
             }
         }
     }
