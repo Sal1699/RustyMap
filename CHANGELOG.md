@@ -4,6 +4,28 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.33.0] - 2026-04-26
+- IPv6 OS detection: `ping_ttl()` now auto-selects `ping -6` (Linux/
+  Windows/macOS modern) and falls back to `ping6(1)` on older Linux.
+  TTL_RE regex extended to also capture `hlim=`, `hop_limit=`, `hops=`
+  formats emitted by the various ping(8) variants. The IPv4 family
+  heuristic (TTL 64=*nix, 128=Windows, 255=network gear) maps 1-to-1
+  to IPv6 hop-limit, so OS family guessing now works on both stacks.
+- OS banner DB grew from 60+ to 100+ rules. Curated additions cover
+  modern targets only — no Win 95/2000/XP, no Solaris ≤9, no IRIX:
+  - Modern immutable Linux: Talos, Flatcar, Bottlerocket, Photon OS,
+    NixOS
+  - Pentest/desktop: Kali, Mint, Manjaro, Pop!_OS, EndeavourOS
+  - Network/VPN appliances: VyOS, OpenVPN AS, WireGuard, Tailscale,
+    Headscale, Sophos UTM, Amazon eero, OpenBMC, Vyatta
+  - Container/k8s flavors: k3s, k0s, Rancher, OpenShift, Podman,
+    CRI-O, containerd
+  - Self-hosted services that define the host's role: Pi-hole,
+    Home Assistant OS, Tasmota, ESPHome, OctoPrint, openHAB,
+    Nextcloud, ownCloud, Vaultwarden, Bitwarden, Matrix Synapse,
+    Mastodon, Forgejo, MinIO, Varnish, HAProxy, Linkerd, Wazuh,
+    Graylog, Splunk
+
 ## [0.32.0] - 2026-04-26
 - `--nmap-os-db FILE`: load nmap's nmap-os-db at runtime. Parser
   extracts `Fingerprint` / `Class` / `CPE` blocks (the binary

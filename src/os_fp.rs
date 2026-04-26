@@ -14,23 +14,47 @@ pub struct OsGuess {
     pub hints: Vec<String>,
 }
 
-static TTL_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)ttl[=:]\s*(\d+)").unwrap());
+// Matches both IPv4 "ttl=64" and IPv6 "hlim=64" / "hop_limit=64" /
+// "hops=64" output across the various ping(8) variants (BusyBox, iputils,
+// macOS, Windows). Case-insensitive; integer in capture group 1.
+static TTL_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)(?:ttl|hlim|hop[ _-]?limit|hops?)[=:]\s*(\d+)").unwrap()
+});
 
-/// Ping the host and parse TTL from system ping output.
+/// Ping the host and parse the IPv4 TTL or IPv6 hop-limit from system
+/// ping output. Auto-selects -6 / ping6 on IPv6 targets.
 fn ping_ttl(ip: IpAddr, timeout: Duration) -> Option<u8> {
     let ip_s = ip.to_string();
     let timeout_ms = timeout.as_millis().max(200) as u64;
+    let is_v6 = ip.is_ipv6();
+
     let out = if cfg!(windows) {
-        Command::new("ping")
-            .args(["-n", "1", "-w", &timeout_ms.to_string(), &ip_s])
-            .output()
-            .ok()?
+        // Windows ping auto-detects family; -6 forces IPv6 for clarity.
+        let mut args: Vec<String> = vec!["-n".into(), "1".into(), "-w".into(), timeout_ms.to_string()];
+        if is_v6 { args.insert(0, "-6".into()); }
+        args.push(ip_s);
+        Command::new("ping").args(&args).output().ok()?
     } else {
-        let secs = timeout_ms.div_ceil(1000).max(1);
-        Command::new("ping")
-            .args(["-c", "1", "-W", &secs.to_string(), &ip_s])
-            .output()
-            .ok()?
+        let secs = timeout_ms.div_ceil(1000).max(1).to_string();
+        // Try `ping -6` first (modern iputils + macOS + busybox 1.30+);
+        // if the binary doesn't recognise -6, fall back to `ping6`.
+        if is_v6 {
+            let r = Command::new("ping")
+                .args(["-6", "-c", "1", "-W", &secs, &ip_s])
+                .output();
+            match r {
+                Ok(o) if o.status.success() => o,
+                _ => Command::new("ping6")
+                    .args(["-c", "1", "-W", &secs, &ip_s])
+                    .output()
+                    .ok()?,
+            }
+        } else {
+            Command::new("ping")
+                .args(["-c", "1", "-W", &secs, &ip_s])
+                .output()
+                .ok()?
+        }
     };
     let text = String::from_utf8_lossy(&out.stdout);
     TTL_RE.captures(&text).and_then(|c| c.get(1)).and_then(|m| m.as_str().parse::<u8>().ok())
@@ -261,6 +285,57 @@ fn refine_from_banners(host: &HostResult, guess: &mut OsGuess) {
         ("netapp", "NetApp ONTAP", 92),
         ("isilon", "Dell EMC Isilon", 92),
         ("powerstore", "Dell PowerStore", 92),
+        // ── Modern Linux distros / immutable ──
+        ("talos", "Talos Linux (k8s-only)", 92),
+        ("flatcar", "Flatcar Container Linux", 92),
+        ("bottlerocket", "AWS Bottlerocket", 92),
+        ("kali", "Kali Linux", 92),
+        ("linux mint", "Linux Mint", 90),
+        ("manjaro", "Manjaro Linux", 90),
+        ("pop!_os", "System76 Pop!_OS", 90),
+        ("endeavouros", "EndeavourOS", 88),
+        ("nixos", "NixOS", 92),
+        ("photon os", "VMware Photon OS", 90),
+        // ── Network OS / VPN appliances ──
+        ("vyos", "VyOS", 92),
+        ("openvpn access server", "OpenVPN Access Server", 92),
+        ("wireguard", "WireGuard endpoint", 80),
+        ("tailscale", "Tailscale node", 88),
+        ("headscale", "Headscale (Tailscale ctl)", 88),
+        ("sophos", "Sophos UTM", 92),
+        ("eero", "Amazon eero (mesh)", 90),
+        ("openbmc", "OpenBMC (BMC firmware)", 92),
+        // ── Container / k8s flavors ──
+        ("k3s", "k3s (lightweight Kubernetes)", 92),
+        ("k0s", "k0s (Kubernetes)", 92),
+        ("rancher", "Rancher (k8s mgmt)", 92),
+        ("openshift", "Red Hat OpenShift", 92),
+        ("podman", "Podman daemon", 88),
+        ("cri-o", "CRI-O container runtime", 88),
+        ("containerd", "containerd", 85),
+        // ── Self-hosted services (often the OS-defining role of the host) ──
+        ("pi-hole", "Pi-hole (DNS sinkhole)", 92),
+        ("home assistant", "Home Assistant OS", 92),
+        ("homeassistant", "Home Assistant OS", 92),
+        ("tasmota", "Tasmota (ESP firmware)", 92),
+        ("esphome", "ESPHome (ESP firmware)", 92),
+        ("octoprint", "OctoPrint (3D printer)", 92),
+        ("openhab", "openHAB (smart home hub)", 90),
+        ("nextcloud", "Nextcloud server", 92),
+        ("owncloud", "ownCloud server", 92),
+        ("vaultwarden", "Vaultwarden (Bitwarden-compat)", 92),
+        ("bitwarden", "Bitwarden server", 92),
+        ("synapse", "Matrix Synapse", 92),
+        ("mastodon", "Mastodon instance", 92),
+        ("forgejo", "Forgejo (Git host)", 92),
+        ("minio", "MinIO (S3-compat object store)", 92),
+        ("varnish", "Varnish HTTP cache", 88),
+        ("haproxy", "HAProxy", 88),
+        ("linkerd", "Linkerd service mesh", 90),
+        ("wazuh", "Wazuh (XDR/SIEM)", 92),
+        ("graylog", "Graylog (log mgmt)", 92),
+        ("splunk", "Splunk", 92),
+        ("vyatta", "Vyatta (legacy VyOS predecessor)", 88),
     ];
 
     for p in &host.ports {
