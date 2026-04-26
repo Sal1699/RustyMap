@@ -4,6 +4,32 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.35.0] - 2026-04-26
+- Built-in rhai script library grew from 21 to 36 (+15). New scripts
+  patterned after the most-cited public NSE checks plus modern stack
+  pitfalls:
+  - `http-cors-wildcard` — flags ACAO=* with credentials=true (the
+    classic CORS misconfig that turns "any origin can read" into
+    "any origin can read your authenticated session")
+  - `http-missing-security-headers` — counts missing HSTS/CSP/XFO/
+    X-Content-Type-Options
+  - `kibana-no-auth` — verify xpack.security
+  - `rabbitmq-management` — guest:guest default
+  - `kafka-no-auth` — SASL listener absent
+  - `portainer-exposed` — first-visit-claims-admin race
+  - `hashicorp-exposed` — Vault unsealed / Consul ACL bypass /
+    Nomad raw-exec
+  - `graphql-introspection` — schema leak default
+  - `prometheus-no-auth` — node_exporter / pushgateway / cAdvisor
+    leaks (process list, mounts, kernel)
+  - `nfs-exposed` — `showmount -e` enumeration + no_root_squash
+  - `rsync-exposed` — anonymous module enumeration
+  - `smtp-open-relay` — open-relay test hint with detected MTA
+  - `openldap-exposed` — anonymous bind test hint
+  - `modern-auth-exposed` — Authelia/Authentik/Keycloak/ZITADEL
+    operator pitfalls
+  - `backup-exposed` — restic-server --no-auth, MinIO default creds
+
 ## [0.34.0] - 2026-04-26
 - Service-probe SIGS grew from 50+ to 90+ rules. Added curated
   signatures for software actually deployed in 2025/26 networks
