@@ -168,12 +168,27 @@ pub fn print_help(user_path: Option<&str>) {
 /// Scripts baked into the binary at build time. Returns (name, source) pairs.
 pub fn builtin_scripts() -> Vec<(&'static str, &'static str)> {
     vec![
+        ("anonymous-ftp", include_str!("../scripts/anonymous-ftp.rhai")),
         ("cleartext-protocols", include_str!("../scripts/cleartext-protocols.rhai")),
         ("default-cred-likely", include_str!("../scripts/default-cred-likely.rhai")),
+        ("dns-zone-transfer-hint", include_str!("../scripts/dns-zone-transfer-hint.rhai")),
+        ("docker-api-exposed", include_str!("../scripts/docker-api-exposed.rhai")),
+        ("elasticsearch-open", include_str!("../scripts/elasticsearch-open.rhai")),
+        ("exposed-management", include_str!("../scripts/exposed-management.rhai")),
+        ("http-admin-paths", include_str!("../scripts/http-admin-paths.rhai")),
+        ("ipmi-exposed", include_str!("../scripts/ipmi-exposed.rhai")),
+        ("jenkins-anonymous", include_str!("../scripts/jenkins-anonymous.rhai")),
+        ("k8s-api-exposed", include_str!("../scripts/k8s-api-exposed.rhai")),
+        ("mongodb-no-auth", include_str!("../scripts/mongodb-no-auth.rhai")),
+        ("mqtt-anonymous", include_str!("../scripts/mqtt-anonymous.rhai")),
+        ("mssql-default", include_str!("../scripts/mssql-default.rhai")),
         ("old-openssh", include_str!("../scripts/old-openssh.rhai")),
+        ("redis-no-auth", include_str!("../scripts/redis-no-auth.rhai")),
         ("smb-exposed", include_str!("../scripts/smb-exposed.rhai")),
+        ("snmp-public", include_str!("../scripts/snmp-public.rhai")),
         ("tls-cert-issues", include_str!("../scripts/tls-cert-issues.rhai")),
         ("tls-deprecated", include_str!("../scripts/tls-deprecated.rhai")),
+        ("vnc-no-auth", include_str!("../scripts/vnc-no-auth.rhai")),
     ]
 }
 

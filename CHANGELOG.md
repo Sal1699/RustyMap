@@ -4,6 +4,29 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.31.0] - 2026-04-26
+- Built-in rhai script library grew from 6 to 21. The new scripts
+  cover common NSE patterns most pentesters reach for first:
+  - `anonymous-ftp` — FTP banner suggests anonymous login
+  - `dns-zone-transfer-hint` — DNS port reachable, suggest AXFR test
+  - `docker-api-exposed` — Docker daemon on 2375 (cleartext) / 2376
+  - `elasticsearch-open` — ES/Kibana reachable without auth
+  - `exposed-management` — flags 15 mgmt-plane ports (Vault, Consul,
+    Nomad, WinRM, JBoss, GlassFish, ActiveMQ, Cockpit, Grafana, …)
+  - `http-admin-paths` — HTTP banner exposes admin/login/manager
+  - `ipmi-exposed` — IPMI 623, BMC console KVM-over-IP
+  - `jenkins-anonymous` — Jenkins reachable, anyone-can-do-anything
+    risk
+  - `k8s-api-exposed` — k8s API/kubelet/etcd reachable
+  - `mongodb-no-auth` — MongoDB without --auth
+  - `mqtt-anonymous` — MQTT broker on 1883/8883/8083
+  - `mssql-default` — MSSQL on 1433/1434
+  - `redis-no-auth` — Redis without requirepass
+  - `snmp-public` — SNMP exposed
+  - `vnc-no-auth` — VNC RFB protocol weak by default
+- All 15 new scripts run alongside the existing 6 — no flag needed.
+  Disable with `--no-builtin-scripts`.
+
 ## [0.30.0] - 2026-04-26
 - Built-in OS-fingerprint DB grew from 6 banner rules to 60+:
   Linux distros (Ubuntu/Debian/RHEL/Amazon/Alpine/Arch/Fedora/SUSE/
