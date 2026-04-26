@@ -4,6 +4,30 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.34.0] - 2026-04-26
+- Service-probe SIGS grew from 50+ to 90+ rules. Added curated
+  signatures for software actually deployed in 2025/26 networks
+  (patterns cross-referenced against public nmap-service-probes
+  PRs, HackTricks service-detection notes, and Wappalyzer
+  fingerprints):
+  - **NewSQL/modern DBs**: CockroachDB, TiDB, YugabyteDB, ClickHouse,
+    ScyllaDB, Neo4j, InfluxDB
+  - **Streaming/MQ**: Apache Kafka, Pulsar, RocketMQ
+  - **Observability**: Grafana Loki, Tempo, Mimir, VictoriaMetrics,
+    Thanos, OpenTelemetry Collector
+  - **Identity/auth**: Authelia, Authentik, Keycloak, ZITADEL
+  - **HashiCorp stack**: Vault, Consul, Nomad
+  - **Modern proxies/runtimes**: Cloudflare Pingora, Bun, Deno
+  - **Self-hosted dashboards**: Metabase, Superset, Airflow,
+    Argo CD, Portainer, Pi-hole, Home Assistant, Nextcloud,
+    Matrix Synapse, Mastodon
+  - **Networking/mesh**: Tailscale DERP relay, Headscale
+  - **Backup/storage**: restic-server
+- Patterns improved over upstream nmap variants where Rust regex
+  let us simplify (e.g. ClickHouse via X-ClickHouse-Server-Display-Name
+  header is a single anchor; nmap chains 3 fallback regexes for the
+  same).
+
 ## [0.33.0] - 2026-04-26
 - IPv6 OS detection: `ping_ttl()` now auto-selects `ping -6` (Linux/
   Windows/macOS modern) and falls back to `ping6(1)` on older Linux.

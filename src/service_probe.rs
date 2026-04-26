@@ -328,6 +328,181 @@ static SIGS: Lazy<Vec<Signature>> = Lazy::new(|| {
             regex: Regex::new(r"(?i)Lua-CGI|GoAhead|uhttpd|micro_httpd").unwrap(),
             product: Some("embedded HTTP daemon"), product_group: None, version_group: None, extra_group: None,
         },
+        // ── NewSQL / modern DBs ──
+        Signature {
+            regex: Regex::new(r"(?i)CockroachDB[\s/-]+v?([\d.]+)").unwrap(),
+            product: Some("CockroachDB"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            // TiDB rides on the MySQL wire protocol; bytes 5..N of the
+            // server-greeting include the literal version, e.g. "5.7.25-TiDB-v6.5.0"
+            regex: Regex::new(r"(?i)([\d.]+-TiDB-v?[\d.]+)").unwrap(),
+            product: Some("TiDB"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)YugabyteDB[\s/-]+v?([\d.]+)").unwrap(),
+            product: Some("YugabyteDB"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*ClickHouse").unwrap(),
+            product: Some("ClickHouse"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)X-ClickHouse-Server-Display-Name").unwrap(),
+            product: Some("ClickHouse"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Scylla version\s+([\d.]+)").unwrap(),
+            product: Some("ScyllaDB"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r#"(?i)"neo4j_version"\s*:\s*"([\d.]+)""#).unwrap(),
+            product: Some("Neo4j"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)X-Influxdb-Version:\s*v?([\d.]+)").unwrap(),
+            product: Some("InfluxDB"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        // ── Streaming / message brokers ──
+        Signature {
+            regex: Regex::new(r"(?i)Kafka(?:-Broker)?[\s/-]+v?([\d.]+)").unwrap(),
+            product: Some("Apache Kafka"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Pulsar[\s/-]+v?([\d.]+)").unwrap(),
+            product: Some("Apache Pulsar"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)RocketMQ").unwrap(),
+            product: Some("Apache RocketMQ"), product_group: None, version_group: None, extra_group: None,
+        },
+        // ── Observability stack ──
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*Loki/?([\d.]+)?").unwrap(),
+            product: Some("Grafana Loki"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*Tempo").unwrap(),
+            product: Some("Grafana Tempo"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*Mimir").unwrap(),
+            product: Some("Grafana Mimir"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)VictoriaMetrics/?([\d.]+)?").unwrap(),
+            product: Some("VictoriaMetrics"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)thanos[\s/-]+v?([\d.]+)").unwrap(),
+            product: Some("Thanos"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*opentelemetry-collector").unwrap(),
+            product: Some("OpenTelemetry Collector"), product_group: None, version_group: None, extra_group: None,
+        },
+        // ── Identity / auth ──
+        Signature {
+            regex: Regex::new(r"(?i)authelia_session|Authelia").unwrap(),
+            product: Some("Authelia"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)authentik|goauthentik").unwrap(),
+            product: Some("Authentik"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Keycloak[\s/-]+v?([\d.]+)").unwrap(),
+            product: Some("Keycloak"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)/auth/realms/").unwrap(),
+            product: Some("Keycloak"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)zitadel").unwrap(),
+            product: Some("ZITADEL"), product_group: None, version_group: None, extra_group: None,
+        },
+        // ── HashiCorp stack ──
+        Signature {
+            regex: Regex::new(r"(?i)X-Vault-Server\s*([^\r\n]+)|Server:\s*Vault/?([\d.]+)?").unwrap(),
+            product: Some("HashiCorp Vault"), product_group: None, version_group: Some(2), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)X-Consul-Index|Server:\s*Consul").unwrap(),
+            product: Some("HashiCorp Consul"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)X-Nomad-Index|Server:\s*Nomad").unwrap(),
+            product: Some("HashiCorp Nomad"), product_group: None, version_group: None, extra_group: None,
+        },
+        // ── Modern proxies / runtimes ──
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*pingora").unwrap(),
+            product: Some("Cloudflare Pingora"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*Bun/?([\d.]+)?").unwrap(),
+            product: Some("Bun"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*Deno/?([\d.]+)?").unwrap(),
+            product: Some("Deno"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        // ── Self-hosted / dashboards ──
+        Signature {
+            regex: Regex::new(r"(?i)Set-Cookie:\s*metabase\.SESSION|Metabase").unwrap(),
+            product: Some("Metabase"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Set-Cookie:\s*session_apache_superset|Apache Superset").unwrap(),
+            product: Some("Apache Superset"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)X-Apache-Airflow|Airflow").unwrap(),
+            product: Some("Apache Airflow"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)X-Argocd-Username|argocd").unwrap(),
+            product: Some("Argo CD"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*Portainer").unwrap(),
+            product: Some("Portainer"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)X-Pi-hole").unwrap(),
+            product: Some("Pi-hole"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)X-Home-Assistant").unwrap(),
+            product: Some("Home Assistant"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)X-Nextcloud-Status|Nc-Request-ID").unwrap(),
+            product: Some("Nextcloud"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*Synapse/?([\d.]+)?").unwrap(),
+            product: Some("Matrix Synapse"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Mastodon|X-Request-Id.*?M:").unwrap(),
+            product: Some("Mastodon"), product_group: None, version_group: None, extra_group: None,
+        },
+        // ── Networking / mesh ──
+        Signature {
+            regex: Regex::new(r"(?i)Tailscale Derper|Server:\s*tailscale").unwrap(),
+            product: Some("Tailscale (DERP relay)"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)headscale").unwrap(),
+            product: Some("Headscale"), product_group: None, version_group: None, extra_group: None,
+        },
+        // ── Backup / storage ──
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*restic|restic-server").unwrap(),
+            product: Some("restic-server"), product_group: None, version_group: None, extra_group: None,
+        },
     ]
 });
 
