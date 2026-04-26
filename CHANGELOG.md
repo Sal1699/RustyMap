@@ -4,6 +4,23 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.32.0] - 2026-04-26
+- `--nmap-os-db FILE`: load nmap's nmap-os-db at runtime. Parser
+  extracts `Fingerprint` / `Class` / `CPE` blocks (the binary
+  TCP/IP probe data is skipped — implementing nmap's probe engine
+  would be a project on its own). When a banner matches a curated
+  fingerprint name, our family label is upgraded to nmap's exact
+  string (e.g. "Linux 4.15 - 5.6") plus the CPE.
+- `--nmap-service-probes FILE`: load nmap's nmap-service-probes.
+  Parses `match` and `softmatch` lines as `Signature` rules.
+  Rust regex handles ~80% of nmap's patterns out of the box; lines
+  using Perl-only constructs (lookahead, named-group syntax) are
+  silently skipped. Counter goes to stderr at startup.
+- Both files stay on the user's disk — no GPLv2 contamination of
+  the MIT source tree. Match rules append to our built-in SIGS, so
+  user-loaded probes run only when our curated list missed.
+- 4 new unit tests on the parsers → 51/51.
+
 ## [0.31.0] - 2026-04-26
 - Built-in rhai script library grew from 6 to 21. The new scripts
   cover common NSE patterns most pentesters reach for first:

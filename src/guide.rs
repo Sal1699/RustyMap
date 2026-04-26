@@ -214,6 +214,8 @@ pub fn print_guide() {
     line("--cve-db FILE         Correla servizi a CVE (usa con --sV)");
     line("--no-builtin-scripts  Disabilita gli script Rhai baked nel binario");
     line("--no-builtin-cves     Disabilita il DB CVE baked nel binario");
+    line("--nmap-os-db FILE     Carica nmap-os-db (GPLv2, parsing runtime, no contamin.)");
+    line("--nmap-service-probes FILE  Carica nmap-service-probes (parse `match` lines)");
     line("--examples            Stampa 16 ricette pronte per casi comuni");
     line("--completions SHELL   Genera completion script (bash|zsh|fish|powershell)");
     line("--trace-raw           Logga ogni tx/rx pacchetto raw (debug --sS)");

@@ -18,6 +18,7 @@ mod ip_proto_scan;
 mod json_out;
 mod log;
 mod net_util;
+mod nmap_db;
 mod npcap;
 mod os_fp;
 mod output;
@@ -192,6 +193,24 @@ async fn main() -> Result<()> {
             eprintln!("[proxies] {} hop(s) configured for connect-scan", chain.len());
         }
         scanner::set_proxy_chain(chain);
+    }
+
+    // --nmap-os-db / --nmap-service-probes: load user-provided GPL data
+    // files. Counts go to stderr; bad lines silently skipped by the parser.
+    if let Some(path) = &args.nmap_os_db {
+        match nmap_db::load_os_db(path) {
+            Ok(n) => eprintln!("[nmap-os-db] loaded {} fingerprints from {}", n, path),
+            Err(e) => eprintln!("[!] --nmap-os-db {}: {}", path, e),
+        }
+    }
+    if let Some(path) = &args.nmap_service_probes {
+        match nmap_db::load_service_probes(path) {
+            Ok((n, skipped)) => eprintln!(
+                "[nmap-service-probes] {} match rules loaded, {} unparseable from {}",
+                n, skipped, path
+            ),
+            Err(e) => eprintln!("[!] --nmap-service-probes {}: {}", path, e),
+        }
     }
 
     if args.guide {

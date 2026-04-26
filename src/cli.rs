@@ -191,6 +191,14 @@ pub struct Cli {
     #[arg(long = "spoof-mac", value_name = "MAC|VENDOR")]
     pub spoof_mac: Option<String>,
 
+    /// Load nmap's nmap-os-db file (GPLv2 — keep on user disk, parsed at runtime)
+    #[arg(long = "nmap-os-db", value_name = "FILE")]
+    pub nmap_os_db: Option<String>,
+
+    /// Load nmap's nmap-service-probes file (parses `match` lines as extra detection rules)
+    #[arg(long = "nmap-service-probes", value_name = "FILE")]
+    pub nmap_service_probes: Option<String>,
+
     /// Write normal output to file
     #[arg(long = "oN")]
     pub output_normal: Option<String>,

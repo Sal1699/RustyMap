@@ -276,7 +276,16 @@ fn refine_from_banners(host: &HostResult, guess: &mut OsGuess) {
                         guess.confidence = *conf;
                         guess.hints.push(format!("banner: {}", needle));
                     }
-                    break; // first matching rule per port is enough
+                    break;
+                }
+            }
+            // If the user loaded nmap-os-db, try to upgrade the family
+            // label to the curated nmap fingerprint when we can match it.
+            if let Some(entry) = crate::nmap_db::match_banner_to_os(&all) {
+                guess.family = entry.name.clone();
+                guess.confidence = guess.confidence.max(85);
+                if !entry.cpe.is_empty() {
+                    guess.hints.push(format!("nmap-os-db cpe: {}", entry.cpe[0]));
                 }
             }
         }

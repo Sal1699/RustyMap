@@ -345,6 +345,18 @@ fn match_signatures(data: &[u8]) -> Option<ServiceInfo> {
             return Some(ServiceInfo { product, version, extra, banner, tls: None });
         }
     }
+    // Fall back to user-loaded nmap-service-probes match rules.
+    if let Some((product, version, info)) = crate::nmap_db::match_loaded_probes(&text) {
+        if product.is_some() || version.is_some() || info.is_some() {
+            return Some(ServiceInfo {
+                product,
+                version,
+                extra: info,
+                banner: first_line(&text),
+                tls: None,
+            });
+        }
+    }
     None
 }
 
