@@ -4,6 +4,42 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.30.0] - 2026-04-26
+- Built-in OS-fingerprint DB grew from 6 banner rules to 60+:
+  Linux distros (Ubuntu/Debian/RHEL/Amazon/Alpine/Arch/Fedora/SUSE/
+  Oracle/Rocky/Alma/OpenWrt/DD-WRT/Synology/QNAP/Raspbian), BSD
+  family (FreeBSD/OpenBSD/NetBSD/DragonFly/pfSense/OPNsense), Windows
+  variants (NT/2016/2019/2022/Exchange/IIS/HTTPAPI), Apple
+  (macOS/Darwin/iOS), network gear (Cisco IOS/IOS-XE/IOS-XR/NX-OS/ASA/
+  WLC, Juniper Junos, MikroTik RouterOS, Ubiquiti EdgeOS/UniFi,
+  Fortinet FortiOS/FortiGate, Palo Alto PAN-OS/GlobalProtect,
+  SonicWall, Citrix NetScaler, F5 BIG-IP, Check Point), hypervisors
+  (ESXi/vSphere/vCenter/XenServer/Proxmox), commercial UNIX
+  (Solaris/SmartOS/HP-UX/AIX/OS400/zOS), embedded RTOS
+  (VxWorks/FreeRTOS/Contiki/RIOT), storage appliances (NetApp
+  ONTAP/Dell Isilon/PowerStore).
+- Port-pattern refinement gained 15+ new combos: Active Directory
+  DC (88+389+445+636), Hyper-V host (2179), VMware mgmt (902/5480),
+  MikroTik Winbox (8291), VPN endpoint (500+4500), L2TP/PPTP, ADB
+  Android (5555), iOS lockdown (62078), Chromecast (8009/8008/8443),
+  ICS protocols (S7/Modbus/DNP3/EtherNet-IP/BACnet), container
+  runtimes (Docker 2375/76, Kubernetes 6443, kubelet 10250, etcd).
+- Service-probe SIGS grew from 17 to 50+ rules: more web servers
+  (OpenResty/Tengine/Tomcat/Jetty/Werkzeug/Gunicorn/Uvicorn/Hypercorn/
+  Envoy/Traefik/Cowboy/Kestrel), caches/MQ (memcached/RabbitMQ/NATS/
+  MQTT), DBs (PostgreSQL/MSSQL/CouchDB/Elasticsearch/Cassandra/
+  ZooKeeper), container daemons (Docker/k8s API/etcd), monitoring
+  (Prometheus/Grafana/Kibana), DevOps (Jenkins/GitLab/Gitea/Nexus/
+  Artifactory), remote access (RDP/VNC/NoMachine), hypervisor mgmt
+  (ESXi/Proxmox), ICS (Siemens/Modicon), embedded HTTP daemons.
+
+Improvement vs nmap: nmap's nmap-os-db ships ~5000 fingerprints
+under GPLv2 — incompatible with our MIT license. The expanded
+built-in DBs are curated from public banner research and OUI lists.
+For users who own a copy of nmap's DBs, --nmap-os-db FILE and
+--nmap-service-probes FILE will arrive in a follow-up to load them
+at runtime without source-tree contamination.
+
 ## [0.29.0] - 2026-04-26
 - Web technology fingerprinting (Wappalyzer-style). New `web_fp`
   module re-examines the HTTP body+headers fetched by `vendor_probe`
