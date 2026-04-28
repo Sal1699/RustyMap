@@ -4,6 +4,30 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.36.0] - 2026-04-26
+- Active TCP/IP fingerprint probe — first cut of nmap's T1 probe.
+  When `-O` is on, the host is up, and at least one TCP port is
+  open on IPv4, RustyMap now sends one SYN with nmap's canonical
+  T1 option set (MSS-1460, NOP, WindowScale-10, NOP, NOP,
+  Timestamp, SACKOK) and captures the SYN/ACK reply. Extracted
+  fields:
+  - **W**indow size (distinguishes Linux 29200/65535 vs Windows
+    8192/64240 vs BSD 65535 with high confidence)
+  - **O**ptions ordering and values in nmap-os-db notation
+    (`M5B4NW7L` = MSS-1460 + NOP + WindowScale-7 + EOL)
+  - placeholder for TTL/DF (these need an IP-level channel which
+    is a separate small task)
+  - round-trip latency in micros
+- Surfaced as a `tcp-fp: T1 W=0xffff O=M5B4NW7L TTL=0 DF=false`
+  hint line on the OS guess. Confidence bumped by +10 when the
+  probe succeeds, since the window+options tuple is a strong
+  signal even before we wire up nmap-os-db pattern matching.
+- Silent no-op when raw sockets aren't available (no admin /
+  Npcap missing), no open port is found, or target is IPv6 — so
+  enabling `-O` doesn't suddenly start failing on hosts where it
+  worked before.
+- 5 new tests on the option encoder → 56/56.
+
 ## [0.35.0] - 2026-04-26
 - Built-in rhai script library grew from 21 to 36 (+15). New scripts
   patterned after the most-cited public NSE checks plus modern stack

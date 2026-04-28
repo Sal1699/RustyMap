@@ -378,5 +378,40 @@ pub fn fingerprint(host: &HostResult, timeout: Duration) -> OsGuess {
     };
     refine_from_ports(host, &mut guess);
     refine_from_banners(host, &mut guess);
+    refine_from_tcp_fp(host, &mut guess, timeout);
     guess
+}
+
+/// Active TCP fingerprint: when we have an open TCP port and the host
+/// is on IPv4, send a single SYN with nmap's T1 option set and surface
+/// the captured window/options as a hint. Silent no-op on IPv6, when
+/// no port is open, or when raw sockets aren't available.
+fn refine_from_tcp_fp(host: &HostResult, guess: &mut OsGuess, timeout: Duration) {
+    let v4 = match host.target.ip {
+        IpAddr::V4(v) => v,
+        IpAddr::V6(_) => return,
+    };
+    let open = host
+        .ports
+        .iter()
+        .find(|p| p.state == PortState::Open)
+        .map(|p| p.port);
+    let Some(port) = open else { return };
+
+    // Source IP: best-effort; if we can't determine it, skip.
+    let src = match crate::net_util::source_ipv4_for(v4) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    let probe_to = timeout.min(Duration::from_secs(2));
+    if let Some(fp) = crate::tcp_fp::probe(src, v4, port, probe_to) {
+        guess.hints.push(format!("tcp-fp: {}", fp.summary()));
+        // The window value alone is a strong signal because OSes use
+        // distinctive defaults (Linux 2.6+ ~29200/65535, Windows
+        // ~8192/64240, BSD ~65535). Bump confidence modestly.
+        if guess.confidence < 75 {
+            guess.confidence = (guess.confidence + 10).min(85);
+        }
+    }
 }

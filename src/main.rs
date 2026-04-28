@@ -36,6 +36,7 @@ mod shutdown;
 mod spoof_mac;
 mod syn_emu;
 mod target;
+mod tcp_fp;
 mod tls_probe;
 mod top_ports;
 mod traceroute;
