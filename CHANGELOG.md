@@ -4,6 +4,17 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.36.1] - 2026-04-26
+- `--update` diagnostics: pre-flight writability check on the
+  binary's parent directory. The classic Kali/Debian failure
+  ("rustymap installed in /usr/local/bin owned by root, user runs
+  --update without sudo") now surfaces a clear error explaining
+  the fix instead of self_update's opaque IO error.
+- self_update error path now distinguishes IO / network / parse /
+  release-not-found and prints a manual `curl + tar + install`
+  one-liner pointing at the exact GitHub asset for the current
+  platform, so the update path always has a fallback.
+
 ## [0.36.0] - 2026-04-26
 - Active TCP/IP fingerprint probe — first cut of nmap's T1 probe.
   When `-O` is on, the host is up, and at least one TCP port is
