@@ -4,6 +4,21 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.38.0] - 2026-04-28
+- `--ssl-enum`: testssl-light. New `tls_enum` module probes each TLS
+  protocol version separately:
+  - TLS 1.2 / 1.3 via dedicated rustls configs (returns negotiated
+    cipher suite)
+  - TLS 1.0 / 1.1 via hand-crafted ClientHello + ServerHello version
+    inspection (rustls refuses these by design — correctly so).
+    Bug-aware: parses the ServerHello body's negotiated version, not
+    the record-layer version (which is unreliable; many servers
+    stamp 0x0301 there regardless).
+  Output: `[ssl-enum] host:443 → 1.0 · 1.1 · 1.2(cipher) · 1.3(cipher)`
+  with a "deprecated TLS supported" warning when 1.0 or 1.1 answer.
+  Audit log records deprecated findings for `--every` runs.
+- 3 new tests in `tls_enum` → 59/59.
+
 ## [0.37.0] - 2026-04-28
 - `--dns-ct APEX`: subdomain enumeration via Certificate Transparency
   logs (crt.sh). Pure passive recon — no probes against the target.

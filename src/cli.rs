@@ -551,6 +551,10 @@ pub struct Cli {
     #[arg(long = "http-enum")]
     pub http_enum: bool,
 
+    /// TLS protocol/version enumeration on TLS-likely ports (testssl-light)
+    #[arg(long = "ssl-enum")]
+    pub ssl_enum: bool,
+
     /// Self-update to the latest release from GitHub
     #[arg(long = "update")]
     pub self_update: bool,

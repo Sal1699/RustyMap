@@ -39,6 +39,7 @@ mod spoof_mac;
 mod syn_emu;
 mod target;
 mod tcp_fp;
+mod tls_enum;
 mod tls_probe;
 mod top_ports;
 mod traceroute;
@@ -1088,6 +1089,37 @@ async fn main() -> Result<()> {
             let hits = cve::correlate(&d, &sorted);
             cve::print_hits(&hits);
             audit.event("cve_correlated", json!({ "hits": hits.len() }));
+        }
+    }
+
+    // TLS protocol/cipher enumeration on every TLS-likely open port
+    if args.ssl_enum && !was_cancelled {
+        for h in sorted.iter().filter(|h| h.up) {
+            for p in &h.ports {
+                if p.state != PortState::Open || !tls_probe::likely_tls(p.port) {
+                    continue;
+                }
+                let timeout = timeout_dur.min(std::time::Duration::from_secs(3));
+                match tls_enum::enumerate(h.target.ip, p.port, h.target.hostname.as_deref(), timeout).await {
+                    Ok(e) => {
+                        let label = h.target.display();
+                        let dep = if e.has_deprecated() { " ⚠ deprecated TLS supported".to_string() } else { String::new() };
+                        println!("[ssl-enum] {} :{} → {}{}", label, p.port, e.summary(), dep);
+                        if e.has_deprecated() {
+                            audit.event(
+                                "tls_deprecated",
+                                json!({
+                                    "host": h.target.ip.to_string(),
+                                    "port": p.port,
+                                    "tls10": e.tls10,
+                                    "tls11": e.tls11,
+                                }),
+                            );
+                        }
+                    }
+                    Err(e) => eprintln!("[!] ssl-enum {}:{}: {}", h.target.display(), p.port, e),
+                }
+            }
         }
     }
 
