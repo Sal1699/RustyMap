@@ -4,6 +4,27 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.37.0] - 2026-04-28
+- `--dns-ct APEX`: subdomain enumeration via Certificate Transparency
+  logs (crt.sh). Pure passive recon — no probes against the target.
+  Typically returns 10-100x more names than the wordlist brute-force,
+  with historical certs that often surface forgotten staging/dev
+  hosts. Improvement vs nmap: nmap has no equivalent (passive CT
+  recon usually means a separate `subfinder`/`crtsh` tool).
+- `--http-enum`: gobuster-light. After the scan, GETs ~80 curated
+  admin/config/leak paths against every open HTTP port, classifies
+  by status. Improvements vs typical tools:
+  1. Per-status priority (401 on /admin > 200 on /);
+  2. Wall-detection — stops if 5 consecutive responses share the
+     same shape (captive-portal / catch-all defense). No false-positive
+     flood when a host returns the same page for everything.
+- New rhai script `jwt-alg-none`: detects JWTs in HTTP banners with
+  alg=none (critical) / HS256 (low — verify rotation) / general
+  bearer-in-cleartext warning.
+- New rhai script `cookie-flags-audit`: parses Set-Cookie headers
+  and flags ≥2 missing of {Secure, HttpOnly, SameSite}.
+- 38 built-in rhai scripts total.
+
 ## [0.36.1] - 2026-04-26
 - `--update` diagnostics: pre-flight writability check on the
   binary's parent directory. The classic Kali/Debian failure

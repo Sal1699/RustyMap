@@ -541,6 +541,16 @@ pub struct Cli {
     #[arg(long = "dns-reverse", value_name = "CIDR")]
     pub dns_reverse: Option<String>,
 
+    /// Enumerate subdomains via Certificate Transparency logs (crt.sh).
+    /// Passive recon — no probes against the target.
+    #[arg(long = "dns-ct", value_name = "APEX")]
+    pub dns_ct: Option<String>,
+
+    /// HTTP path enumeration on each open HTTP port after the scan.
+    /// Curated list of ~80 admin/config/leak paths; classifies by status.
+    #[arg(long = "http-enum")]
+    pub http_enum: bool,
+
     /// Self-update to the latest release from GitHub
     #[arg(long = "update")]
     pub self_update: bool,

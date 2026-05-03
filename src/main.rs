@@ -2,6 +2,7 @@ mod arp_ping;
 mod audit;
 mod ble;
 mod cli;
+mod ct_logs;
 mod cve;
 mod db;
 mod device_fp;
@@ -11,6 +12,7 @@ mod evasion;
 mod examples;
 mod file_out;
 mod guide;
+mod http_enum;
 mod icmp_ping;
 mod idle_scan;
 mod iflist;
@@ -326,6 +328,24 @@ async fn main() -> Result<()> {
                 println!("{:<40} {}", sub, ips_s.join(", "));
             }
             println!("\nFound {} subdomain(s)", rep.subdomains.len());
+        }
+        return Ok(());
+    }
+    if let Some(apex) = &args.dns_ct {
+        eprintln!("[ct-logs] querying crt.sh for *.{}", apex);
+        let timeout = std::time::Duration::from_secs(15);
+        match ct_logs::fetch(apex, timeout).await {
+            Ok(names) if names.is_empty() => {
+                println!("No CT-log entries found for {}", apex);
+            }
+            Ok(names) => {
+                println!("\n{:<60}", "SUBDOMAIN (from CT logs)");
+                for n in &names {
+                    println!("{}", n);
+                }
+                println!("\nFound {} subdomain(s) via crt.sh", names.len());
+            }
+            Err(e) => eprintln!("[!] CT log query failed: {}", e),
         }
         return Ok(());
     }
@@ -1068,6 +1088,28 @@ async fn main() -> Result<()> {
             let hits = cve::correlate(&d, &sorted);
             cve::print_hits(&hits);
             audit.event("cve_correlated", json!({ "hits": hits.len() }));
+        }
+    }
+
+    // HTTP path enumeration on every up host with an open HTTP port
+    if args.http_enum && !was_cancelled {
+        for h in sorted.iter().filter(|h| h.up) {
+            let host_label = h.target.display();
+            let timeout = timeout_dur.min(std::time::Duration::from_secs(3));
+            match http_enum::scan_host(h, timeout).await {
+                Ok(findings) if !findings.is_empty() => {
+                    http_enum::print_findings(&host_label, &findings);
+                    audit.event(
+                        "http_enum",
+                        json!({
+                            "host": h.target.ip.to_string(),
+                            "findings": findings.len(),
+                        }),
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!("[!] http-enum {}: {}", host_label, e),
+            }
         }
     }
 

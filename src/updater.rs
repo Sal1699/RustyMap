@@ -124,9 +124,7 @@ pub fn update() -> Result<()> {
     // spending time downloading. Common failure on Kali/Debian: rustymap
     // installed to /usr/local/bin owned by root and the user runs
     // `rustymap --update` without sudo.
-    if let Err(e) = check_writable() {
-        return Err(e);
-    }
+    check_writable()?;
 
     let status = self_update::backends::github::Update::configure()
         .repo_owner(REPO_OWNER)
