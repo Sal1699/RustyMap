@@ -4,6 +4,21 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.40.0] - 2026-05-08
+- `--notify URL`: webhook summary on scan completion. Three flavors:
+  - `ntfy://topic` → POST to ntfy.sh (or `ntfy://host/topic` for
+    self-hosted ntfy). Priority bumps to "high" when critical/high
+    findings are present.
+  - `slack://hook-url` → POST {"text": "..."} to Slack webhook.
+  - `https://...` → generic webhook with full JSON body
+    (hosts_up, open_ports, elapsed_secs, critical_findings).
+  Pairs naturally with `--every 6h`: schedule scans, get notified
+  only when something changes.
+- `--progress`: real progress spinner via indicatif. Shows elapsed
+  time + scan type + target/port count while the scan is running.
+  Cleared at the end so summary output isn't mixed with the spinner.
+- Total feature set: 110+ flags, 42 built-in scripts, 60+ unit tests.
+
 ## [0.39.0] - 2026-05-08
 - **Active rhai scripts**: the script engine gains two network
   primitives, turning scripts from pure pattern-reasoners into NSE

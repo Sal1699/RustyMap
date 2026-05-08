@@ -555,6 +555,15 @@ pub struct Cli {
     #[arg(long = "ssl-enum")]
     pub ssl_enum: bool,
 
+    /// Send scan summary to webhook on completion
+    /// (ntfy://topic | slack://hook-url | https://your-webhook)
+    #[arg(long = "notify", value_name = "URL")]
+    pub notify: Option<String>,
+
+    /// Show a real progress bar during the scan (indicatif)
+    #[arg(long = "progress")]
+    pub progress: bool,
+
     /// Self-update to the latest release from GitHub
     #[arg(long = "update")]
     pub self_update: bool,

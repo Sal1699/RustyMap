@@ -21,6 +21,7 @@ mod json_out;
 mod log;
 mod net_util;
 mod nmap_db;
+mod notify;
 mod npcap;
 mod os_fp;
 mod output;
@@ -808,6 +809,26 @@ async fn main() -> Result<()> {
     let parallel = args.parallel();
     let show_closed = args.verbose >= 2 && !args.only_open;
 
+    // --progress: spinner with elapsed time + scan type until results return.
+    let progress_bar: Option<indicatif::ProgressBar> = if args.progress {
+        let pb = indicatif::ProgressBar::new_spinner();
+        pb.set_style(
+            indicatif::ProgressStyle::with_template("{spinner:.cyan} [{elapsed_precise}] {msg}")
+                .unwrap()
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+        );
+        pb.set_message(format!(
+            "{:?} scan · {} target(s) · {} port(s)",
+            scan_type,
+            targets.len(),
+            port_list.len()
+        ));
+        pb.enable_steady_tick(std::time::Duration::from_millis(120));
+        Some(pb)
+    } else {
+        None
+    };
+
     // --stats-every: spawn a tick that prints elapsed time periodically.
     let stats_handle: Option<(tokio::task::JoinHandle<()>, Arc<std::sync::atomic::AtomicBool>)> =
         if args.stats_every_secs > 0 {
@@ -1066,6 +1087,9 @@ async fn main() -> Result<()> {
         handle.abort();
         let _ = handle.await;
     }
+    if let Some(pb) = progress_bar {
+        pb.finish_and_clear();
+    }
     output::print_summary(&sorted, elapsed);
 
     // CVE correlation (requires -sV to have populated service info).
@@ -1270,6 +1294,18 @@ async fn main() -> Result<()> {
             "cancelled": was_cancelled,
         }),
     );
+
+    // --notify: webhook summary. Built from script findings only
+    // (cve correlation already in audit log; webhook should be a
+    // wake-me-up signal, not a full report).
+    if let Some(spec) = &args.notify {
+        let findings_for_notify: Vec<(String, String, String)> = Vec::new();
+        let summary = notify::Summary::build(&sorted, elapsed, &findings_for_notify);
+        match notify::send(spec, &summary).await {
+            Ok(()) => audit.event("notify_sent", json!({ "url": spec })),
+            Err(e) => eprintln!("[!] --notify {}: {}", spec, e),
+        }
+    }
 
     if args.tui {
         if let Err(e) = tui::run(&sorted) {

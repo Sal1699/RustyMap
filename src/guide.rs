@@ -181,6 +181,8 @@ pub fn print_guide() {
     line("--dns-ct APEX         Subdomain via Certificate Transparency (crt.sh, passivo)");
     line("--http-enum           Path enumeration su porte HTTP open dopo lo scan");
     line("--ssl-enum            Enumera TLS 1.0/1.1/1.2/1.3 + cipher su porte TLS open");
+    line("--notify URL          Webhook su completion (ntfy://topic, slack://hook, https://)");
+    line("--progress            Spinner indicatif durante lo scan (elapsed + tipo + N target)");
     line("--dns-sniff           Sniff DNS sulla rete (admin + Npcap)");
     line("--dns-spoof D=IP      Spoof risposte DNS (ripetibile)");
     line("--iface NOME          Interfaccia per sniff/spoof");
