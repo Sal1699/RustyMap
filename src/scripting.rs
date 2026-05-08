@@ -3,7 +3,10 @@ use anyhow::{Context, Result};
 use rhai::{Array, Dynamic, Engine, Map, Scope};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::{Read, Write};
+use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
@@ -168,6 +171,10 @@ pub fn print_help(user_path: Option<&str>) {
 /// Scripts baked into the binary at build time. Returns (name, source) pairs.
 pub fn builtin_scripts() -> Vec<(&'static str, &'static str)> {
     vec![
+        ("active-anonymous-ftp", include_str!("../scripts/active-anonymous-ftp.rhai")),
+        ("active-elasticsearch-version", include_str!("../scripts/active-elasticsearch-version.rhai")),
+        ("active-http-title", include_str!("../scripts/active-http-title.rhai")),
+        ("active-redis-info", include_str!("../scripts/active-redis-info.rhai")),
         ("anonymous-ftp", include_str!("../scripts/anonymous-ftp.rhai")),
         ("backup-exposed", include_str!("../scripts/backup-exposed.rhai")),
         ("cleartext-protocols", include_str!("../scripts/cleartext-protocols.rhai")),
@@ -232,6 +239,88 @@ fn trace_event(script: &str, host: &str, status: &str, detail: &str) {
     );
 }
 
+/// Build a rhai Engine with our network/probe primitives registered.
+/// Used by both run_inline and run_scripts so file-based scripts get
+/// the same active-probe API as the built-ins.
+fn build_engine() -> Engine {
+    let mut engine = Engine::new();
+
+    // tcp_send(host, port, payload_string, timeout_ms) -> reply_string
+    // Truncates the reply to 8 KiB. Returns "" on any failure.
+    engine.register_fn("tcp_send", |host: &str, port: i64, payload: &str, timeout_ms: i64| -> String {
+        let timeout = Duration::from_millis(timeout_ms.clamp(50, 30_000) as u64);
+        let port = port.clamp(1, 65535) as u16;
+        let mut addrs = match (host, port).to_socket_addrs() {
+            Ok(a) => a,
+            Err(_) => return String::new(),
+        };
+        let addr = match addrs.next() {
+            Some(a) => a,
+            None => return String::new(),
+        };
+        let mut s = match std::net::TcpStream::connect_timeout(&addr, timeout) {
+            Ok(s) => s,
+            Err(_) => return String::new(),
+        };
+        let _ = s.set_read_timeout(Some(timeout));
+        let _ = s.set_write_timeout(Some(timeout));
+        if !payload.is_empty() && s.write_all(payload.as_bytes()).is_err() {
+            return String::new();
+        }
+        let mut buf = [0u8; 8192];
+        match s.read(&mut buf) {
+            Ok(n) => String::from_utf8_lossy(&buf[..n]).into_owned(),
+            Err(_) => String::new(),
+        }
+    });
+
+    // http_get(url, timeout_ms) -> map { status: i64, body: string, headers: string }
+    // Uses reqwest::blocking with rustls. Returns map with status=0 on error.
+    engine.register_fn("http_get", |url: &str, timeout_ms: i64| -> Map {
+        use reqwest::blocking::Client;
+        let timeout = Duration::from_millis(timeout_ms.clamp(50, 30_000) as u64);
+        let mut out = Map::new();
+        let client = match Client::builder()
+            .timeout(timeout)
+            .danger_accept_invalid_certs(true)
+            .user_agent("rustymap/script")
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => {
+                out.insert("status".into(), Dynamic::from(0i64));
+                out.insert("body".into(), Dynamic::from(String::new()));
+                out.insert("headers".into(), Dynamic::from(String::new()));
+                return out;
+            }
+        };
+        match client.get(url).send() {
+            Ok(resp) => {
+                let status = resp.status().as_u16() as i64;
+                let headers: String = resp
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("")))
+                    .collect::<Vec<_>>()
+                    .join("\r\n");
+                let body = resp.text().unwrap_or_default();
+                let truncated: String = body.chars().take(8192).collect();
+                out.insert("status".into(), Dynamic::from(status));
+                out.insert("body".into(), Dynamic::from(truncated));
+                out.insert("headers".into(), Dynamic::from(headers));
+            }
+            Err(_) => {
+                out.insert("status".into(), Dynamic::from(0i64));
+                out.insert("body".into(), Dynamic::from(String::new()));
+                out.insert("headers".into(), Dynamic::from(String::new()));
+            }
+        }
+        out
+    });
+
+    engine
+}
+
 /// Run a list of (name, source) scripts against a host set.
 pub fn run_inline(
     scripts: &[(&str, &str)],
@@ -241,7 +330,7 @@ pub fn run_inline(
     if scripts.is_empty() {
         return Vec::new();
     }
-    let engine = Engine::new();
+    let engine = build_engine();
     let args_map: Map = script_args
         .iter()
         .map(|(k, v)| (k.clone().into(), Dynamic::from(v.clone())))
@@ -310,7 +399,7 @@ pub fn run_scripts(
         return Ok(vec![]);
     }
 
-    let engine = Engine::new();
+    let engine = build_engine();
     let mut findings = Vec::new();
     let args_map: Map = script_args
         .iter()

@@ -4,6 +4,30 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.39.0] - 2026-05-08
+- **Active rhai scripts**: the script engine gains two network
+  primitives, turning scripts from pure pattern-reasoners into NSE
+  peers that can actually probe the target:
+  - `tcp_send(host, port, payload, timeout_ms) -> String` — sync
+    TCP send/receive (8 KiB cap on response)
+  - `http_get(url, timeout_ms) -> Map { status, body, headers }` —
+    blocking reqwest with rustls, accepts invalid certs, body capped
+    at 8192 chars
+- 4 new active scripts shipped built-in:
+  - `active-anonymous-ftp`: tries `USER anonymous / PASS anonymous@`,
+    flags HTTP 230 as **high**
+  - `active-http-title`: GETs / on every HTTP-likely port, extracts
+    `<title>` for quick recon
+  - `active-redis-info`: sends `INFO\r\n` to Redis, leaks `redis_version:`
+    line as **critical** when no auth
+  - `active-elasticsearch-version`: GETs / on 9200, parses
+    `cluster_name` + `version.number` when auth is missing
+- Improvement vs nmap NSE: same model (probe → reason), but with
+  rust-native engine (no Lua install), pre-loaded primitives, and
+  scripts shipping inside the binary. Tradeoff: only TCP+HTTP for now;
+  no UDP / raw socket / TLS handshake from inside scripts.
+- Total built-in scripts: 42.
+
 ## [0.38.0] - 2026-04-28
 - `--ssl-enum`: testssl-light. New `tls_enum` module probes each TLS
   protocol version separately:

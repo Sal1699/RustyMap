@@ -236,6 +236,9 @@ pub fn print_guide() {
     line("--ble-scan SECONDI    Scan Bluetooth LE per N secondi (phone/wearable/IoT)");
     line("--iflist [TARGET]     Lista interfacce (con hint route-to-target)");
     line("--script-help         Catalogo script Rhai (built-in + utente)");
+    line("                      Script API (active probes):");
+    line("                       tcp_send(host, port, payload, timeout_ms) -> str");
+    line("                       http_get(url, timeout_ms) -> {status, body, headers}");
     line("--confirm-large       Permette target list > 4096 host");
     example("rustymap --sT --sV --cve-db cves.json 10.0.0.5");
     example("rustymap --sT --script rules/ 10.0.0.5");
