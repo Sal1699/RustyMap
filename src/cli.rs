@@ -564,6 +564,40 @@ pub struct Cli {
     #[arg(long = "progress")]
     pub progress: bool,
 
+    /// Refresh the local NVD CVE cache (~/.cache/rustymap/nvd.sqlite).
+    /// Pulls the last 5 years from services.nvd.nist.gov and exits.
+    #[arg(long = "update-cve-db")]
+    pub update_cve_db: bool,
+
+    /// Refresh the exploit-reference catalog (CISA KEV + ExploitDB +
+    /// Nuclei). Cached at ~/.cache/rustymap/exploit_refs.json.
+    #[arg(long = "update-exploit-refs")]
+    pub update_exploit_refs: bool,
+
+    /// Subdomain-takeover check on a host or apex domain.
+    /// Resolves CNAMEs and matches against 17 known dangling-provider
+    /// fingerprints (S3, Heroku, GitHub Pages, Azure, …).
+    #[arg(long = "takeover-check", value_name = "DOMAIN")]
+    pub takeover_check: Option<String>,
+
+    /// Origin-IP discovery for a domain behind a CDN/WAF.
+    /// Combines MX records, SPF ip4: declarations, and a list of
+    /// commonly-forgotten subdomains; HIGH confidence when ≥2 sources
+    /// agree.
+    #[arg(long = "origin-discovery", value_name = "DOMAIN")]
+    pub origin_discovery: Option<String>,
+
+    /// DNS security-posture audit (DNSSEC chain, CAA, DANE/TLSA,
+    /// SPF/DMARC qualifiers, MX failover).
+    #[arg(long = "dns-security", value_name = "DOMAIN")]
+    pub dns_security: Option<String>,
+
+    /// TLS posture grade A+/F + SSLv2/SSLv3/Heartbleed PoC.
+    /// Read-only — Heartbleed PoC inspects only the response header,
+    /// never reads leaked memory.
+    #[arg(long = "tls-grade")]
+    pub tls_grade: bool,
+
     /// Self-update to the latest release from GitHub
     #[arg(long = "update")]
     pub self_update: bool,

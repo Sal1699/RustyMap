@@ -40,7 +40,14 @@ mod spoof_mac;
 mod syn_emu;
 mod target;
 mod tcp_fp;
+mod dns_advanced;
+mod dns_security;
+#[allow(dead_code)]
+mod exploit_refs;
+#[allow(dead_code)]
+mod nvd;
 mod tls_enum;
+mod tls_grade;
 mod tls_probe;
 mod top_ports;
 mod traceroute;
@@ -255,6 +262,56 @@ async fn main() -> Result<()> {
     }
     if args.self_update {
         return tokio::task::spawn_blocking(updater::update).await?;
+    }
+    if args.update_cve_db {
+        let verbose = args.verbose > 0;
+        return tokio::task::spawn_blocking(move || -> Result<()> {
+            let mut db = nvd::open_cache()?;
+            let n = nvd::sync(&mut db, verbose)?;
+            println!("[cve-db] {} entries in {}", n, nvd::cache_path().display());
+            Ok(())
+        }).await?;
+    }
+    if args.update_exploit_refs {
+        let verbose = args.verbose > 0;
+        return tokio::task::spawn_blocking(move || -> Result<()> {
+            let cat = exploit_refs::sync(verbose)?;
+            println!("[exploit-refs] {} CVEs catalogued", cat.by_cve.len());
+            Ok(())
+        }).await?;
+    }
+    if let Some(domain) = &args.takeover_check {
+        let subs = vec![domain.clone()];
+        let timeout = std::time::Duration::from_secs(10);
+        match dns_advanced::detect_takeover(&subs, timeout).await {
+            Ok(findings) if findings.is_empty() => {
+                println!("[ok] {} not vulnerable to known takeover patterns", domain);
+            }
+            Ok(findings) => {
+                for f in &findings {
+                    println!("[!] Subdomain takeover possible: {}", f.subdomain);
+                    println!("    provider   : {}", f.provider);
+                    println!("    cname      : {}", f.cname);
+                    println!("    fingerprint: {}", f.fingerprint);
+                }
+            }
+            Err(e) => eprintln!("[!] takeover check failed: {}", e),
+        }
+        return Ok(());
+    }
+    if let Some(domain) = &args.origin_discovery {
+        let domain = domain.clone();
+        let timeout = std::time::Duration::from_secs(10);
+        let candidates = dns_advanced::discover_origin(&domain, timeout).await?;
+        dns_advanced::print_origin_candidates(&domain, &candidates);
+        return Ok(());
+    }
+    if let Some(domain) = &args.dns_security {
+        let domain = domain.clone();
+        let timeout = std::time::Duration::from_secs(10);
+        let report = dns_security::audit(&domain, timeout).await?;
+        dns_security::print_report(&report);
+        return Ok(());
     }
 
     let cancel = shutdown::install_handler();
@@ -1116,8 +1173,11 @@ async fn main() -> Result<()> {
         }
     }
 
-    // TLS protocol/cipher enumeration on every TLS-likely open port
-    if args.ssl_enum && !was_cancelled {
+    // TLS protocol/cipher enumeration on every TLS-likely open port.
+    // --tls-grade implies --ssl-enum since grading needs the version
+    // matrix as input.
+    let want_tls_work = args.ssl_enum || args.tls_grade;
+    if want_tls_work && !was_cancelled {
         for h in sorted.iter().filter(|h| h.up) {
             for p in &h.ports {
                 if p.state != PortState::Open || !tls_probe::likely_tls(p.port) {
@@ -1139,6 +1199,27 @@ async fn main() -> Result<()> {
                                     "tls11": e.tls11,
                                 }),
                             );
+                        }
+                        if args.tls_grade {
+                            let g = tls_grade::grade(h.target.ip, p.port, &e, timeout).await;
+                            let grade_str = g.grade.as_deref().unwrap_or("?");
+                            println!("[tls-grade] {} :{} → {}", label, p.port, grade_str);
+                            for d in &g.detail {
+                                println!("            · {}", d);
+                            }
+                            if g.heartbleed || g.sslv2 || g.sslv3 {
+                                audit.event(
+                                    "tls_classic_vuln",
+                                    json!({
+                                        "host": h.target.ip.to_string(),
+                                        "port": p.port,
+                                        "sslv2": g.sslv2,
+                                        "sslv3": g.sslv3,
+                                        "heartbleed": g.heartbleed,
+                                        "grade": grade_str,
+                                    }),
+                                );
+                            }
                         }
                     }
                     Err(e) => eprintln!("[!] ssl-enum {}:{}: {}", h.target.display(), p.port, e),

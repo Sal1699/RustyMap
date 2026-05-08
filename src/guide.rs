@@ -179,8 +179,12 @@ pub fn print_guide() {
     line("--dns-wordlist FILE   Wordlist custom per --dns-enum");
     line("--dns-reverse CIDR    Reverse-DNS sweep (PTR) su un range");
     line("--dns-ct APEX         Subdomain via Certificate Transparency (crt.sh, passivo)");
+    line("--takeover-check D    CNAME → 17 dangling-provider fingerprints (S3/Heroku/Azure…)");
+    line("--origin-discovery D  Origin-IP dietro CDN: MX + SPF ip4: + sottodomini comuni");
+    line("--dns-security D      Audit DNSSEC + CAA + DANE/TLSA + SPF/DMARC qualifiers + MX");
     line("--http-enum           Path enumeration su porte HTTP open dopo lo scan");
     line("--ssl-enum            Enumera TLS 1.0/1.1/1.2/1.3 + cipher su porte TLS open");
+    line("--tls-grade           Grade A+/F + DROWN/POODLE/Heartbleed PoC (read-only)");
     line("--notify URL          Webhook su completion (ntfy://topic, slack://hook, https://)");
     line("--progress            Spinner indicatif durante lo scan (elapsed + tipo + N target)");
     line("--dns-sniff           Sniff DNS sulla rete (admin + Npcap)");
@@ -191,6 +195,10 @@ pub fn print_guide() {
     example("rustymap --dns-reverse 10.0.0.0/24");
     example("rustymap --dns-sniff --iface Ethernet");
     example("rustymap --dns-spoof example.com=10.0.0.5 --iface Ethernet");
+    example("rustymap --takeover-check abandoned.example.com");
+    example("rustymap --origin-discovery example.com");
+    example("rustymap --dns-security example.com");
+    example("rustymap --tls-grade --ssl-enum -p 443 example.com");
 
     category("AUTOMATION & TOOLING");
     section("VAULT (credenziali cifrate)");
@@ -251,10 +259,14 @@ pub fn print_guide() {
     line("--install-npcap       Installa runtime Npcap (Windows admin)");
     line("--check-update        Controlla se esiste una release più recente");
     line("--update              Scarica e installa l'ultima release da GitHub");
+    line("--update-cve-db       Sync NVD JSON 2.0 (last 5y) → ~/.cache/rustymap/nvd.sqlite");
+    line("--update-exploit-refs Sync KEV + ExploitDB + Nuclei → exploit_refs.json");
     example("rustymap --sS --audit-log audit.jsonl 10.0.0.5");
     example("rustymap --install-npcap");
     example("rustymap --check-update");
     example("rustymap --update");
+    example("rustymap --update-cve-db");
+    example("rustymap --update-exploit-refs");
 
     section("ALTRO");
     line("--help                Help breve (clap)");

@@ -4,6 +4,41 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.42.0] - 2026-05-08
+- **Fase 1 — Vuln intel foundation.** Five new sub-systems land in
+  one bundle, all read-only and locally cached:
+- `--update-cve-db` syncs NVD JSON 2.0 (last 5 years, 2000/page,
+  RFC-respected 7s/page back-off) to a SQLite cache at
+  `~/.cache/rustymap/nvd.sqlite`. Replaces the old 25-entry regex
+  table. Includes a canonical CVSS v3.1 formula (validated against
+  Log4Shell → 10.0 and `AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N` → 4.3).
+- `--update-exploit-refs` builds a CVE → exploit-source map from
+  CISA KEV (in-the-wild flag), ExploitDB CSV, and Nuclei
+  templates index. Cached at `~/.cache/rustymap/exploit_refs.json`,
+  refreshed every 24h. Lets the scanner answer "is there public
+  exploitation?" not just "is there a CVE?".
+- `--takeover-check DOMAIN` — resolves CNAME and matches against 17
+  dangling-provider fingerprints (S3, Heroku, GitHub Pages, Azure
+  App Service / CDN, CloudFront, Bitbucket, ReadTheDocs, Surge,
+  Fastly, Pantheon, Tumblr, Shopify, Unbounce, Desk, …). Confirms
+  with a body-fingerprint HTTP request before flagging.
+- `--origin-discovery DOMAIN` — finds origin IPs hidden behind a
+  CDN/WAF using four techniques: MX records (mail rarely on CDN),
+  SPF `ip4:` declarations, common forgotten subdomains
+  (mail/dev/staging/admin/cpanel/…), and CDN-IP exclusion. Marks
+  HIGH confidence when ≥2 sources agree.
+- `--dns-security DOMAIN` — DNSSEC chain (DNSKEY+DS), CAA, DANE/TLSA
+  on 443/25, DMARC policy + `pct=`, SPF qualifier (`+all` → bad,
+  `~all`/`?all` → warn, `-all` → good) + 10-DNS-lookup limit, MX
+  failover. Three severity levels: good/warn/bad.
+- `--tls-grade` — composes with `--ssl-enum`. Adds SSLv2 (DROWN
+  CVE-2016-0800) and SSLv3 (POODLE CVE-2014-3566) hand-crafted
+  ClientHello probes, plus a Heartbleed (CVE-2014-0160) PoC that
+  reads only the 5-byte response header — never reads leaked
+  memory. Outputs A+/A/B/C/D/F grade with the deductions listed.
+- 11 new tests cover CVSS canonical, exploit-ref aggregation, DNS
+  audit accumulation, and TLS grade ordering → 72/72 pass.
+
 ## [0.41.0] - 2026-05-08
 - **`--update` rewritten from scratch.** The previous integration
   used the `self_update` crate, which was an opaque box — when it
