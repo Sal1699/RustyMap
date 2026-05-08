@@ -4,6 +4,32 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.41.0] - 2026-05-08
+- **`--update` rewritten from scratch.** The previous integration
+  used the `self_update` crate, which was an opaque box — when it
+  failed, you got a generic IO error with no clue which step broke.
+  New impl prints every step:
+  ```
+  [1/7] resolving latest release …
+  [2/7] comparing versions: v0.40.0 → v0.41.0 …
+  [3/7] picking asset for linux-x86_64 …
+  [4/7] downloading rustymap-linux-x86_64.tar.gz (8.4 MiB) … [progress bar]
+  [5/7] verifying SHA256 against SHA256SUMS.txt …
+  [6/7] extracting binary …
+  [7/7] swapping in new binary at /usr/local/bin/rustymap …
+  ✓ Updated to v0.41.0
+  ```
+- New impl uses reqwest (already in tree) + flate2 + tar + zip + sha2.
+  Drops self_update dep (and the reqwest 0.11 it pulled in alongside
+  our 0.12 — single reqwest version now).
+- SHA256 verification against SHA256SUMS.txt published in the same
+  release — the previous self_update path skipped this.
+- Windows: rename-self trick handles replacing the running .exe by
+  moving the old one aside, then renaming the new one in. Restores
+  the original on failure.
+- Manual install fallback printed on every failure path.
+- 2 new tests on version comparison + asset name mapping → 61/61.
+
 ## [0.40.0] - 2026-05-08
 - `--notify URL`: webhook summary on scan completion. Three flavors:
   - `ntfy://topic` → POST to ntfy.sh (or `ntfy://host/topic` for
