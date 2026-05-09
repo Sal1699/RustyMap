@@ -215,6 +215,12 @@ pub fn print_guide() {
     line("--save-profile F.toml Salva l'invocation corrente come profilo TOML");
     line("--history [N]         Mostra le ultime N scan (default 20)");
     line("--history-clear       Tronca lo storico delle scansioni");
+    line("--siem-format FMT     Output SIEM: cef|leef|ecs|syslog");
+    line("--siem-out FILE       File destinazione SIEM events (richiede --siem-format)");
+    line("--threat-intel-misp U Sync IoC MISP nel cache locale");
+    line("--misp-api-key KEY    API key MISP");
+    line("--misp-days N         Giorni di lookback MISP (default 30)");
+    line("--threat-intel-match  Confronta target con IoC cached → flag matches");
     line("--notify URL          Webhook su completion (ntfy://topic, slack://hook, https://)");
     line("--progress            Spinner indicatif durante lo scan (elapsed + tipo + N target)");
     line("--dns-sniff           Sniff DNS sulla rete (admin + Npcap)");
@@ -247,6 +253,13 @@ pub fn print_guide() {
     example("rustymap --recommend example.com");
     example("rustymap -sV --auth-audit --save-profile lab.toml 10.0.0.5");
     example("rustymap --history 50");
+    example("rustymap --siem-format ecs --siem-out events.jsonl 10.0.0.0/24");
+    example("rustymap --siem-format cef --siem-out events.cef --auth-audit 10.0.0.5");
+    example("rustymap --threat-intel-misp https://misp.lab.example --misp-api-key XXX");
+    example("rustymap --threat-intel-match --auth-audit 10.0.0.0/24");
+    example("rustymap --notify discord://discord.com/api/webhooks/...");
+    example("rustymap --notify teams://outlook.office.com/webhook/...");
+    example("rustymap --notify 'jira://alice:tok@jira.example.com/SEC?type=Bug'");
 
     category("AUTOMATION & TOOLING");
     section("VAULT (credenziali cifrate)");

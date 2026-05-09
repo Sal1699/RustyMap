@@ -751,6 +751,34 @@ pub struct Cli {
     #[arg(long = "history-clear")]
     pub history_clear: bool,
 
+    /// SIEM-friendly output format. One of: cef | leef | ecs | syslog.
+    /// Pair with --siem-out to write the events to file.
+    #[arg(long = "siem-format", value_name = "FORMAT")]
+    pub siem_format: Option<String>,
+
+    /// Write the SIEM-formatted events to FILE.
+    #[arg(long = "siem-out", value_name = "FILE")]
+    pub siem_out: Option<String>,
+
+    /// Sync MISP IoCs from URL into the local cache and exit.
+    /// Pair with --misp-api-key.
+    #[arg(long = "threat-intel-misp", value_name = "URL")]
+    pub threat_intel_misp: Option<String>,
+
+    /// MISP API key (used with --threat-intel-misp).
+    #[arg(long = "misp-api-key", value_name = "KEY")]
+    pub misp_api_key: Option<String>,
+
+    /// MISP days-back window for sync (default 30).
+    #[arg(long = "misp-days", default_value_t = 30)]
+    pub misp_days: u32,
+
+    /// Match scan targets against the cached MISP IoCs (loaded from
+    /// ~/.cache/rustymap/misp.json). Surfaces hits as critical
+    /// findings.
+    #[arg(long = "threat-intel-match")]
+    pub threat_intel_match: bool,
+
     /// Self-update to the latest release from GitHub
     #[arg(long = "update")]
     pub self_update: bool,

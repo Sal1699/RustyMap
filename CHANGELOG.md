@@ -4,6 +4,38 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.49.0] - 2026-05-09
+- **Fase 8 — Integrations.** Connect RustyMap into the rest of the
+  security-ops stack — SIEM forwarders, ChatOps, ticketing,
+  threat-intel platforms.
+- `--siem-format FMT --siem-out FILE` writes scan results in
+  CEF (ArcSight/Splunk CIM), LEEF v2 (QRadar), ECS JSON (Elastic),
+  or RFC 5424 syslog. One line per event (open ports + finding-
+  taxonomy entries from the v0.46 compliance pipeline). Pure
+  string output — pair with filebeat / vector / rsyslog without
+  any extra translation layer.
+- `--notify` gains three schemes alongside the existing
+  `ntfy://` / `slack://` / `https://`:
+  - `discord://hook-url` — POST `{"content": "..."}` (1900-char cap).
+  - `teams://hook-url` — POST MessageCard JSON, theme color
+    flips to red when critical findings are present.
+  - `jira://user:token@host/PROJECT[?type=Bug]` — POST issue
+    creation to `/rest/api/2/issue` with HTTP Basic auth, default
+    issue type "Task".
+- `--threat-intel-misp URL --misp-api-key KEY` queries a MISP
+  instance's `/events/restSearch` endpoint, classifies every
+  Attribute into IPs / domains / hashes / URLs, caches the result
+  at `~/.cache/rustymap/misp.json` with full provenance (event id +
+  category per IoC). `--misp-days N` sets the lookback window
+  (default 30).
+- `--threat-intel-match` runs at scan-end: every scanned target
+  (ip + hostname) is looked up against the cached IoCs; matches
+  surface as a `threat_intel_match` finding the compliance
+  evaluator treats as critical.
+- 16 new tests cover all four SIEM emitters, jira:// spec parser
+  edge cases, MISP attribute classification across types, and
+  match_targets across ip + domain hits. 170/170 pass.
+
 ## [0.48.0] - 2026-05-09
 - **Fase 7 — UX/Workflow.** Four ergonomic adds that smooth the
   on-ramp for first-time users and the daily loop for power users.

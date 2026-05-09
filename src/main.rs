@@ -60,9 +60,11 @@ mod owasp_probes;
 mod pdf_out;
 mod rdp_audit;
 mod recommend;
+mod siem;
 mod smb_audit;
 mod smtp_audit;
 mod ssh_audit;
+mod threat_intel;
 mod tls_enum;
 mod tls_grade;
 mod tls_probe;
@@ -348,6 +350,21 @@ async fn main() -> Result<()> {
         return tokio::task::spawn_blocking(move || -> Result<()> {
             let cat = exploit_refs::sync(verbose)?;
             println!("[exploit-refs] {} CVEs catalogued", cat.by_cve.len());
+            Ok(())
+        }).await?;
+    }
+    if let Some(misp_url) = &args.threat_intel_misp {
+        let url = misp_url.clone();
+        let key = args.misp_api_key.clone()
+            .ok_or_else(|| anyhow!("--misp-api-key is required when using --threat-intel-misp"))?;
+        let days = args.misp_days;
+        let verbose = args.verbose > 0;
+        return tokio::task::spawn_blocking(move || -> Result<()> {
+            let cache = threat_intel::sync(&url, &key, days, verbose)?;
+            println!(
+                "[threat-intel] cache written ({} ips, {} domains, {} hashes)",
+                cache.ips.len(), cache.domains.len(), cache.hashes.len()
+            );
             Ok(())
         }).await?;
     }
@@ -1693,6 +1710,51 @@ async fn main() -> Result<()> {
     }
     if let Some(p) = &args.output_pdf {
         pdf_out::write_pdf(std::path::Path::new(p), &sorted, &scan_type_str, started_at, elapsed)?;
+    }
+    if args.threat_intel_match {
+        let cache = threat_intel::load();
+        if cache.ips.is_empty() && cache.domains.is_empty() {
+            eprintln!("[threat-intel] cache empty — run --threat-intel-misp first");
+        } else {
+            let targets: Vec<(String, Option<String>)> = sorted
+                .iter()
+                .map(|h| (h.target.ip.to_string(), h.target.hostname.clone()))
+                .collect();
+            let matches = threat_intel::match_targets(&cache, &targets);
+            threat_intel::print(&matches);
+            for m in &matches {
+                let prov: Vec<String> = m
+                    .provenance
+                    .iter()
+                    .map(|(eid, cat)| format!("event {} ({})", eid, cat))
+                    .collect();
+                compliance_findings.push(compliance::Finding::new(
+                    "threat_intel_match",
+                    &m.host,
+                    format!("{} {} — {}", m.ioc_type, m.ioc_value, prov.join(", ")),
+                ));
+                audit.event(
+                    "threat_intel_match",
+                    json!({
+                        "host": m.host,
+                        "ioc_type": m.ioc_type,
+                        "ioc_value": m.ioc_value,
+                        "provenance": m.provenance,
+                    }),
+                );
+            }
+        }
+    }
+    if let (Some(fmt_str), Some(out)) = (&args.siem_format, &args.siem_out) {
+        match siem::SiemFormat::parse(fmt_str) {
+            Some(fmt) => {
+                siem::write(fmt, std::path::Path::new(out), &sorted, &compliance_findings)?;
+                println!("[siem] {} events written to {}", fmt.label(), out);
+            }
+            None => eprintln!("[!] unknown --siem-format '{}'", fmt_str),
+        }
+    } else if args.siem_format.is_some() ^ args.siem_out.is_some() {
+        eprintln!("[!] --siem-format and --siem-out must be used together");
     }
     if let Some(p) = &args.output_svg {
         topology_svg::write(std::path::Path::new(p), &sorted)?;
