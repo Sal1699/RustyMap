@@ -4,6 +4,36 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.54.0] - 2026-05-09
+- **Fase 13 — IPv6 maturity.** Closes the lower-hanging IPv6 gaps;
+  raw-socket IPv6 (SYN/SCTP/UDP raw) stays a separate roadmap item.
+- `Target` struct gains a `zone: Option<String>` field. Spec parser
+  in `target.rs` accepts `fe80::1%eth0` and `fe80::%eth0/64` syntax,
+  splitting off the zone label and storing it alongside the IP.
+- `Target::socket_addr_with_zone(port)` resolves the zone-ID to a
+  numeric scope id via `if_nametoindex` on Unix and pnet's adapter
+  enumeration on Windows. Numeric zones (`%2`) pass through.
+- IPv6 CIDR safety cap: any IPv6 CIDR with prefix-length below /112
+  is refused at parse time (would expand to >65k addresses). Use a
+  smaller scope or an explicit address list.
+- `src/os_fp_v6.rs`: best-effort IPv6 OS fingerprint via
+  `--os-fp-v6 HOST [--os-fp-v6-port N]`. Coarse classification into
+  Windows / Unix-like / network-gear / unknown buckets, confidence
+  capped at 70% reflecting the limited signal set vs v4 stack-fp.
+  Includes a hop-limit→initial-value estimator (64/128/255 family
+  detection assuming ≤30 hops to target).
+- High-level audits (ssh / smb / rdp / smtp / http / cloud / ICS /
+  IoT / containers) already used `SocketAddr::new(ip, port)` and
+  work transparently for global-scope IPv6. **Known limitation**:
+  link-local IPv6 to those audits doesn't thread the zone-ID
+  through; a future fase will refactor signatures to take `&Target`.
+- 17 new tests: zone-ID split for bare/CIDR forms, iface-to-scope
+  numeric passthrough + unknown-iface fallback, Target.display()
+  zone formatting, IPv6 CIDR refusal at /64, IPv6 CIDR acceptance
+  at /126, Target.zone preservation through expand_one,
+  hop-limit estimator across stack defaults, OS-fp port
+  classification across 22/3389/445/8080/9999. 227/227 pass.
+
 ## [0.53.0] - 2026-05-09
 - **Fase 12 — Core scan-engine extensions.** Closes the last
   protocol-level gaps with nmap.

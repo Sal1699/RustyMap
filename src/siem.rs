@@ -232,7 +232,7 @@ mod tests {
 
     fn host(ip: [u8; 4], port: u16) -> HostResult {
         HostResult {
-            target: Target { ip: Ipv4Addr::from(ip).into(), hostname: Some("h.test".into()) },
+            target: Target { ip: Ipv4Addr::from(ip).into(), hostname: Some("h.test".into()), zone: None },
             up: true,
             ports: vec![PortResult { port, state: PortState::Open, rtt: Duration::from_millis(0), service: None }],
             elapsed: Duration::from_millis(0),

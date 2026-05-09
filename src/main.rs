@@ -65,6 +65,7 @@ mod owasp_probes;
 mod pdf_out;
 mod plugin_meta;
 mod rdp_audit;
+mod os_fp_v6;
 mod recommend;
 mod sctp_scan;
 mod siem;
@@ -508,6 +509,34 @@ async fn main() -> Result<()> {
         let timeout = std::time::Duration::from_secs(8);
         let fp = cloud_fingerprint::fingerprint(&host, timeout).await?;
         cloud_fingerprint::print_report(&fp);
+        return Ok(());
+    }
+    if let Some(spec) = &args.os_fp_v6 {
+        let spec = spec.clone();
+        let port = args.os_fp_v6_port;
+        let dur = args.timeout();
+        // Resolve the spec the same way regular targets are resolved.
+        let mut tmp: Vec<String> = vec![spec];
+        let targets = target::expand_targets(&tmp, !args.no_dns).await?;
+        let _ = &mut tmp;
+        for t in &targets {
+            let zone = t.zone.as_deref();
+            match os_fp_v6::fingerprint_target(t.ip, zone, port, dur).await {
+                Ok(fp) => {
+                    println!(
+                        "[os-fp-v6] {} :{} → family={} ({}%)",
+                        t.display(),
+                        port,
+                        fp.family,
+                        fp.confidence
+                    );
+                    if let Some(h) = fp.hop_limit_initial_estimate {
+                        println!("           initial hop-limit estimate: {}", h);
+                    }
+                }
+                Err(e) => eprintln!("[!] os-fp-v6 {}: {}", t.display(), e),
+            }
+        }
         return Ok(());
     }
     if let Some(host) = &args.ics_scan {

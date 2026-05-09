@@ -176,7 +176,7 @@ mod tests {
 
     fn host(ip: [u8; 4], ports: &[u16]) -> HostResult {
         HostResult {
-            target: Target { ip: Ipv4Addr::from(ip).into(), hostname: None },
+            target: Target { ip: Ipv4Addr::from(ip).into(), hostname: None, zone: None },
             up: true,
             ports: ports
                 .iter()

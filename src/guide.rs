@@ -79,6 +79,9 @@ pub fn print_guide() {
     line("--PM                  ICMP Address Mask ping (type 17)");
     line("--PO PROTO            IP-protocol ping (1=ICMP, 17=UDP, 132=SCTP, 47=GRE)");
     line("--ttl N               IP TTL custom (alias di --ip-ttl)");
+    line("fe80::1%eth0          IPv6 link-local con zone-ID — supportato come target");
+    line("--os-fp-v6 HOST       IPv6 OS fingerprint best-effort (Linux/Windows/BSD/network)");
+    line("--os-fp-v6-port N     Probe port per --os-fp-v6 (default 80)");
     line("--sI ZOMBIE[:PORT]    Idle/zombie scan (spoof via host con IPID incrementale)");
     line("--sO                  IP protocol scan (TCP/UDP/ICMP/GRE/OSPF/SCTP…)");
     example("rustymap --sT 10.0.0.5");
@@ -88,6 +91,9 @@ pub fn print_guide() {
     example("rustymap --PY 80 --PM 10.0.0.0/24         # SCTP+netmask host discovery");
     example("rustymap --PO 132 10.0.0.5                # IP-proto ping (SCTP)");
     example("rustymap --sS --ttl 200 10.0.0.5          # SYN scan con TTL custom");
+    example("rustymap --sT 'fe80::1%eth0' -p 22         # IPv6 link-local con zone");
+    example("rustymap --os-fp-v6 2001:db8::42");
+    example("rustymap 2001:db8::/120                    # IPv6 CIDR (cap a /112)");
     example("rustymap --sI 192.168.1.100:80 10.0.0.5");
 
     section("HOST DISCOVERY");

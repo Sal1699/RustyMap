@@ -121,6 +121,17 @@ pub struct Cli {
     #[arg(long = "PO", value_name = "PROTO")]
     pub ping_proto: Option<u8>,
 
+    /// IPv6 OS fingerprint (best-effort). Probes a single port and
+    /// classifies into Windows / Unix-like / network-gear / unknown.
+    /// Confidence is capped low (≤70%) — IPv6 fingerprinting has
+    /// fewer signals than v4 stack-fp.
+    #[arg(long = "os-fp-v6", value_name = "HOST")]
+    pub os_fp_v6: Option<String>,
+
+    /// Probe port for --os-fp-v6 (default 80)
+    #[arg(long = "os-fp-v6-port", default_value_t = 80)]
+    pub os_fp_v6_port: u16,
+
     /// Idle (zombie) scan — spoofs probes via a zombie with incremental IP ID (root/admin)
     #[arg(long = "sI", value_name = "ZOMBIE[:PORT]", group = "scan_type")]
     pub scan_idle: Option<String>,

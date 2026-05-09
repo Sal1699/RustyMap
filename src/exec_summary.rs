@@ -230,7 +230,7 @@ mod tests {
 
     fn host_with(open_ports: &[u16], up: bool) -> HostResult {
         HostResult {
-            target: Target { ip: Ipv4Addr::new(10, 0, 0, 1).into(), hostname: None },
+            target: Target { ip: Ipv4Addr::new(10, 0, 0, 1).into(), hostname: None, zone: None },
             up,
             ports: open_ports
                 .iter()
@@ -274,9 +274,9 @@ mod tests {
     #[test]
     fn most_exposed_picked_correctly() {
         let mut h1 = host_with(&[22], true);
-        h1.target = Target { ip: Ipv4Addr::new(1, 1, 1, 1).into(), hostname: None };
+        h1.target = Target { ip: Ipv4Addr::new(1, 1, 1, 1).into(), hostname: None, zone: None };
         let mut h2 = host_with(&[22, 80, 443, 3389], true);
-        h2.target = Target { ip: Ipv4Addr::new(2, 2, 2, 2).into(), hostname: None };
+        h2.target = Target { ip: Ipv4Addr::new(2, 2, 2, 2).into(), hostname: None, zone: None };
         let s = build(&[h1, h2], 1.0);
         let (host, n) = s.most_exposed_host.unwrap();
         assert_eq!(n, 4);
