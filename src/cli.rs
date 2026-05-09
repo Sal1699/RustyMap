@@ -95,6 +95,32 @@ pub struct Cli {
     #[arg(long = "sU", group = "scan_type")]
     pub scan_udp: bool,
 
+    /// SCTP INIT scan — `-sY` in nmap. Sends a chunk-1 INIT and
+    /// classifies INIT-ACK→open / ABORT→closed / no reply→filtered.
+    /// Requires raw IP (root/CAP_NET_RAW or Npcap).
+    #[arg(long = "sY", group = "scan_type")]
+    pub scan_sctp_init: bool,
+
+    /// SCTP COOKIE-ECHO scan — `-sZ` in nmap. Useful past stateless
+    /// firewalls that pass the chunk through; ABORT→closed.
+    #[arg(long = "sZ", group = "scan_type")]
+    pub scan_sctp_cookie: bool,
+
+    /// SCTP INIT ping for host discovery — `-PY` in nmap.
+    #[arg(long = "PY", value_name = "PORT", default_value = "")]
+    pub ping_sctp: String,
+
+    /// ICMP Address Mask ping (type 17) — `-PM` in nmap.
+    #[arg(long = "PM")]
+    pub ping_netmask: bool,
+
+    /// IP-protocol ping — `-PO PROTO` in nmap. Sends a bare IP
+    /// packet with the requested protocol number; any reply (or
+    /// proto-unreachable ICMP) confirms the host is up. Common
+    /// values: 1 (ICMP), 17 (UDP), 132 (SCTP), 47 (GRE).
+    #[arg(long = "PO", value_name = "PROTO")]
+    pub ping_proto: Option<u8>,
+
     /// Idle (zombie) scan — spoofs probes via a zombie with incremental IP ID (root/admin)
     #[arg(long = "sI", value_name = "ZOMBIE[:PORT]", group = "scan_type")]
     pub scan_idle: Option<String>,
@@ -287,8 +313,9 @@ pub struct Cli {
     #[arg(long = "source-port")]
     pub source_port: Option<u16>,
 
-    /// Custom IP TTL for raw scan probes (default 64)
-    #[arg(long = "ip-ttl")]
+    /// Custom IP TTL for raw scan probes (default 64). `--ttl` is a
+    /// nmap-style alias.
+    #[arg(long = "ip-ttl", visible_alias = "ttl")]
     pub ip_ttl: Option<u8>,
 
     /// Per-probe TTL jitter (±N). Randomizes IP TTL on every probe.
@@ -892,6 +919,8 @@ pub enum ScanType {
     Udp,
     Idle,
     IpProto,
+    SctpInit,
+    SctpCookie,
 }
 
 impl Cli {
@@ -905,6 +934,8 @@ impl Cli {
         else if self.scan_maimon { ScanType::Maimon }
         else if self.scan_list { ScanType::List }
         else if self.scan_udp { ScanType::Udp }
+        else if self.scan_sctp_init { ScanType::SctpInit }
+        else if self.scan_sctp_cookie { ScanType::SctpCookie }
         else if self.scan_idle.is_some() { ScanType::Idle }
         else if self.scan_ipproto { ScanType::IpProto }
         else { ScanType::Connect }

@@ -73,11 +73,21 @@ pub fn print_guide() {
     line("--sM                  TCP Maimon scan (FIN+ACK, BSD-derived stacks)");
     line("--sL                  List scan: risolve target con PTR e esce");
     line("--sU                  UDP scan");
+    line("--sY                  SCTP INIT scan (raw, root/Npcap)");
+    line("--sZ                  SCTP COOKIE-ECHO scan (raw, root/Npcap)");
+    line("--PY [PORT]           SCTP INIT ping (host discovery; default port 80)");
+    line("--PM                  ICMP Address Mask ping (type 17)");
+    line("--PO PROTO            IP-protocol ping (1=ICMP, 17=UDP, 132=SCTP, 47=GRE)");
+    line("--ttl N               IP TTL custom (alias di --ip-ttl)");
     line("--sI ZOMBIE[:PORT]    Idle/zombie scan (spoof via host con IPID incrementale)");
     line("--sO                  IP protocol scan (TCP/UDP/ICMP/GRE/OSPF/SCTP…)");
     example("rustymap --sT 10.0.0.5");
     example("rustymap --sS -p 1-65535 10.0.0.5");
     example("rustymap --sU -p 53,123,161 10.0.0.5");
+    example("rustymap --sY -p 80,443,2049 10.0.0.5     # SCTP INIT scan");
+    example("rustymap --PY 80 --PM 10.0.0.0/24         # SCTP+netmask host discovery");
+    example("rustymap --PO 132 10.0.0.5                # IP-proto ping (SCTP)");
+    example("rustymap --sS --ttl 200 10.0.0.5          # SYN scan con TTL custom");
     example("rustymap --sI 192.168.1.100:80 10.0.0.5");
 
     section("HOST DISCOVERY");

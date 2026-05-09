@@ -66,6 +66,7 @@ mod pdf_out;
 mod plugin_meta;
 mod rdp_audit;
 mod recommend;
+mod sctp_scan;
 mod siem;
 mod smb_audit;
 mod smtp_audit;
@@ -991,10 +992,40 @@ async fn main() -> Result<()> {
                     std::net::IpAddr::V6(_) => Some(t),
                 })
                 .collect()
-        } else if args.ping_icmp || args.ping_timestamp {
+        } else if args.ping_icmp || args.ping_timestamp || args.ping_netmask || args.ping_proto.is_some() || !args.ping_sctp.is_empty() {
             #[cfg(windows)]
             npcap::ensure_available()?;
-            icmp_ping::icmp_discover_kind(targets, args.timeout(), args.ping_timestamp)?
+            // Run echo/timestamp first via the existing helper, then
+            // fold in netmask/proto/SCTP results when configured.
+            let mut alive = if args.ping_icmp || args.ping_timestamp {
+                icmp_ping::icmp_discover_kind(targets.clone(), args.timeout(), args.ping_timestamp)?
+            } else {
+                Vec::new()
+            };
+            let already: std::collections::HashSet<std::net::IpAddr> =
+                alive.iter().map(|t| t.ip).collect();
+            let proto_ping = args.ping_proto;
+            let want_netmask = args.ping_netmask;
+            let sctp_port: Option<u16> = if args.ping_sctp.is_empty() {
+                None
+            } else {
+                args.ping_sctp.parse().ok().or(Some(80))
+            };
+            let to = args.timeout();
+            for t in &targets {
+                if already.contains(&t.ip) {
+                    continue;
+                }
+                if let std::net::IpAddr::V4(v4) = t.ip {
+                    let up = (want_netmask && icmp_ping::icmp_netmask(v4, to))
+                        || (proto_ping.map(|p| icmp_ping::icmp_proto_ping(v4, p, to)).unwrap_or(false))
+                        || (sctp_port.map(|p| sctp_scan::sctp_ping(v4, p, to)).unwrap_or(false));
+                    if up {
+                        alive.push(t.clone());
+                    }
+                }
+            }
+            alive
         } else {
             discovery::discover_hosts(targets, args.timeout(), args.parallel()).await
         };
@@ -1309,6 +1340,34 @@ async fn main() -> Result<()> {
             run_idle(targets, port_list.clone(), scanner, zombie_port, timeout_dur).await
         }
         ScanType::List => unreachable!("-sL is handled before the dispatch"),
+        ScanType::SctpInit | ScanType::SctpCookie => {
+            let kind = match scan_type {
+                ScanType::SctpInit => sctp_scan::SctpScanKind::Init,
+                ScanType::SctpCookie => sctp_scan::SctpScanKind::CookieEcho,
+                _ => unreachable!(),
+            };
+            let mut out = Vec::with_capacity(targets.len());
+            for t in &targets {
+                let r = tokio::task::spawn_blocking({
+                    let target = t.clone();
+                    let ports = port_list.clone();
+                    let to = timeout_dur;
+                    move || sctp_scan::sctp_scan(target, &ports, kind, to)
+                })
+                .await
+                .unwrap_or_else(|_| crate::scanner::HostResult {
+                    target: t.clone(),
+                    up: false,
+                    ports: vec![],
+                    elapsed: std::time::Duration::from_millis(0),
+                    os: None,
+                    device: None,
+                    mac: None,
+                });
+                out.push(r);
+            }
+            out
+        }
         ScanType::IpProto => {
             // IP protocol scan operates per host (not per port) — run a
             // dedicated scanner and short-circuit the rest of the pipeline.

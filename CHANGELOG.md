@@ -4,6 +4,29 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.53.0] - 2026-05-09
+- **Fase 12 — Core scan-engine extensions.** Closes the last
+  protocol-level gaps with nmap.
+- `--sY` SCTP INIT scan: hand-rolled SCTP common header + INIT
+  chunk with proper CRC32c (Castagnoli, RFC 4960 §6.8) checksum.
+  INIT-ACK→open / ABORT→closed / no reply→filtered. Raw IP,
+  requires root/CAP_NET_RAW or Npcap.
+- `--sZ` SCTP COOKIE-ECHO scan: passes stateless firewalls that
+  filter INIT but pass post-handshake chunks; ABORT→closed,
+  silence→filtered/openish.
+- `--PY [PORT]` SCTP INIT ping for host discovery (default port 80).
+- `--PM` ICMP Address Mask ping (type 17/18). Useful when echo and
+  timestamp are filtered on legacy gear.
+- `--PO PROTO` IP-protocol ping. Sends a bare IP packet with the
+  requested protocol number; any reply or ICMP proto-unreachable
+  confirms the host. Common values: 1 (ICMP), 17 (UDP), 132 (SCTP),
+  47 (GRE).
+- `--ttl N` nmap-style alias for the existing `--ip-ttl` knob.
+- 8 new tests cover SCTP INIT/COOKIE-ECHO byte layout, CRC32c
+  determinism + payload-sensitivity, classify() across reply
+  types, first-chunk-type extractor.
+- Adds `crc32c = "0.6"` dep (~3 KB pure Rust).
+
 ## [0.52.0] - 2026-05-09
 - **Fase 11 — Plugin metadata.** Final release of the 11-fase
   roadmap. Rhai scripts now carry structured metadata in their

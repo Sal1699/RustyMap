@@ -118,6 +118,119 @@ pub fn icmp_echo(dst: Ipv4Addr, timeout: Duration) -> bool {
     matches!(rx_chan.recv_timeout(timeout), Ok(true))
 }
 
+/// Send an ICMP Address Mask Request (type 17) and wait for the reply
+/// (type 18). Useful when other ICMP types are filtered — netmask
+/// requests are sometimes left enabled on legacy gear because they
+/// were considered diagnostic-only.
+pub fn icmp_netmask(dst: Ipv4Addr, timeout: Duration) -> bool {
+    let (mut tx, mut rx) = match transport_channel(
+        4096,
+        Layer4(Ipv4(IpNextHeaderProtocols::Icmp)),
+    ) {
+        Ok(pair) => pair,
+        Err(_) => return false,
+    };
+
+    // 12-byte ICMP Address Mask Request:
+    //   type=17, code=0, checksum, identifier, sequence, address-mask(4)
+    let mut buf = [0u8; 12];
+    buf[0] = 17;
+    buf[1] = 0;
+    buf[4..6].copy_from_slice(&(std::process::id() as u16).to_be_bytes());
+    buf[6..8].copy_from_slice(&1u16.to_be_bytes());
+    // address-mask field (offset 8..12) stays zero — request form
+    let cs = pnet::util::checksum(&buf, 1);
+    buf[2..4].copy_from_slice(&cs.to_be_bytes());
+
+    let icmp = IcmpPacket::new(&buf).unwrap();
+    if tx.send_to(icmp, IpAddr::V4(dst)).is_err() {
+        return false;
+    }
+
+    let (tx_chan, rx_chan) = mpsc::channel::<bool>();
+    thread::spawn(move || {
+        let mut iter = icmp_packet_iter(&mut rx);
+        loop {
+            match iter.next() {
+                Ok((packet, src)) => {
+                    if src != IpAddr::V4(dst) {
+                        continue;
+                    }
+                    // Type 18 = Address Mask Reply
+                    if packet.get_icmp_type().0 == 18 {
+                        let _ = tx_chan.send(true);
+                        return;
+                    }
+                }
+                Err(_) => {
+                    let _ = tx_chan.send(false);
+                    return;
+                }
+            }
+        }
+    });
+    matches!(rx_chan.recv_timeout(timeout), Ok(true))
+}
+
+/// IP-protocol ping (`-PO PROTOCOL_NUM`). Sends a bare IP packet with
+/// the requested protocol number and waits for *any* reply: a
+/// proto-specific response means the host is up; an ICMP destination-
+/// unreachable from the host (type 3, code 2 = "protocol unreachable")
+/// also confirms reachability.
+///
+/// Common values: 1 (ICMP), 6 (TCP), 17 (UDP), 132 (SCTP), 47 (GRE).
+/// We send a single empty IP packet via Layer3.
+pub fn icmp_proto_ping(dst: Ipv4Addr, proto: u8, timeout: Duration) -> bool {
+    use pnet::transport::TransportChannelType::Layer3;
+    use pnet::packet::ip::IpNextHeaderProtocol;
+    use pnet::packet::ipv4::MutableIpv4Packet;
+
+    let proto = IpNextHeaderProtocol(proto);
+    let (mut tx, mut rx) = match transport_channel(4096, Layer3(proto)) {
+        Ok(pair) => pair,
+        Err(_) => return false,
+    };
+
+    // Minimal IPv4 packet: 20-byte header + zero payload.
+    let mut buf = [0u8; 20];
+    {
+        let mut pkt = MutableIpv4Packet::new(&mut buf).unwrap();
+        pkt.set_version(4);
+        pkt.set_header_length(5);
+        pkt.set_total_length(20);
+        pkt.set_ttl(64);
+        pkt.set_next_level_protocol(proto);
+        pkt.set_destination(dst);
+        // source IP filled by kernel when zero
+        pkt.set_checksum(pnet::packet::ipv4::checksum(&pkt.to_immutable()));
+    }
+    let ipv4 = pnet::packet::ipv4::Ipv4Packet::new(&buf).unwrap();
+    if tx.send_to(ipv4, IpAddr::V4(dst)).is_err() {
+        return false;
+    }
+
+    let (tx_chan, rx_chan) = mpsc::channel::<bool>();
+    thread::spawn(move || {
+        use pnet::transport::ipv4_packet_iter;
+        let mut iter = ipv4_packet_iter(&mut rx);
+        loop {
+            match iter.next() {
+                Ok((_pkt, src)) => {
+                    if src == IpAddr::V4(dst) {
+                        let _ = tx_chan.send(true);
+                        return;
+                    }
+                }
+                Err(_) => {
+                    let _ = tx_chan.send(false);
+                    return;
+                }
+            }
+        }
+    });
+    matches!(rx_chan.recv_timeout(timeout), Ok(true))
+}
+
 #[allow(dead_code)]
 pub fn icmp_discover(targets: Vec<Target>, timeout: Duration) -> Result<Vec<Target>> {
     icmp_discover_kind(targets, timeout, false)
