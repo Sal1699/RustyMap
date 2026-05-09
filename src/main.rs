@@ -41,8 +41,10 @@ mod syn_emu;
 mod target;
 mod tcp_fp;
 mod apk_scan;
+mod baseline_diff;
 mod cloud_buckets;
 mod compliance;
+mod exec_summary;
 mod cloud_fingerprint;
 mod cloud_metadata;
 mod ipa_scan;
@@ -54,6 +56,7 @@ mod exploit_refs;
 #[allow(dead_code)]
 mod nvd;
 mod owasp_probes;
+mod pdf_out;
 mod rdp_audit;
 mod smb_audit;
 mod smtp_audit;
@@ -61,6 +64,7 @@ mod ssh_audit;
 mod tls_enum;
 mod tls_grade;
 mod tls_probe;
+mod topology_svg;
 mod web_crawl;
 mod top_ports;
 mod traceroute;
@@ -1632,6 +1636,22 @@ async fn main() -> Result<()> {
         report::write_custom(tpl, out, &sorted, &scan_type_str, started_at, elapsed, &diffs)?;
     } else if args.template_path.is_some() ^ args.output_template.is_some() {
         return Err(anyhow!("--template and --oT must be used together"));
+    }
+    if let Some(p) = &args.output_pdf {
+        pdf_out::write_pdf(std::path::Path::new(p), &sorted, &scan_type_str, started_at, elapsed)?;
+    }
+    if let Some(p) = &args.output_svg {
+        topology_svg::write(std::path::Path::new(p), &sorted)?;
+    }
+    if let Some(baseline) = &args.diff_against {
+        match baseline_diff::diff_against(std::path::Path::new(baseline), &sorted) {
+            Ok(d) => baseline_diff::print(&d),
+            Err(e) => eprintln!("[!] --diff-against {}: {}", baseline, e),
+        }
+    }
+    if args.executive_summary {
+        let summary = exec_summary::build(&sorted, elapsed);
+        exec_summary::print(&summary);
     }
 
     // Compliance evaluation. Hooks into the findings collected by the

@@ -206,6 +206,10 @@ pub fn print_guide() {
     line("--ipa-scan FILE       Static IPA: Info.plist (ATS, URL schemes), binary secrets");
     line("--compliance FW       Eval findings vs framework: pci-dss|hipaa|nist-800-53|iso-27001|cis");
     line("--compliance-report F Scrive un report Markdown del risultato compliance");
+    line("--executive-summary   Stampa narrativa + top services + esposizioni sensibili");
+    line("--oP FILE.pdf         Scrive report PDF (printpdf, no system deps)");
+    line("--oSvg FILE.svg       Scrive topology SVG self-contained (no Graphviz)");
+    line("--diff-against F.json Diff vs un --oJ precedente (no --db needed)");
     line("--notify URL          Webhook su completion (ntfy://topic, slack://hook, https://)");
     line("--progress            Spinner indicatif durante lo scan (elapsed + tipo + N target)");
     line("--dns-sniff           Sniff DNS sulla rete (admin + Npcap)");
@@ -232,6 +236,8 @@ pub fn print_guide() {
     example("rustymap --ipa-scan MyApp.ipa");
     example("rustymap --auth-audit --tls-grade --compliance pci-dss 10.0.0.5");
     example("rustymap --auth-audit --compliance cis --compliance-report cis.md target");
+    example("rustymap --executive-summary --oP report.pdf --oSvg map.svg 10.0.0.0/24");
+    example("rustymap --diff-against baseline.json --oJ now.json 10.0.0.0/24");
 
     category("AUTOMATION & TOOLING");
     section("VAULT (credenziali cifrate)");

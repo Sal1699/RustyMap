@@ -4,6 +4,31 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.47.0] - 2026-05-09
+- **Fase 6 — Reporting.** Four new modules push the post-scan
+  workflow toward something handoff-ready.
+- `--executive-summary`: pure-function distillation of a `[HostResult]`
+  into hosts-up / hosts-total / open-port-total / top-5-services /
+  most-exposed-host / sensitive-port list. Three render targets:
+  terminal print, plain text, and Markdown. Sensitive-port table
+  flags Telnet, RDP, MSSQL, MySQL, PostgreSQL, Redis, Mongo,
+  Elasticsearch, Memcached, Docker-no-TLS, VNC, WinRM-HTTP.
+- `--oP FILE.pdf`: native PDF report via `printpdf` (pure Rust, no
+  Graphviz / pandoc / wkhtmltopdf). A4 portrait, Helvetica builtin
+  font, naïve pagination — three sections: title + metadata, exec
+  summary, per-host detail with services + OS guess.
+- `--oSvg FILE.svg`: hub-and-spoke topology rendered as a
+  self-contained SVG (no Graphviz dependency). Each up-host orbits
+  the scanner node on a ring whose radius scales with host count;
+  open ports surround each host as colour-coded chips (green = HTTP/
+  SSH/SMTP/DNS, amber = SMB/RDP/LDAP/WinRM, red = DBs/cache/Docker/
+  VNC).
+- `--diff-against FILE.json`: file-based scan diff that reads any
+  prior `--oJ` export and reports new hosts, gone hosts, newly-open
+  ports, newly-closed ports, state transitions. Works without the
+  SQLite db, so CI artefacts and ad-hoc baselines compare cleanly.
+- 16 new tests, 144/144 pass. Adds `printpdf` dep (pure Rust).
+
 ## [0.46.0] - 2026-05-09
 - **Fase 5 — Compliance.** New `compliance` module with built-in
   templates for PCI-DSS v4.0, HIPAA Security Rule, NIST SP 800-53

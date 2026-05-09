@@ -706,6 +706,27 @@ pub struct Cli {
     #[arg(long = "compliance-report", value_name = "FILE.md")]
     pub compliance_report: Option<String>,
 
+    /// Print an executive-summary block at end of scan (hosts up,
+    /// open-port total, top services, sensitive exposures).
+    #[arg(long = "executive-summary")]
+    pub executive_summary: bool,
+
+    /// Write a PDF report (printpdf, no system deps) to FILE.pdf.
+    #[arg(long = "oP", value_name = "FILE.pdf")]
+    pub output_pdf: Option<String>,
+
+    /// Write a self-contained SVG topology map (no Graphviz needed)
+    /// to FILE.svg. Hub-and-spoke layout with port chips coloured by
+    /// service-tier severity.
+    #[arg(long = "oSvg", value_name = "FILE.svg")]
+    pub output_svg: Option<String>,
+
+    /// Diff the current scan against a previously-saved JSON output
+    /// (--oJ). Reports new/closed ports, new/gone hosts, state
+    /// changes. Works without --db.
+    #[arg(long = "diff-against", value_name = "FILE.json")]
+    pub diff_against: Option<String>,
+
     /// Self-update to the latest release from GitHub
     #[arg(long = "update")]
     pub self_update: bool,
