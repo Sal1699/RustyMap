@@ -45,6 +45,7 @@ mod baseline_diff;
 mod cloud_buckets;
 mod compliance;
 mod exec_summary;
+mod history;
 mod cloud_fingerprint;
 mod cloud_metadata;
 mod ipa_scan;
@@ -58,6 +59,7 @@ mod nvd;
 mod owasp_probes;
 mod pdf_out;
 mod rdp_audit;
+mod recommend;
 mod smb_audit;
 mod smtp_audit;
 mod ssh_audit;
@@ -66,6 +68,7 @@ mod tls_grade;
 mod tls_probe;
 mod topology_svg;
 mod web_crawl;
+mod wizard;
 mod top_ports;
 mod traceroute;
 mod tui;
@@ -253,6 +256,57 @@ async fn main() -> Result<()> {
     if let Some(secs) = args.ble_scan {
         let dur = secs.clamp(1, 300);
         return ble::scan(dur).await;
+    }
+    if args.history_clear {
+        history::clear()?;
+        println!("[history] cleared");
+        return Ok(());
+    }
+    if let Some(n) = args.history {
+        let entries = history::load(n.max(1))?;
+        history::print(&entries);
+        return Ok(());
+    }
+    if args.wizard {
+        let out = tokio::task::spawn_blocking(wizard::run).await??;
+        if let Some(path) = &out.save_profile {
+            // Build a Cli from the wizard args via clap, then derive
+            // a profile from it. Lets save_profile() reuse the same
+            // serialization logic as `--save-profile`.
+            let mut argv = vec!["rustymap".to_string()];
+            argv.extend(out.args.iter().cloned());
+            match Cli::try_parse_from(&argv) {
+                Ok(synth) => {
+                    let prof = profile::from_cli(&synth, Some("wizard"));
+                    if let Err(e) = profile::save(path, &prof) {
+                        eprintln!("[!] could not save profile: {}", e);
+                    } else {
+                        println!("[wizard] profile written to {}", path);
+                    }
+                }
+                Err(e) => eprintln!("[!] couldn't parse wizard output as CLI: {}", e),
+            }
+        }
+        if !out.run_now {
+            return Ok(());
+        }
+        // Re-enter main with the wizard's args by re-parsing them.
+        let mut argv = vec!["rustymap".to_string()];
+        argv.extend(out.args.iter().cloned());
+        args = Cli::parse_from(&argv);
+    }
+    if let Some(host) = &args.recommend {
+        let host = host.clone();
+        let dur = std::time::Duration::from_secs(2);
+        let rec = recommend::analyze(&host, dur).await?;
+        recommend::print(&rec);
+        return Ok(());
+    }
+    if let Some(path) = &args.save_profile {
+        let prof = profile::from_cli(&args, None);
+        profile::save(path, &prof)?;
+        println!("[profile] saved to {}", path);
+        return Ok(());
     }
     if args.iflist {
         let target_ip = args
@@ -1692,6 +1746,26 @@ async fn main() -> Result<()> {
                 "not_applicable": eval.not_applicable,
             }),
         );
+    }
+
+    // Append to per-user history (best-effort — IO errors are
+    // logged but never fail the scan).
+    if !was_cancelled {
+        let entry = history::HistoryEntry {
+            timestamp: chrono::Local::now().to_rfc3339(),
+            targets: args.targets.clone(),
+            hosts_total: sorted.len(),
+            hosts_up: sorted.iter().filter(|h| h.up).count(),
+            open_ports: sorted
+                .iter()
+                .map(|h| h.ports.iter().filter(|p| p.state == PortState::Open).count())
+                .sum(),
+            elapsed_secs: elapsed,
+            args: std::env::args().collect::<Vec<_>>().join(" "),
+        };
+        if let Err(e) = history::append(&entry) {
+            eprintln!("[!] history append failed: {}", e);
+        }
     }
 
     audit.event(

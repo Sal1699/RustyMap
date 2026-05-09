@@ -1,11 +1,11 @@
 use crate::cli::Cli;
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 
 /// A compliance / scan profile loaded from a TOML file.
 /// Any field set here overrides the corresponding CLI arg unless already set.
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct Profile {
     pub name: Option<String>,
     #[allow(dead_code)]
@@ -50,6 +50,48 @@ pub fn apply(cli: &mut Cli, p: &Profile) {
             _ => {}
         }
     }
+}
+
+/// Build a `Profile` from the current CLI args. Only fields the
+/// caller actually changed from clap defaults are written, so the
+/// resulting TOML is compact and editable by hand.
+pub fn from_cli(cli: &Cli, name: Option<&str>) -> Profile {
+    let scan_type = if cli.scan_syn {
+        Some("syn".into())
+    } else if cli.scan_fin {
+        Some("fin".into())
+    } else if cli.scan_null {
+        Some("null".into())
+    } else if cli.scan_xmas {
+        Some("xmas".into())
+    } else if cli.scan_ack {
+        Some("ack".into())
+    } else if cli.scan_udp {
+        Some("udp".into())
+    } else {
+        None
+    };
+
+    Profile {
+        name: name.map(String::from),
+        description: None,
+        ports: if cli.ports != "1-1000" { Some(cli.ports.clone()) } else { None },
+        scan_type,
+        timing: if cli.timing != 3 { Some(cli.timing) } else { None },
+        service_version: if cli.service_version { Some(true) } else { None },
+        os_fingerprint: if cli.os_fingerprint { Some(true) } else { None },
+        randomize_ports: if cli.randomize_ports { Some(true) } else { None },
+        scan_delay_ms: if cli.scan_delay_ms != 0 { Some(cli.scan_delay_ms) } else { None },
+        cve_db: cli.cve_db.clone(),
+        script: cli.script_path.clone(),
+        adaptive: if cli.adaptive { Some(true) } else { None },
+    }
+}
+
+pub fn save(path: &str, p: &Profile) -> Result<()> {
+    let s = toml::to_string_pretty(p).context("serialize profile to TOML")?;
+    fs::write(path, s).with_context(|| format!("write {}", path))?;
+    Ok(())
 }
 
 pub fn parse_duration(spec: &str) -> Option<std::time::Duration> {

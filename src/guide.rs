@@ -210,6 +210,11 @@ pub fn print_guide() {
     line("--oP FILE.pdf         Scrive report PDF (printpdf, no system deps)");
     line("--oSvg FILE.svg       Scrive topology SVG self-contained (no Graphviz)");
     line("--diff-against F.json Diff vs un --oJ precedente (no --db needed)");
+    line("--wizard              Wizard interattivo che assembla un comando rustymap");
+    line("--recommend HOST      Probe rapido + suggerisce i flag più utili");
+    line("--save-profile F.toml Salva l'invocation corrente come profilo TOML");
+    line("--history [N]         Mostra le ultime N scan (default 20)");
+    line("--history-clear       Tronca lo storico delle scansioni");
     line("--notify URL          Webhook su completion (ntfy://topic, slack://hook, https://)");
     line("--progress            Spinner indicatif durante lo scan (elapsed + tipo + N target)");
     line("--dns-sniff           Sniff DNS sulla rete (admin + Npcap)");
@@ -238,6 +243,10 @@ pub fn print_guide() {
     example("rustymap --auth-audit --compliance cis --compliance-report cis.md target");
     example("rustymap --executive-summary --oP report.pdf --oSvg map.svg 10.0.0.0/24");
     example("rustymap --diff-against baseline.json --oJ now.json 10.0.0.0/24");
+    example("rustymap --wizard");
+    example("rustymap --recommend example.com");
+    example("rustymap -sV --auth-audit --save-profile lab.toml 10.0.0.5");
+    example("rustymap --history 50");
 
     category("AUTOMATION & TOOLING");
     section("VAULT (credenziali cifrate)");

@@ -4,6 +4,32 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.48.0] - 2026-05-09
+- **Fase 7 — UX/Workflow.** Four ergonomic adds that smooth the
+  on-ramp for first-time users and the daily loop for power users.
+- `--wizard` walks through stdin prompts (target → scan type → ports
+  → service/OS → audit add-ons → compliance → outputs) and either
+  runs the assembled scan immediately or saves it to a profile file.
+  Pure stdin/stdout, no TUI dep.
+- `--recommend HOST` does a focused TCP-connect probe over ~30 well-
+  known ports, then prints a curated set of follow-up flags
+  (`--ssh-audit`, `--smb-audit`, `--rdp-audit`, `--smtp-audit`,
+  `--http-enum`, `--ssl-enum`, `--tls-grade`, `--dns-security`) plus
+  an explanatory note per suggestion. Sensitive DB/cache exposure
+  surfaces as a warning rather than a flag.
+- `--save-profile FILE.toml` serializes the *non-default* scan
+  settings of the current invocation to a TOML the user can later
+  reload with `--profile`. Pairs naturally with the wizard's
+  "save?" prompt.
+- `--history [N]` (default 20) prints recent scans recorded at
+  `~/.config/rustymap/history.jsonl` (or `%APPDATA%\rustymap\` on
+  Windows). Each successful scan auto-appends one JSON line with
+  timestamp, targets, hosts up/total, open ports, elapsed seconds,
+  and the full CLI args. `--history-clear` truncates.
+- 10 new tests cover wizard helper boundaries, recommend's pure
+  derivation function across SSH/HTTPS/DB/DNS/empty inputs, history
+  JSON round-trip + append/load. 154/154 pass.
+
 ## [0.47.0] - 2026-05-09
 - **Fase 6 — Reporting.** Four new modules push the post-scan
   workflow toward something handoff-ready.

@@ -727,6 +727,30 @@ pub struct Cli {
     #[arg(long = "diff-against", value_name = "FILE.json")]
     pub diff_against: Option<String>,
 
+    /// Interactive scan-builder wizard. Walks through prompts and
+    /// either runs the assembled scan or saves it to a profile file.
+    #[arg(long = "wizard")]
+    pub wizard: bool,
+
+    /// Probe a host's common ports and print the rustymap flags
+    /// most worth running next given what's open.
+    #[arg(long = "recommend", value_name = "HOST")]
+    pub recommend: Option<String>,
+
+    /// Persist the current invocation as a TOML profile usable with
+    /// `--profile`. Captures non-default scan settings only.
+    #[arg(long = "save-profile", value_name = "FILE.toml")]
+    pub save_profile: Option<String>,
+
+    /// Show the last N scans recorded in ~/.config/rustymap/history.jsonl
+    /// (default 20). Each scan is appended on successful completion.
+    #[arg(long = "history", value_name = "N", num_args = 0..=1, default_missing_value = "20")]
+    pub history: Option<usize>,
+
+    /// Truncate the scan-history file.
+    #[arg(long = "history-clear")]
+    pub history_clear: bool,
+
     /// Self-update to the latest release from GitHub
     #[arg(long = "update")]
     pub self_update: bool,
