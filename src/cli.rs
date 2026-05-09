@@ -682,6 +682,18 @@ pub struct Cli {
     #[arg(long = "cloud-fingerprint", value_name = "DOMAIN")]
     pub cloud_fingerprint: Option<String>,
 
+    /// Static analysis of an Android APK: AndroidManifest.xml string-pool
+    /// parse (permissions, components, flag refs), classes.dex sweep
+    /// for SSL-pinning libraries and hardcoded secrets.
+    #[arg(long = "apk-scan", value_name = "FILE")]
+    pub apk_scan: Option<String>,
+
+    /// Static analysis of an iOS IPA: Info.plist parse (bundle id,
+    /// URL schemes, ATS exceptions), Mach-O sweep for TrustKit /
+    /// NSPinnedDomains and hardcoded secrets.
+    #[arg(long = "ipa-scan", value_name = "FILE")]
+    pub ipa_scan: Option<String>,
+
     /// Self-update to the latest release from GitHub
     #[arg(long = "update")]
     pub self_update: bool,

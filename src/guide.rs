@@ -202,6 +202,8 @@ pub fn print_guide() {
     line("--cloud-metadata      Probe IMDS 169.254.169.254 (AWS/GCP/Azure/OpenStack)");
     line("--cloud-metadata-via URL  Probe IMDS via SSRF prefix sul target");
     line("--cloud-fingerprint D Identifica AWS/GCP/Azure/Cloudflare/Akamai/Fastly da DNS");
+    line("--apk-scan FILE       Static APK: manifest perms+components, dex secrets+pinning");
+    line("--ipa-scan FILE       Static IPA: Info.plist (ATS, URL schemes), binary secrets");
     line("--notify URL          Webhook su completion (ntfy://topic, slack://hook, https://)");
     line("--progress            Spinner indicatif durante lo scan (elapsed + tipo + N target)");
     line("--dns-sniff           Sniff DNS sulla rete (admin + Npcap)");
@@ -224,6 +226,8 @@ pub fn print_guide() {
     example("rustymap --cloud-metadata             # da dentro una VM");
     example("rustymap --cloud-metadata-via 'https://target/?u='");
     example("rustymap --cloud-fingerprint cdn.example.com");
+    example("rustymap --apk-scan app-release.apk");
+    example("rustymap --ipa-scan MyApp.ipa");
 
     category("AUTOMATION & TOOLING");
     section("VAULT (credenziali cifrate)");

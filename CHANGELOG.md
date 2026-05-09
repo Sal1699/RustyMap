@@ -4,6 +4,40 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.45.0] - 2026-05-09
+- **Fase 4 — Mobile.** Static analysis of Android APKs and iOS IPAs
+  with no execution and no instrumentation — pure file reads on a
+  zip archive.
+- `--apk-scan FILE` opens the APK, parses `AndroidManifest.xml` via
+  an inline AXML string-pool decoder (no extra dep — supports both
+  UTF-8 and UTF-16 string pools), classifies every string into
+  permissions / component class names / suspicious flag references
+  (`debuggable`, `allowBackup`, `usesCleartextTraffic`, `testOnly`,
+  `cleartextTrafficPermitted`, `exported`). Dangerous-permission
+  list covers the runtime-prompt set (SMS / call-log / contacts /
+  audio / camera / location / external storage / accessibility /
+  device-admin / package-usage-stats / MANAGE_EXTERNAL_STORAGE /
+  QUERY_ALL_PACKAGES). Detects SSL pinning via byte-search for
+  `okhttp3/CertificatePinner`, TrustKit, Network Security Config,
+  custom X509TrustManager, gRPC+OkHttp.
+- `--ipa-scan FILE` opens the IPA, locates `Payload/*.app/Info.plist`
+  (binary or XML — auto-detected via the `plist` crate), pulls
+  bundle ID / display name / version / minimum iOS, enumerates
+  `CFBundleURLSchemes`, audits `NSAppTransportSecurity` for
+  `NSAllowsArbitraryLoads*`, per-domain `NSExceptionAllowsInsecureHTTPLoads`,
+  `NSExceptionMinimumTLSVersion = TLSv1.0/1.1`, and PFS waiver.
+  Detects pinning via `TrustKit` / `TSKConfiguration` /
+  `NSPinnedDomains` / `SecTrustEvaluate` / custom
+  `URLSession didReceiveChallenge` byte signatures.
+- `mobile_secrets` shared module: regex sweep over every entry's
+  bytes for AWS access-key-IDs, Google API keys, Slack tokens,
+  GitHub PAT/OAuth, Stripe secrets, JWTs, PEM private-key blocks,
+  Firebase URLs. Snippets sanitize non-printable bytes so terminal
+  output stays safe even on Mach-O / .dex blobs.
+- 14 new tests cover synthetic AXML round-trip, dangerous-permission
+  classification, ATS exception detection across the three
+  arbitrary-loads variants, plus secret-pattern matchers.
+
 ## [0.44.0] - 2026-05-09
 - **Fase 3 — Cloud.** Three new modules covering the unauth-attack-
   surface a cloud-native target exposes via DNS, public storage, and

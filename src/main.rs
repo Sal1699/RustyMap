@@ -40,9 +40,12 @@ mod spoof_mac;
 mod syn_emu;
 mod target;
 mod tcp_fp;
+mod apk_scan;
 mod cloud_buckets;
 mod cloud_fingerprint;
 mod cloud_metadata;
+mod ipa_scan;
+mod mobile_secrets;
 mod dns_advanced;
 mod dns_security;
 #[allow(dead_code)]
@@ -343,6 +346,22 @@ async fn main() -> Result<()> {
         let fp = cloud_fingerprint::fingerprint(&host, timeout).await?;
         cloud_fingerprint::print_report(&fp);
         return Ok(());
+    }
+    if let Some(file) = &args.apk_scan {
+        let file = file.clone();
+        return tokio::task::spawn_blocking(move || -> Result<()> {
+            let report = apk_scan::scan(std::path::Path::new(&file))?;
+            apk_scan::print_report(&report);
+            Ok(())
+        }).await?;
+    }
+    if let Some(file) = &args.ipa_scan {
+        let file = file.clone();
+        return tokio::task::spawn_blocking(move || -> Result<()> {
+            let report = ipa_scan::scan(std::path::Path::new(&file))?;
+            ipa_scan::print_report(&report);
+            Ok(())
+        }).await?;
     }
     // --web-crawl and --owasp-scan: standalone web-app probes. The
     // OWASP variant feeds the crawl inventory through the active
