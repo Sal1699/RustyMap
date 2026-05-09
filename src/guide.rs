@@ -224,6 +224,10 @@ pub fn print_guide() {
     line("--ics-scan HOST       ICS/SCADA: Modbus 502, S7 102, DNP3 20000, EnIP 44818, BACnet 47808");
     line("--iot-discover HOST   IoT unicast: mDNS 5353, SSDP 1900, CoAP 5683");
     line("--container-scan HOST Docker (2375/6) + K8s API (6443/8443) + Kubelet (10250/55) + etcd + Consul");
+    line("--detect-preview      Anteprima statica: cosa vedrebbe un defender della tua scan");
+    line("--delay-jitter PCT    Randomizza ±N% lo --scan-delay (anti-pattern semplici)");
+    line("--explain ARGS        Spiega ogni flag dell'invocation in linguaggio piano");
+    line("--explain last        Spiega l'ultima scan recorded in --history");
     line("--notify URL          Webhook su completion (ntfy://topic, slack://hook, https://)");
     line("--progress            Spinner indicatif durante lo scan (elapsed + tipo + N target)");
     line("--dns-sniff           Sniff DNS sulla rete (admin + Npcap)");
@@ -266,6 +270,10 @@ pub fn print_guide() {
     example("rustymap --ics-scan 10.0.0.50          # PLC enumeration");
     example("rustymap --iot-discover 192.168.1.42   # camera / hub probe");
     example("rustymap --container-scan node.k8s.lab # Docker/K8s/etcd/Consul");
+    example("rustymap --detect-preview --sS -T 5 10.0.0.5  # mostra impatto IDS");
+    example("rustymap --scan-delay 500 --delay-jitter 30 10.0.0.0/24");
+    example("rustymap --explain '--auth-audit --tls-grade --compliance pci-dss'");
+    example("rustymap --explain last        # spiega l'ultima scan dello storico");
 
     category("AUTOMATION & TOOLING");
     section("VAULT (credenziali cifrate)");

@@ -798,6 +798,24 @@ pub struct Cli {
     #[arg(long = "container-scan", value_name = "HOST")]
     pub container_scan: Option<String>,
 
+    /// Static analysis of the planned scan: which IDS / SIEM / WAF /
+    /// EDR rules would fire, and how to suppress them. Educational —
+    /// no traffic generated.
+    #[arg(long = "detect-preview")]
+    pub detect_preview: bool,
+
+    /// Randomize the per-probe scan-delay by ±N% (0–100). Breaks the
+    /// "constant interval" pattern simple correlators look for.
+    /// Has no effect when --scan-delay is 0.
+    #[arg(long = "delay-jitter", value_name = "PCT", default_value_t = 0)]
+    pub delay_jitter: u8,
+
+    /// Plain-language gloss of every flag in the supplied invocation.
+    /// Pass the args as a single quoted string, or use the literal
+    /// keyword `last` to explain the most recent run from --history.
+    #[arg(long = "explain", value_name = "ARGS")]
+    pub explain: Option<String>,
+
     /// Self-update to the latest release from GitHub
     #[arg(long = "update")]
     pub self_update: bool,

@@ -4,6 +4,38 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.51.0] - 2026-05-09
+- **Fase 10 — Detection / polish.** Three angles on the same theme:
+  understand what your scan looks like to the other side, smooth
+  the mechanical edge off the timing, and onboard new users faster.
+- `--detect-preview` is a pure-static analyzer: given the parsed
+  CLI args (no traffic generated), it reports which IDS / WAF /
+  EDR / SIEM rules will fire and what flag would suppress each.
+  Covers Suricata stream-events / sfPortscan, Snort sfPortscan,
+  EDR process telemetry (Sysmon ID 1, CrowdStrike, Defender),
+  Wireshark/Zeek `tls.heartbeat` (when `--tls-grade` runs),
+  WAF (OWASP CRS 941xxx XSS / 942xxx SQLi when `--owasp-scan`
+  runs, generic admin-path rules when `--http-enum` runs),
+  ICS-aware monitors (Claroty / Nozomi when `--ics-scan` runs),
+  generic SIEM correlation when `-A` is set. Each entry has a
+  one-line **mitigation** showing what flag would change the
+  outcome — useful for both pentesters tuning a stealthy run and
+  defenders validating their detection coverage.
+- `--delay-jitter PCT` (0–100) randomises the configured `--scan-delay`
+  by ±N% once per scan run, breaking the "constant interval"
+  pattern simple correlators look for. No effect when
+  `--scan-delay` is 0. Per-probe randomisation is on the roadmap;
+  current behaviour is honest about its scope.
+- `--explain ARGS` (or `--explain last` to reuse the most recent
+  history entry) prints a plain-language Italian gloss of every
+  flag in the supplied invocation. Curated glossary covers ~70
+  flags and matches the in-app guide's phrasing — runbook handoffs
+  no longer need a parallel cheat-sheet.
+- 15 new tests cover detect_preview's flag-driven branching,
+  timing_jitter's ±N% bounds and zero-base safety, explain's
+  long-form `--flag=value` handling, and the unknown-flag
+  fallback. 193/193 pass.
+
 ## [0.50.0] - 2026-05-09
 - **Fase 9 — Specialized environments.** Three new modules cover
   the targets a generic TCP scan misses: industrial control,

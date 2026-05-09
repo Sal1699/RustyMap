@@ -51,6 +51,8 @@ mod iot_discover;
 mod cloud_fingerprint;
 mod cloud_metadata;
 mod container_scan;
+mod detect_preview;
+mod explain;
 mod ipa_scan;
 mod mobile_secrets;
 mod dns_advanced;
@@ -68,6 +70,7 @@ mod smb_audit;
 mod smtp_audit;
 mod ssh_audit;
 mod threat_intel;
+mod timing_jitter;
 mod tls_enum;
 mod tls_grade;
 mod tls_probe;
@@ -145,6 +148,19 @@ async fn main() -> Result<()> {
     // --max-rate: approximate cap via per-host scan_delay (1000/rate ms).
     if args.max_rate > 0 && args.scan_delay_ms == 0 {
         args.scan_delay_ms = (1000 / args.max_rate).max(1) as u64;
+    }
+    // Jitter the scan-delay once per run so the inter-probe spacing
+    // varies across consecutive runs (anti-pattern for trivial
+    // correlators). Per-probe randomisation lives on the roadmap.
+    if args.delay_jitter > 0 && args.scan_delay_ms > 0 {
+        let jittered = timing_jitter::next_ms(args.scan_delay_ms, args.delay_jitter);
+        if args.verbose > 0 {
+            eprintln!(
+                "[jitter] scan-delay {}ms → {}ms (±{}%)",
+                args.scan_delay_ms, jittered, args.delay_jitter
+            );
+        }
+        args.scan_delay_ms = jittered;
     }
     // --max-scan-delay: clamp any computed scan_delay to this ceiling.
     if args.max_scan_delay_ms > 0 && args.scan_delay_ms > args.max_scan_delay_ms {
@@ -270,6 +286,31 @@ async fn main() -> Result<()> {
     if let Some(n) = args.history {
         let entries = history::load(n.max(1))?;
         history::print(&entries);
+        return Ok(());
+    }
+    if let Some(spec) = &args.explain {
+        let line: String = if spec == "last" {
+            let entries = history::load(1)?;
+            entries
+                .last()
+                .map(|e| e.args.clone())
+                .unwrap_or_else(|| "rustymap".into())
+        } else {
+            spec.clone()
+        };
+        // Tokenize: respects quotes, splits on whitespace.
+        let tokens: Vec<String> = line
+            .split_whitespace()
+            .filter(|t| *t != "rustymap")
+            .map(String::from)
+            .collect();
+        let glosses = explain::explain(&tokens);
+        explain::print(&tokens, &glosses);
+        return Ok(());
+    }
+    if args.detect_preview {
+        let exp = detect_preview::analyze(&args);
+        detect_preview::print(&exp);
         return Ok(());
     }
     if args.wizard {
