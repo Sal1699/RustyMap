@@ -221,6 +221,9 @@ pub fn print_guide() {
     line("--misp-api-key KEY    API key MISP");
     line("--misp-days N         Giorni di lookback MISP (default 30)");
     line("--threat-intel-match  Confronta target con IoC cached → flag matches");
+    line("--ics-scan HOST       ICS/SCADA: Modbus 502, S7 102, DNP3 20000, EnIP 44818, BACnet 47808");
+    line("--iot-discover HOST   IoT unicast: mDNS 5353, SSDP 1900, CoAP 5683");
+    line("--container-scan HOST Docker (2375/6) + K8s API (6443/8443) + Kubelet (10250/55) + etcd + Consul");
     line("--notify URL          Webhook su completion (ntfy://topic, slack://hook, https://)");
     line("--progress            Spinner indicatif durante lo scan (elapsed + tipo + N target)");
     line("--dns-sniff           Sniff DNS sulla rete (admin + Npcap)");
@@ -260,6 +263,9 @@ pub fn print_guide() {
     example("rustymap --notify discord://discord.com/api/webhooks/...");
     example("rustymap --notify teams://outlook.office.com/webhook/...");
     example("rustymap --notify 'jira://alice:tok@jira.example.com/SEC?type=Bug'");
+    example("rustymap --ics-scan 10.0.0.50          # PLC enumeration");
+    example("rustymap --iot-discover 192.168.1.42   # camera / hub probe");
+    example("rustymap --container-scan node.k8s.lab # Docker/K8s/etcd/Consul");
 
     category("AUTOMATION & TOOLING");
     section("VAULT (credenziali cifrate)");

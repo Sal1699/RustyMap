@@ -4,6 +4,37 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.50.0] - 2026-05-09
+- **Fase 9 — Specialized environments.** Three new modules cover
+  the targets a generic TCP scan misses: industrial control,
+  embedded IoT, and container/orchestrator surface.
+- `--ics-scan HOST` runs read-only protocol probes against five
+  ICS/SCADA flavours: Modbus/TCP (port 502, FC 43 MEI 14 Read
+  Device Identification), Siemens S7 (102, TPKT/COTP CR + S7
+  Setup Communication), DNP3 (20000, Request Link Status with
+  hand-rolled CRC-16/DNP), EtherNet/IP (44818, List Identity
+  command 0x63), BACnet/IP (47808 UDP, unconfirmed Who-Is). One
+  well-formed request per protocol — no control function ever
+  written.
+- `--iot-discover HOST` performs unicast variants of the usual
+  multicast IoT discovery protocols against a single target —
+  works across routed networks without interface binding. Covers
+  mDNS (`_services._dns-sd._udp.local` PTR query on 5353),
+  SSDP/UPnP (M-SEARCH ssdp:all on 1900), CoAP
+  (`GET /.well-known/core` on 5683).
+- `--container-scan HOST` probes the documented endpoints of the
+  container ecosystem — Docker remote API (2375 plain, 2376 TLS,
+  `/info`), Kubernetes API (6443/8443, `/version`), Kubelet
+  read-only (10255, `/pods`), Kubelet authenticated (10250,
+  `/metrics`), etcd v2 (2379/2380, `/version`), Consul (8500,
+  `/v1/agent/self`). Tags each finding **UNAUTHED / AUTHED /
+  LOCKED** so the user can prioritise: an unauthed Docker socket
+  on a routable address is full container takeover.
+- 8 new tests cover the DNP3 CRC-16/DNP against the spec example
+  vector, printable-string extraction from the Modbus / EnIP
+  reply bodies, container exposure-tier serialization, and the
+  CoAP CON/ACK header bit-layout. 178/178 pass.
+
 ## [0.49.0] - 2026-05-09
 - **Fase 8 — Integrations.** Connect RustyMap into the rest of the
   security-ops stack — SIEM forwarders, ChatOps, ticketing,

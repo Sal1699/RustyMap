@@ -46,8 +46,11 @@ mod cloud_buckets;
 mod compliance;
 mod exec_summary;
 mod history;
+mod ics_scan;
+mod iot_discover;
 mod cloud_fingerprint;
 mod cloud_metadata;
+mod container_scan;
 mod ipa_scan;
 mod mobile_secrets;
 mod dns_advanced;
@@ -421,6 +424,27 @@ async fn main() -> Result<()> {
         let timeout = std::time::Duration::from_secs(8);
         let fp = cloud_fingerprint::fingerprint(&host, timeout).await?;
         cloud_fingerprint::print_report(&fp);
+        return Ok(());
+    }
+    if let Some(host) = &args.ics_scan {
+        let h = host.clone();
+        let dur = std::time::Duration::from_secs(3);
+        let findings = ics_scan::scan(&h, dur).await?;
+        ics_scan::print_findings(&h, &findings);
+        return Ok(());
+    }
+    if let Some(host) = &args.iot_discover {
+        let h = host.clone();
+        let dur = std::time::Duration::from_secs(3);
+        let findings = iot_discover::discover(&h, dur).await?;
+        iot_discover::print_findings(&h, &findings);
+        return Ok(());
+    }
+    if let Some(host) = &args.container_scan {
+        let h = host.clone();
+        let dur = std::time::Duration::from_secs(5);
+        let findings = container_scan::scan(&h, dur).await?;
+        container_scan::print_findings(&h, &findings);
         return Ok(());
     }
     if let Some(file) = &args.apk_scan {

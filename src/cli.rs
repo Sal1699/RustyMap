@@ -779,6 +779,25 @@ pub struct Cli {
     #[arg(long = "threat-intel-match")]
     pub threat_intel_match: bool,
 
+    /// ICS/SCADA protocol probe: Modbus/TCP (502), Siemens S7 (102),
+    /// DNP3 (20000), EtherNet/IP (44818), BACnet/IP (47808 UDP).
+    /// Read-only — single well-formed request per protocol.
+    #[arg(long = "ics-scan", value_name = "HOST")]
+    pub ics_scan: Option<String>,
+
+    /// IoT unicast discovery — mDNS / SSDP / CoAP probes against
+    /// the supplied host. Useful for embedded targets that respond
+    /// to unicast variants of the usual multicast queries.
+    #[arg(long = "iot-discover", value_name = "HOST")]
+    pub iot_discover: Option<String>,
+
+    /// Container & orchestrator surface — Docker remote API
+    /// (2375/2376), Kubernetes API (6443/8443), Kubelet (10250/10255),
+    /// etcd (2379/2380), Consul (8500). Tags each finding UNAUTHED /
+    /// LOCKED so you can prioritise.
+    #[arg(long = "container-scan", value_name = "HOST")]
+    pub container_scan: Option<String>,
+
     /// Self-update to the latest release from GitHub
     #[arg(long = "update")]
     pub self_update: bool,
