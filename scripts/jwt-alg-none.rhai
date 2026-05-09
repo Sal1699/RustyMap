@@ -1,7 +1,14 @@
-// Flag JWT tokens visible in HTTP banners with weak/none alg.
-// JWT format: <base64url-header>.<base64url-payload>.<sig>
-// We can detect the header part contains "alg":"none" or "HS256" with
-// a public key context (asymmetric algos are stronger).
+// @name: jwt-alg-none
+// @description: Flag JWT tokens visible in HTTP banners with weak/none alg
+// @category: web
+// @severity: high
+// @tags: jwt, auth, owasp-a07
+// @cve: CVE-2018-1000136, CVE-2018-1000531
+// @references: https://jwt.io/, https://datatracker.ietf.org/doc/html/rfc7519
+//
+// JWT format: <base64url-header>.<base64url-payload>.<sig>. We detect the
+// header part containing "alg":"none" (server may accept unsigned tokens)
+// or "HS256" with a public key context (asymmetric algos are stronger).
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 80 && p.port != 443 && p.port != 8080 && p.port != 8443 { continue; }

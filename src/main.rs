@@ -63,6 +63,7 @@ mod exploit_refs;
 mod nvd;
 mod owasp_probes;
 mod pdf_out;
+mod plugin_meta;
 mod rdp_audit;
 mod recommend;
 mod siem;
@@ -364,6 +365,47 @@ async fn main() -> Result<()> {
     }
     if args.script_help {
         scripting::print_help(args.script_path.as_deref());
+        return Ok(());
+    }
+    if args.script_list
+        || args.script_info.is_some()
+        || args.script_catalog.is_some()
+        || args.script_cve.is_some()
+        || args.script_category.is_some()
+        || args.script_tag.is_some()
+        || args.script_severity.is_some()
+    {
+        let user_dir = args.script_path.as_deref().map(std::path::Path::new);
+        let builtins = scripting::builtin_scripts();
+        let catalog = plugin_meta::build_catalog(&builtins, user_dir);
+
+        if let Some(name) = &args.script_info {
+            match catalog.iter().find(|m| m.name == *name) {
+                Some(m) => plugin_meta::print_info(m),
+                None => eprintln!("[!] no script named '{}'", name),
+            }
+            return Ok(());
+        }
+        let filter = plugin_meta::CatalogFilter {
+            category: args.script_category.clone(),
+            tag: args.script_tag.clone(),
+            severity: args
+                .script_severity
+                .as_deref()
+                .and_then(plugin_meta::Severity::parse),
+            cve: args.script_cve.clone(),
+        };
+        if let Some(path) = &args.script_catalog {
+            let body = if path.ends_with(".json") {
+                plugin_meta::export_json(&catalog)
+            } else {
+                plugin_meta::export_markdown(&catalog)
+            };
+            std::fs::write(path, body)?;
+            println!("[catalog] {} scripts exported to {}", catalog.len(), path);
+            return Ok(());
+        }
+        plugin_meta::print_catalog(&catalog, &filter);
         return Ok(());
     }
     if let Some(shell) = args.completions {

@@ -4,6 +4,49 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.52.0] - 2026-05-09
+- **Fase 11 — Plugin metadata.** Final release of the 11-fase
+  roadmap. Rhai scripts now carry structured metadata in their
+  header comment block:
+  ```
+  // @name: log4shell-probe
+  // @description: Detect Log4Shell on HTTP services
+  // @category: web
+  // @severity: critical
+  // @tags: log4j, jndi, owasp-a06
+  // @cve: CVE-2021-44228, CVE-2021-45046
+  // @references: https://example/log4shell
+  // @author: alice
+  ```
+  Scripts without metadata still load — they get default values.
+- New `src/plugin_meta.rs` module: parser tolerant to unknown keys
+  (forward-compatible), catalog builder that merges built-in + user
+  scripts, composable filter (category × tag × severity × CVE).
+- `--script-list` lists every script with name / source / category
+  / severity / tags. Filters compose: `--script-list --script-tag
+  jwt --script-severity high` returns the intersection.
+- `--script-info NAME` prints the full metadata block for one
+  script — description, category, severity, tags, CVE list,
+  references, author.
+- `--script-cve CVE-2021-44228` reverse-lookup: given a CVE you
+  found in the NVD correlation, instantly see which scripts can
+  verify it on the wire. The killer feature for chaining
+  `--update-cve-db` → scan → script triage.
+- `--script-catalog FILE` exports the full catalog to `.json` or
+  `.md` (auto-detected by extension), suitable for shipping with
+  a release or importing into other tools.
+- Annotated 7 representative built-in scripts (jwt-alg-none,
+  redis-no-auth, smb-exposed, docker-api-exposed, old-openssh,
+  http-missing-security-headers, mongodb-no-auth, tls-deprecated)
+  with full metadata blocks covering categories web / db / smb /
+  container / ssh / tls. The other 34 ship with default metadata
+  parsed from their first comment line — annotation is opt-in.
+- 9 new tests cover metadata parsing for full and partial blocks,
+  fallback-to-first-comment description, unknown-key tolerance,
+  CVE case-insensitivity, multi-criterion filter intersection,
+  Markdown export structure, and severity-alias parsing.
+  202/202 pass.
+
 ## [0.51.0] - 2026-05-09
 - **Fase 10 — Detection / polish.** Three angles on the same theme:
   understand what your scan looks like to the other side, smooth

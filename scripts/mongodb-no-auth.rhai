@@ -1,4 +1,9 @@
-// Flag MongoDB without auth (port responds but banner says no auth required).
+// @name: mongodb-no-auth
+// @description: Flag MongoDB without auth (port responds but banner says no auth required)
+// @category: db
+// @severity: critical
+// @tags: mongodb, no-auth, owasp-a01
+// @references: https://www.mongodb.com/docs/manual/core/security-self-managed/
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 27017 && p.port != 27018 && p.port != 27019 { continue; }

@@ -1,4 +1,9 @@
-// Flag HTTP responses missing common security headers (HSTS, CSP, XFO).
+// @name: http-missing-security-headers
+// @description: Flag HTTP responses missing common security headers (HSTS, CSP, XFO)
+// @category: web
+// @severity: low
+// @tags: http, headers, hsts, csp, owasp-a05
+// @references: https://owasp.org/www-project-secure-headers/
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 80 && p.port != 443 && p.port != 8080 && p.port != 8443 { continue; }

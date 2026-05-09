@@ -816,6 +816,39 @@ pub struct Cli {
     #[arg(long = "explain", value_name = "ARGS")]
     pub explain: Option<String>,
 
+    /// List the Rhai-script catalog (built-in + user) with structured
+    /// metadata — name, source, category, severity, tags. Honors the
+    /// filter flags below.
+    #[arg(long = "script-list")]
+    pub script_list: bool,
+
+    /// Detailed info on one script (built-in or user). Pass the
+    /// script's @name (or file stem if no @name was declared).
+    #[arg(long = "script-info", value_name = "NAME")]
+    pub script_info: Option<String>,
+
+    /// Filter the catalog by category (e.g. web, db, ssh, tls,
+    /// container, smb).
+    #[arg(long = "script-category", value_name = "CAT")]
+    pub script_category: Option<String>,
+
+    /// Filter the catalog by tag (matches the @tags entry).
+    #[arg(long = "script-tag", value_name = "TAG")]
+    pub script_tag: Option<String>,
+
+    /// Filter by severity (info|low|medium|high|critical).
+    #[arg(long = "script-severity", value_name = "SEV")]
+    pub script_severity: Option<String>,
+
+    /// Find scripts that verify the given CVE id (e.g. CVE-2021-44228).
+    #[arg(long = "script-cve", value_name = "CVE")]
+    pub script_cve: Option<String>,
+
+    /// Export the full plugin catalog to FILE (.json or .md based
+    /// on extension).
+    #[arg(long = "script-catalog", value_name = "FILE")]
+    pub script_catalog: Option<String>,
+
     /// Self-update to the latest release from GitHub
     #[arg(long = "update")]
     pub self_update: bool,

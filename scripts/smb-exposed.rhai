@@ -1,4 +1,10 @@
-// Flag hosts with SMB (445) open to the wider network.
+// @name: smb-exposed
+// @description: Flag hosts with SMB (445) open to the wider network
+// @category: smb
+// @severity: medium
+// @tags: smb, eternalblue, ransomware
+// @cve: CVE-2017-0144, CVE-2017-0143
+// @references: https://docs.microsoft.com/en-us/security-updates/securitybulletins/2017/ms17-010
 for p in host.ports {
     if p.port == 445 && p.state == "open" {
         findings.push(#{

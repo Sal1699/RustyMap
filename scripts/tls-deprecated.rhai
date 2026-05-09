@@ -1,4 +1,10 @@
-// Flag TLS endpoints negotiating deprecated protocol versions.
+// @name: tls-deprecated
+// @description: Flag TLS endpoints negotiating deprecated protocol versions
+// @category: tls
+// @severity: medium
+// @tags: tls, drown, poodle, owasp-a02
+// @cve: CVE-2014-3566, CVE-2016-0800
+// @references: https://datatracker.ietf.org/doc/html/rfc8996
 for p in host.ports {
     if p.state != "open" { continue; }
     let svc = p.service;

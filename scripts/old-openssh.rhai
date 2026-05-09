@@ -1,4 +1,10 @@
-// Flag SSH banners advertising versions known to have pre-auth issues.
+// @name: old-openssh
+// @description: Flag SSH banners advertising versions with known pre-auth issues
+// @category: ssh
+// @severity: high
+// @tags: ssh, openssh, banner
+// @cve: CVE-2018-15473, CVE-2016-10009, CVE-2016-10010
+// @references: https://www.openssh.com/security.html
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 22 { continue; }

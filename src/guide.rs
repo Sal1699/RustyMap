@@ -228,6 +228,13 @@ pub fn print_guide() {
     line("--delay-jitter PCT    Randomizza ±N% lo --scan-delay (anti-pattern semplici)");
     line("--explain ARGS        Spiega ogni flag dell'invocation in linguaggio piano");
     line("--explain last        Spiega l'ultima scan recorded in --history");
+    line("--script-list         Catalogo plugin Rhai (built-in + user) con metadati");
+    line("--script-info NAME    Dettaglio metadati di un singolo plugin");
+    line("--script-category CAT Filtra per categoria (web|db|ssh|tls|container|smb…)");
+    line("--script-tag TAG      Filtra per tag (jwt, no-auth, owasp-aXX…)");
+    line("--script-severity SEV Filtra per severity (info|low|medium|high|critical)");
+    line("--script-cve CVE-ID   Trova plugin che verificano un CVE specifico");
+    line("--script-catalog FILE Esporta tutto il catalogo (.json o .md)");
     line("--notify URL          Webhook su completion (ntfy://topic, slack://hook, https://)");
     line("--progress            Spinner indicatif durante lo scan (elapsed + tipo + N target)");
     line("--dns-sniff           Sniff DNS sulla rete (admin + Npcap)");
@@ -274,6 +281,10 @@ pub fn print_guide() {
     example("rustymap --scan-delay 500 --delay-jitter 30 10.0.0.0/24");
     example("rustymap --explain '--auth-audit --tls-grade --compliance pci-dss'");
     example("rustymap --explain last        # spiega l'ultima scan dello storico");
+    example("rustymap --script-list --script-severity critical");
+    example("rustymap --script-cve CVE-2021-44228     # quali plugin verificano Log4Shell?");
+    example("rustymap --script-info redis-no-auth");
+    example("rustymap --script-catalog catalog.md");
 
     category("AUTOMATION & TOOLING");
     section("VAULT (credenziali cifrate)");

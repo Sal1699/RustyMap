@@ -1,4 +1,9 @@
-// Flag Docker daemon API exposed without TLS — full container takeover.
+// @name: docker-api-exposed
+// @description: Flag Docker daemon API exposed without TLS — full container takeover
+// @category: container
+// @severity: critical
+// @tags: docker, no-auth, container-escape
+// @references: https://docs.docker.com/engine/security/protect-access/
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port == 2375 {

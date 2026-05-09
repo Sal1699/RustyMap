@@ -1,6 +1,13 @@
-// Flag exposed Redis instances. Reasons over service info populated by
-// the built-in Redis probe — banner usually contains "Redis" without a
-// "NOAUTH" hint, meaning anonymous commands are accepted.
+// @name: redis-no-auth
+// @description: Flag Redis instances that accept commands without authentication
+// @category: db
+// @severity: critical
+// @tags: redis, no-auth, owasp-a01
+// @references: https://redis.io/docs/manual/security/
+//
+// Reasons over service info populated by the built-in Redis probe —
+// banner usually contains "Redis" without a "NOAUTH" hint, meaning
+// anonymous commands are accepted.
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 6379 && p.port != 6380 { continue; }
