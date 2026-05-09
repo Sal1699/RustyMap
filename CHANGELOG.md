@@ -4,6 +4,38 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.44.0] - 2026-05-09
+- **Fase 3 — Cloud.** Three new modules covering the unauth-attack-
+  surface a cloud-native target exposes via DNS, public storage, and
+  the metadata service. SDK-level enumeration (boto3-equivalent IAM
+  policy reads) stays gated behind the `cloud-sdk` feature for now —
+  none of the code below requires it.
+- `--cloud-buckets SEED` generates ~30 name permutations from a seed
+  (apex domain or org name) — `acme`, `acme-backup`, `acme-prod`,
+  `backup-acme`, `static-acme`, … — and probes each against
+  `s3.amazonaws.com`, `storage.googleapis.com`, and
+  `*.blob.core.windows.net`. Classifies hits as **PUBLIC_LIST**
+  (XML listing readable, highest severity), **EXISTS** (ACL blocks
+  listing but the name is taken — guess-the-key still possible), or
+  silently skips NOT_FOUND. Counts visible objects when listable.
+- `--cloud-metadata` probes the link-local IMDS at 169.254.169.254
+  across AWS (IMDSv2 token first, IMDSv1 fallback flagged), GCP
+  (Metadata-Flavor header), Azure (Metadata: true), and OpenStack
+  (`/openstack/latest/meta_data.json`). Pulls instance-id, region/
+  zone, IAM role. `--cloud-metadata-via URL_PREFIX` reroutes the
+  same probes through a SSRF parameter on a remote target — the
+  IMDS path is URL-encoded and appended.
+- `--cloud-fingerprint DOMAIN` walks the CNAME chain (up to 8 hops)
+  + reverse-DNS of the resolved A records, matches against ~50
+  suffix rules covering AWS (CloudFront/S3/ELB/API Gateway/Beanstalk),
+  GCP (Compute/AppEngine/Cloud Run/Firebase/Functions), Azure
+  (CDN/Front Door/App Service/Blob/Traffic Manager), Cloudflare
+  (CDN/Pages/Workers/Access), Akamai, Fastly, Vercel, Netlify,
+  GitHub Pages, Linode, DigitalOcean, Vultr, Hetzner, OVH.
+- 13 new tests cover bucket-name validation, S3 status classification,
+  JSON field extraction in IMDS responses, URL building for the
+  SSRF-via path, and CNAME / PTR rule deduplication → 107 total.
+
 ## [0.43.0] - 2026-05-08
 - **Fase 2 — Authenticated/Web deep.** Six new modules cover
   protocol-level audits for the four most-targeted services and a

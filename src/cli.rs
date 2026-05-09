@@ -654,6 +654,34 @@ pub struct Cli {
     #[arg(long = "owasp-checks", value_name = "LIST")]
     pub owasp_checks: Option<String>,
 
+    /// Public-bucket enumeration across S3 / GCS / Azure Blob.
+    /// Generates ~30 name permutations from the seed (apex domain or
+    /// org name) and probes each — flags PUBLIC_LIST and EXISTS.
+    #[arg(long = "cloud-buckets", value_name = "SEED")]
+    pub cloud_buckets: Option<String>,
+
+    /// Max number of seed permutations to probe (default 30)
+    #[arg(long = "cloud-buckets-limit", default_value_t = 30)]
+    pub cloud_buckets_limit: usize,
+
+    /// Probe the cloud-instance metadata service (169.254.169.254).
+    /// Identifies AWS / GCP / Azure / OpenStack and pulls instance-id,
+    /// region, IAM role. Useful from inside a VM to confirm SSRF blast
+    /// radius.
+    #[arg(long = "cloud-metadata")]
+    pub cloud_metadata: bool,
+
+    /// Run --cloud-metadata via a SSRF prefix (URL the target is
+    /// vulnerable to). The IMDS path is appended URL-encoded.
+    #[arg(long = "cloud-metadata-via", value_name = "URL_PREFIX")]
+    pub cloud_metadata_via: Option<String>,
+
+    /// Cloud / CDN provider fingerprint for a domain (CNAME chain +
+    /// PTR rules → AWS / GCP / Azure / Cloudflare / Akamai / Fastly /
+    /// Vercel / Netlify / GitHub Pages).
+    #[arg(long = "cloud-fingerprint", value_name = "DOMAIN")]
+    pub cloud_fingerprint: Option<String>,
+
     /// Self-update to the latest release from GitHub
     #[arg(long = "update")]
     pub self_update: bool,

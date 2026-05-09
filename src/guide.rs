@@ -197,6 +197,11 @@ pub fn print_guide() {
     line("--no-robots           Ignora robots.txt durante --web-crawl");
     line("--owasp-scan URL      Crawl + probe XSS/SQLi/open-redirect/SSRF");
     line("--owasp-checks LIST   Subset: xss,sqli,redirect,ssrf");
+    line("--cloud-buckets SEED  Enum public S3/GCS/Azure (~30 permutazioni dal seed)");
+    line("--cloud-buckets-limit N  Tetto permutazioni provate (default 30)");
+    line("--cloud-metadata      Probe IMDS 169.254.169.254 (AWS/GCP/Azure/OpenStack)");
+    line("--cloud-metadata-via URL  Probe IMDS via SSRF prefix sul target");
+    line("--cloud-fingerprint D Identifica AWS/GCP/Azure/Cloudflare/Akamai/Fastly da DNS");
     line("--notify URL          Webhook su completion (ntfy://topic, slack://hook, https://)");
     line("--progress            Spinner indicatif durante lo scan (elapsed + tipo + N target)");
     line("--dns-sniff           Sniff DNS sulla rete (admin + Npcap)");
@@ -215,6 +220,10 @@ pub fn print_guide() {
     example("rustymap --web-crawl https://target/ --crawl-depth 4");
     example("rustymap --owasp-scan https://target/ --owasp-checks xss,sqli");
     example("rustymap --owasp-scan https://target/ --web-cookie \"session=abc\"");
+    example("rustymap --cloud-buckets acme.com");
+    example("rustymap --cloud-metadata             # da dentro una VM");
+    example("rustymap --cloud-metadata-via 'https://target/?u='");
+    example("rustymap --cloud-fingerprint cdn.example.com");
 
     category("AUTOMATION & TOOLING");
     section("VAULT (credenziali cifrate)");

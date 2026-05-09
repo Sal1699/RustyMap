@@ -40,6 +40,9 @@ mod spoof_mac;
 mod syn_emu;
 mod target;
 mod tcp_fp;
+mod cloud_buckets;
+mod cloud_fingerprint;
+mod cloud_metadata;
 mod dns_advanced;
 mod dns_security;
 #[allow(dead_code)]
@@ -317,6 +320,28 @@ async fn main() -> Result<()> {
         let timeout = std::time::Duration::from_secs(10);
         let report = dns_security::audit(&domain, timeout).await?;
         dns_security::print_report(&report);
+        return Ok(());
+    }
+    if let Some(seed) = &args.cloud_buckets {
+        let seed = seed.clone();
+        let limit = args.cloud_buckets_limit;
+        let timeout = std::time::Duration::from_secs(8);
+        let findings = cloud_buckets::enumerate(&seed, limit, timeout).await?;
+        cloud_buckets::print_findings(&seed, &findings);
+        return Ok(());
+    }
+    if args.cloud_metadata || args.cloud_metadata_via.is_some() {
+        let via = args.cloud_metadata_via.clone();
+        let timeout = std::time::Duration::from_secs(5);
+        let report = cloud_metadata::probe(via.as_deref(), timeout).await?;
+        cloud_metadata::print_report(&report)?;
+        return Ok(());
+    }
+    if let Some(host) = &args.cloud_fingerprint {
+        let host = host.clone();
+        let timeout = std::time::Duration::from_secs(8);
+        let fp = cloud_fingerprint::fingerprint(&host, timeout).await?;
+        cloud_fingerprint::print_report(&fp);
         return Ok(());
     }
     // --web-crawl and --owasp-scan: standalone web-app probes. The
