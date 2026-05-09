@@ -42,6 +42,7 @@ mod target;
 mod tcp_fp;
 mod apk_scan;
 mod cloud_buckets;
+mod compliance;
 mod cloud_fingerprint;
 mod cloud_metadata;
 mod ipa_scan;
@@ -410,6 +411,10 @@ async fn main() -> Result<()> {
 
     let cancel = shutdown::install_handler();
     let audit = Arc::new(Audit::open(args.audit_log.as_deref())?);
+    // Findings collected for the optional compliance evaluator.
+    // Populated by the post-scan audits (ssl-enum / ssh / smb / rdp /
+    // smtp / dns-security / cve correlation / port mapping).
+    let mut compliance_findings: Vec<compliance::Finding> = Vec::new();
 
     // ----- DNS commands (no scan) -----
     if args.dns_sniff {
@@ -1281,8 +1286,14 @@ async fn main() -> Result<()> {
                 match tls_enum::enumerate(h.target.ip, p.port, h.target.hostname.as_deref(), timeout).await {
                     Ok(e) => {
                         let label = h.target.display();
+                        let host_port = format!("{}:{}", h.target.ip, p.port);
                         let dep = if e.has_deprecated() { " ⚠ deprecated TLS supported".to_string() } else { String::new() };
                         println!("[ssl-enum] {} :{} → {}{}", label, p.port, e.summary(), dep);
+                        compliance_findings.push(compliance::Finding::new(
+                            "tls_evaluated",
+                            &host_port,
+                            e.summary(),
+                        ));
                         if e.has_deprecated() {
                             audit.event(
                                 "tls_deprecated",
@@ -1293,6 +1304,18 @@ async fn main() -> Result<()> {
                                     "tls11": e.tls11,
                                 }),
                             );
+                            compliance_findings.push(compliance::Finding::new(
+                                "tls_protocol_legacy",
+                                &host_port,
+                                format!("TLS 1.0={} 1.1={}", e.tls10, e.tls11),
+                            ));
+                        }
+                        if !e.tls12 && !e.tls13 {
+                            compliance_findings.push(compliance::Finding::new(
+                                "tls_no_modern",
+                                &host_port,
+                                "neither TLS 1.2 nor 1.3 negotiated",
+                            ));
                         }
                         if args.tls_grade {
                             let g = tls_grade::grade(h.target.ip, p.port, &e, timeout).await;
@@ -1313,6 +1336,22 @@ async fn main() -> Result<()> {
                                         "grade": grade_str,
                                     }),
                                 );
+                                let mut bits = Vec::new();
+                                if g.sslv2 { bits.push("SSLv2/DROWN"); }
+                                if g.sslv3 { bits.push("SSLv3/POODLE"); }
+                                if g.heartbleed { bits.push("Heartbleed"); }
+                                compliance_findings.push(compliance::Finding::new(
+                                    "tls_classic_vuln",
+                                    &host_port,
+                                    bits.join(", "),
+                                ));
+                            }
+                            if g.detail.iter().any(|d| d.contains("RC4") || d.contains("CBC") || d.contains("3DES")) {
+                                compliance_findings.push(compliance::Finding::new(
+                                    "tls_weak_cipher",
+                                    &host_port,
+                                    g.detail.join("; "),
+                                ));
                             }
                         }
                     }
@@ -1336,10 +1375,12 @@ async fn main() -> Result<()> {
                 if p.state != PortState::Open {
                     continue;
                 }
+                let host_port = format!("{}:{}", h.target.ip, p.port);
                 if want_ssh && p.port == 22 {
                     match ssh_audit::audit(h.target.ip, p.port, auth_dur).await {
                         Ok(a) => {
                             ssh_audit::print_report(&host_label, p.port, &a);
+                            compliance_findings.push(compliance::Finding::new("ssh_evaluated", &host_port, ""));
                             if a.has_weakness() {
                                 audit.event(
                                     "ssh_audit",
@@ -1349,6 +1390,18 @@ async fn main() -> Result<()> {
                                         "findings": a.findings,
                                     }),
                                 );
+                                for f in &a.findings {
+                                    let kind = if f.starts_with("KEX ") {
+                                        "ssh_weak_kex"
+                                    } else if f.starts_with("cipher ") {
+                                        "ssh_weak_cipher"
+                                    } else if f.starts_with("MAC ") {
+                                        "ssh_weak_mac"
+                                    } else {
+                                        "ssh_weak_kex"
+                                    };
+                                    compliance_findings.push(compliance::Finding::new(kind, &host_port, f));
+                                }
                             }
                         }
                         Err(e) => eprintln!("[!] ssh-audit {}:{}: {}", host_label, p.port, e),
@@ -1358,6 +1411,7 @@ async fn main() -> Result<()> {
                     match smb_audit::audit(h.target.ip, p.port, auth_dur).await {
                         Ok(a) => {
                             smb_audit::print_report(&host_label, p.port, &a);
+                            compliance_findings.push(compliance::Finding::new("smb_evaluated", &host_port, &a.dialect));
                             if a.has_weakness() {
                                 audit.event(
                                     "smb_audit",
@@ -1368,6 +1422,16 @@ async fn main() -> Result<()> {
                                         "findings": a.findings,
                                     }),
                                 );
+                                if a.smbv1_supported {
+                                    compliance_findings.push(compliance::Finding::new(
+                                        "smb_v1", &host_port, "SMBv1 negotiated",
+                                    ));
+                                }
+                                if !a.signing_required {
+                                    compliance_findings.push(compliance::Finding::new(
+                                        "smb_no_signing", &host_port, format!("signing_required={}", a.signing_required),
+                                    ));
+                                }
                             }
                         }
                         Err(e) => eprintln!("[!] smb-audit {}:{}: {}", host_label, p.port, e),
@@ -1377,6 +1441,7 @@ async fn main() -> Result<()> {
                     match rdp_audit::audit(h.target.ip, p.port, auth_dur).await {
                         Ok(a) => {
                             rdp_audit::print_report(&host_label, p.port, &a);
+                            compliance_findings.push(compliance::Finding::new("rdp_evaluated", &host_port, ""));
                             if a.has_weakness() {
                                 audit.event(
                                     "rdp_audit",
@@ -1387,6 +1452,11 @@ async fn main() -> Result<()> {
                                         "findings": a.findings,
                                     }),
                                 );
+                                if a.findings.iter().any(|f| f.contains("NLA") || f.contains("BlueKeep")) {
+                                    compliance_findings.push(compliance::Finding::new(
+                                        "rdp_no_nla", &host_port, a.findings.join("; "),
+                                    ));
+                                }
                             }
                         }
                         Err(e) => eprintln!("[!] rdp-audit {}:{}: {}", host_label, p.port, e),
@@ -1396,6 +1466,7 @@ async fn main() -> Result<()> {
                     match smtp_audit::audit(h.target.ip, p.port, auth_dur).await {
                         Ok(a) => {
                             smtp_audit::print_report(&host_label, p.port, &a);
+                            compliance_findings.push(compliance::Finding::new("smtp_evaluated", &host_port, ""));
                             if a.has_weakness() {
                                 audit.event(
                                     "smtp_audit",
@@ -1406,6 +1477,16 @@ async fn main() -> Result<()> {
                                         "findings": a.findings,
                                     }),
                                 );
+                                for f in &a.findings {
+                                    let kind = if f.contains("STARTTLS") {
+                                        "smtp_starttls_missing"
+                                    } else if f.contains("AUTH") || f.contains("PLAIN") || f.contains("LOGIN") {
+                                        "smtp_clear_creds"
+                                    } else {
+                                        continue;
+                                    };
+                                    compliance_findings.push(compliance::Finding::new(kind, &host_port, f));
+                                }
                             }
                         }
                         Err(e) => eprintln!("[!] smtp-audit {}:{}: {}", host_label, p.port, e),
@@ -1551,6 +1632,46 @@ async fn main() -> Result<()> {
         report::write_custom(tpl, out, &sorted, &scan_type_str, started_at, elapsed, &diffs)?;
     } else if args.template_path.is_some() ^ args.output_template.is_some() {
         return Err(anyhow!("--template and --oT must be used together"));
+    }
+
+    // Compliance evaluation. Hooks into the findings collected by the
+    // post-scan audit blocks above. Coverage markers (one per host with
+    // open ports) ensure controls covering port exposure aren't N/A.
+    if let Some(fw_str) = &args.compliance {
+        let fw = compliance::Framework::parse(fw_str)
+            .ok_or_else(|| anyhow!("unknown framework '{}': pci-dss|hipaa|nist-800-53|iso-27001|cis", fw_str))?;
+        for h in sorted.iter().filter(|h| h.up) {
+            let host_label = h.target.ip.to_string();
+            compliance_findings.push(compliance::Finding::new(
+                "port_state_evaluated",
+                &host_label,
+                format!("{} ports scanned", h.ports.len()),
+            ));
+            for p in &h.ports {
+                if p.state == PortState::Open {
+                    compliance_findings.push(compliance::Finding::new(
+                        "port_open_unrestricted",
+                        format!("{}:{}", host_label, p.port),
+                        format!("port {} reachable", p.port),
+                    ));
+                }
+            }
+        }
+        let eval = compliance::evaluate(fw, &compliance_findings);
+        compliance::print_report(&eval);
+        if let Some(out) = &args.compliance_report {
+            compliance::write_markdown(&eval, std::path::Path::new(out))?;
+            println!("\n[compliance] markdown report written to {}", out);
+        }
+        audit.event(
+            "compliance_eval",
+            json!({
+                "framework": eval.framework_label,
+                "passed": eval.passed,
+                "failed": eval.failed,
+                "not_applicable": eval.not_applicable,
+            }),
+        );
     }
 
     audit.event(

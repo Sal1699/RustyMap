@@ -694,6 +694,18 @@ pub struct Cli {
     #[arg(long = "ipa-scan", value_name = "FILE")]
     pub ipa_scan: Option<String>,
 
+    /// Compliance evaluation against a built-in framework template.
+    /// One of: pci-dss | hipaa | nist-800-53 | iso-27001 | cis.
+    /// Maps every finding emitted by the scan (TLS / DNS / SSH / SMB /
+    /// RDP / SMTP / web / mobile / cloud) to the relevant control IDs
+    /// and prints a PASS/FAIL/N/A matrix.
+    #[arg(long = "compliance", value_name = "FRAMEWORK")]
+    pub compliance: Option<String>,
+
+    /// Write the compliance evaluation as a Markdown report to FILE.
+    #[arg(long = "compliance-report", value_name = "FILE.md")]
+    pub compliance_report: Option<String>,
+
     /// Self-update to the latest release from GitHub
     #[arg(long = "update")]
     pub self_update: bool,

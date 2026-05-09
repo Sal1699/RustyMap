@@ -204,6 +204,8 @@ pub fn print_guide() {
     line("--cloud-fingerprint D Identifica AWS/GCP/Azure/Cloudflare/Akamai/Fastly da DNS");
     line("--apk-scan FILE       Static APK: manifest perms+components, dex secrets+pinning");
     line("--ipa-scan FILE       Static IPA: Info.plist (ATS, URL schemes), binary secrets");
+    line("--compliance FW       Eval findings vs framework: pci-dss|hipaa|nist-800-53|iso-27001|cis");
+    line("--compliance-report F Scrive un report Markdown del risultato compliance");
     line("--notify URL          Webhook su completion (ntfy://topic, slack://hook, https://)");
     line("--progress            Spinner indicatif durante lo scan (elapsed + tipo + N target)");
     line("--dns-sniff           Sniff DNS sulla rete (admin + Npcap)");
@@ -228,6 +230,8 @@ pub fn print_guide() {
     example("rustymap --cloud-fingerprint cdn.example.com");
     example("rustymap --apk-scan app-release.apk");
     example("rustymap --ipa-scan MyApp.ipa");
+    example("rustymap --auth-audit --tls-grade --compliance pci-dss 10.0.0.5");
+    example("rustymap --auth-audit --compliance cis --compliance-report cis.md target");
 
     category("AUTOMATION & TOOLING");
     section("VAULT (credenziali cifrate)");

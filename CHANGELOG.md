@@ -4,6 +4,38 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.46.0] - 2026-05-09
+- **Fase 5 — Compliance.** New `compliance` module with built-in
+  templates for PCI-DSS v4.0, HIPAA Security Rule, NIST SP 800-53
+  Rev. 5, ISO/IEC 27001:2022 Annex A, and CIS Benchmarks. ~10
+  controls per framework, each declaring trigger kinds (findings
+  whose presence fails the control) and coverage areas (which scan
+  family must have run for the control to be applicable).
+- `--compliance FRAMEWORK` evaluates the post-scan finding stream
+  against the chosen template. Three statuses per control:
+  - **PASS** — the relevant audit ran and produced no failing
+    findings.
+  - **FAIL** — at least one finding triggers this control;
+    evidence (kind, host, detail) listed inline.
+  - **N/A** — no audit covered the area at all (e.g. an SMB
+    control on a host where 445/139 weren't probed).
+- `--compliance-report FILE.md` writes a Markdown report alongside
+  the terminal print: control matrix + per-failed-control evidence
+  blocks suitable for handoff to a GRC owner.
+- Findings are populated automatically by the existing `--ssl-enum`,
+  `--tls-grade`, `--ssh-audit`, `--smb-audit`, `--rdp-audit`,
+  `--smtp-audit` blocks plus a port-state coverage marker per host.
+  No new flags need to be added to existing audits — drop
+  `--compliance pci-dss` onto any scan that already runs them.
+- Stable finding-kind taxonomy: `tls_protocol_legacy`, `tls_no_modern`,
+  `tls_weak_cipher`, `tls_classic_vuln`, `ssh_weak_kex/cipher/mac`,
+  `smb_v1`, `smb_no_signing`, `rdp_no_nla`, `smtp_starttls_missing`,
+  `smtp_clear_creds`, `port_open_unrestricted`, `cve_critical`, plus
+  per-area `_evaluated` coverage markers.
+- 6 new tests cover framework alias parsing, PASS/FAIL/N/A logic
+  across coverage scenarios, summary count consistency, and the
+  Markdown renderer content. 128/128 total pass.
+
 ## [0.45.0] - 2026-05-09
 - **Fase 4 — Mobile.** Static analysis of Android APKs and iOS IPAs
   with no execution and no instrumentation — pure file reads on a
