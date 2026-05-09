@@ -185,6 +185,18 @@ pub fn print_guide() {
     line("--http-enum           Path enumeration su porte HTTP open dopo lo scan");
     line("--ssl-enum            Enumera TLS 1.0/1.1/1.2/1.3 + cipher su porte TLS open");
     line("--tls-grade           Grade A+/F + DROWN/POODLE/Heartbleed PoC (read-only)");
+    line("--ssh-audit           SSH KEX/cipher/host-key/MAC enum (RFC 4253 KEXINIT)");
+    line("--smb-audit           SMB dialect + signing (flag SMBv1 + signing-not-required)");
+    line("--rdp-audit           RDP X.224 negotiation (flag legacy RDP + missing NLA)");
+    line("--smtp-audit          STARTTLS + AUTH mechanisms su 25/465/587");
+    line("--auth-audit          Shortcut: ssh + smb + rdp + smtp insieme");
+    line("--web-crawl URL       BFS crawler (forms + params + links, robots.txt aware)");
+    line("--crawl-depth N       Profondità max del crawl (default 3)");
+    line("--crawl-max-urls N    Tetto numero URL (default 200)");
+    line("--web-cookie HEADER   Cookie da iniettare (es. \"session=abc; csrf=…\")");
+    line("--no-robots           Ignora robots.txt durante --web-crawl");
+    line("--owasp-scan URL      Crawl + probe XSS/SQLi/open-redirect/SSRF");
+    line("--owasp-checks LIST   Subset: xss,sqli,redirect,ssrf");
     line("--notify URL          Webhook su completion (ntfy://topic, slack://hook, https://)");
     line("--progress            Spinner indicatif durante lo scan (elapsed + tipo + N target)");
     line("--dns-sniff           Sniff DNS sulla rete (admin + Npcap)");
@@ -199,6 +211,10 @@ pub fn print_guide() {
     example("rustymap --origin-discovery example.com");
     example("rustymap --dns-security example.com");
     example("rustymap --tls-grade --ssl-enum -p 443 example.com");
+    example("rustymap --auth-audit -p 22,445,3389,587 10.0.0.5");
+    example("rustymap --web-crawl https://target/ --crawl-depth 4");
+    example("rustymap --owasp-scan https://target/ --owasp-checks xss,sqli");
+    example("rustymap --owasp-scan https://target/ --web-cookie \"session=abc\"");
 
     category("AUTOMATION & TOOLING");
     section("VAULT (credenziali cifrate)");

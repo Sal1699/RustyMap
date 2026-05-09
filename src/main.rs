@@ -46,9 +46,15 @@ mod dns_security;
 mod exploit_refs;
 #[allow(dead_code)]
 mod nvd;
+mod owasp_probes;
+mod rdp_audit;
+mod smb_audit;
+mod smtp_audit;
+mod ssh_audit;
 mod tls_enum;
 mod tls_grade;
 mod tls_probe;
+mod web_crawl;
 mod top_ports;
 mod traceroute;
 mod tui;
@@ -311,6 +317,50 @@ async fn main() -> Result<()> {
         let timeout = std::time::Duration::from_secs(10);
         let report = dns_security::audit(&domain, timeout).await?;
         dns_security::print_report(&report);
+        return Ok(());
+    }
+    // --web-crawl and --owasp-scan: standalone web-app probes. The
+    // OWASP variant feeds the crawl inventory through the active
+    // probes; --web-crawl alone just prints the surface map.
+    if args.web_crawl.is_some() || args.owasp_scan.is_some() {
+        let seed = args
+            .owasp_scan
+            .clone()
+            .or_else(|| args.web_crawl.clone())
+            .unwrap();
+        let cfg = web_crawl::CrawlConfig {
+            max_depth: args.crawl_depth,
+            max_urls: args.crawl_max_urls,
+            respect_robots: !args.no_robots,
+            cookie: args.web_cookie.clone(),
+            timeout: std::time::Duration::from_secs(8),
+        };
+        let result = web_crawl::crawl(&seed, &cfg).await?;
+        web_crawl::print_summary(&result);
+        if args.owasp_scan.is_some() {
+            let checks: Vec<&'static str> = args
+                .owasp_checks
+                .as_deref()
+                .map(|s| {
+                    s.split(',')
+                        .map(|c| c.trim())
+                        .filter_map(|c| match c {
+                            "xss" => Some("xss"),
+                            "sqli" => Some("sqli"),
+                            "redirect" => Some("redirect"),
+                            "ssrf" => Some("ssrf"),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_else(|| vec!["xss", "sqli", "redirect", "ssrf"]);
+            let pcfg = owasp_probes::ProbeConfig {
+                timeout: std::time::Duration::from_secs(8),
+                checks,
+            };
+            let findings = owasp_probes::probe(&result.endpoints, &pcfg).await?;
+            owasp_probes::print_findings(&findings);
+        }
         return Ok(());
     }
 
@@ -1223,6 +1273,99 @@ async fn main() -> Result<()> {
                         }
                     }
                     Err(e) => eprintln!("[!] ssl-enum {}:{}: {}", h.target.display(), p.port, e),
+                }
+            }
+        }
+    }
+
+    // Per-protocol authenticated-service audits (no creds tested,
+    // just protocol-capability enumeration).
+    let want_ssh = args.ssh_audit || args.auth_audit;
+    let want_smb = args.smb_audit || args.auth_audit;
+    let want_rdp = args.rdp_audit || args.auth_audit;
+    let want_smtp = args.smtp_audit || args.auth_audit;
+    if (want_ssh || want_smb || want_rdp || want_smtp) && !was_cancelled {
+        let auth_dur = timeout_dur.min(std::time::Duration::from_secs(8));
+        for h in sorted.iter().filter(|h| h.up) {
+            let host_label = h.target.display();
+            for p in &h.ports {
+                if p.state != PortState::Open {
+                    continue;
+                }
+                if want_ssh && p.port == 22 {
+                    match ssh_audit::audit(h.target.ip, p.port, auth_dur).await {
+                        Ok(a) => {
+                            ssh_audit::print_report(&host_label, p.port, &a);
+                            if a.has_weakness() {
+                                audit.event(
+                                    "ssh_audit",
+                                    json!({
+                                        "host": h.target.ip.to_string(),
+                                        "port": p.port,
+                                        "findings": a.findings,
+                                    }),
+                                );
+                            }
+                        }
+                        Err(e) => eprintln!("[!] ssh-audit {}:{}: {}", host_label, p.port, e),
+                    }
+                }
+                if want_smb && (p.port == 445 || p.port == 139) {
+                    match smb_audit::audit(h.target.ip, p.port, auth_dur).await {
+                        Ok(a) => {
+                            smb_audit::print_report(&host_label, p.port, &a);
+                            if a.has_weakness() {
+                                audit.event(
+                                    "smb_audit",
+                                    json!({
+                                        "host": h.target.ip.to_string(),
+                                        "port": p.port,
+                                        "dialect": a.dialect,
+                                        "findings": a.findings,
+                                    }),
+                                );
+                            }
+                        }
+                        Err(e) => eprintln!("[!] smb-audit {}:{}: {}", host_label, p.port, e),
+                    }
+                }
+                if want_rdp && p.port == 3389 {
+                    match rdp_audit::audit(h.target.ip, p.port, auth_dur).await {
+                        Ok(a) => {
+                            rdp_audit::print_report(&host_label, p.port, &a);
+                            if a.has_weakness() {
+                                audit.event(
+                                    "rdp_audit",
+                                    json!({
+                                        "host": h.target.ip.to_string(),
+                                        "port": p.port,
+                                        "selected": a.protocol_name,
+                                        "findings": a.findings,
+                                    }),
+                                );
+                            }
+                        }
+                        Err(e) => eprintln!("[!] rdp-audit {}:{}: {}", host_label, p.port, e),
+                    }
+                }
+                if want_smtp && (p.port == 25 || p.port == 465 || p.port == 587) {
+                    match smtp_audit::audit(h.target.ip, p.port, auth_dur).await {
+                        Ok(a) => {
+                            smtp_audit::print_report(&host_label, p.port, &a);
+                            if a.has_weakness() {
+                                audit.event(
+                                    "smtp_audit",
+                                    json!({
+                                        "host": h.target.ip.to_string(),
+                                        "port": p.port,
+                                        "starttls": a.starttls_succeeded,
+                                        "findings": a.findings,
+                                    }),
+                                );
+                            }
+                        }
+                        Err(e) => eprintln!("[!] smtp-audit {}:{}: {}", host_label, p.port, e),
+                    }
                 }
             }
         }

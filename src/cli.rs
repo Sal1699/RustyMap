@@ -598,6 +598,62 @@ pub struct Cli {
     #[arg(long = "tls-grade")]
     pub tls_grade: bool,
 
+    /// SSH KEX/cipher/host-key/MAC audit (RFC 4253 KEXINIT enum).
+    /// No auth, no KEX completed — just reads server's algorithm
+    /// name-lists and flags weak entries.
+    #[arg(long = "ssh-audit")]
+    pub ssh_audit: bool,
+
+    /// SMB dialect + signing audit (sends SMBv1 NEGOTIATE, parses
+    /// SMB1/SMB2 response). Flags SMBv1 enabled or signing-not-required.
+    #[arg(long = "smb-audit")]
+    pub smb_audit: bool,
+
+    /// RDP X.224 negotiation audit. Flags legacy RDP (no TLS) and
+    /// missing CredSSP/NLA — BlueKeep-class indicator.
+    #[arg(long = "rdp-audit")]
+    pub rdp_audit: bool,
+
+    /// SMTP STARTTLS + AUTH-mechanism audit on 25/465/587. Flags
+    /// cleartext PLAIN/LOGIN, missing STARTTLS, VRFY/EXPN open.
+    #[arg(long = "smtp-audit")]
+    pub smtp_audit: bool,
+
+    /// Shortcut: --ssh-audit + --smb-audit + --rdp-audit + --smtp-audit.
+    #[arg(long = "auth-audit")]
+    pub auth_audit: bool,
+
+    /// Web crawl from a seed URL — BFS with robots.txt respect,
+    /// records every URL + form + parameter discovered.
+    #[arg(long = "web-crawl", value_name = "URL")]
+    pub web_crawl: Option<String>,
+
+    /// Max crawl depth from the seed (default 3)
+    #[arg(long = "crawl-depth", default_value_t = 3)]
+    pub crawl_depth: usize,
+
+    /// Max URLs to visit during the crawl (default 200)
+    #[arg(long = "crawl-max-urls", default_value_t = 200)]
+    pub crawl_max_urls: usize,
+
+    /// Cookie header sent during --web-crawl (e.g. "session=abc; csrf=…")
+    #[arg(long = "web-cookie", value_name = "HEADER")]
+    pub web_cookie: Option<String>,
+
+    /// Ignore robots.txt during --web-crawl (default: respect it).
+    #[arg(long = "no-robots")]
+    pub no_robots: bool,
+
+    /// Run OWASP active probes (XSS, SQLi, open-redirect, SSRF) on
+    /// every parameter discovered by --web-crawl. Implies --web-crawl
+    /// when given a URL.
+    #[arg(long = "owasp-scan", value_name = "URL")]
+    pub owasp_scan: Option<String>,
+
+    /// Restrict OWASP probes to comma-separated set: xss,sqli,redirect,ssrf
+    #[arg(long = "owasp-checks", value_name = "LIST")]
+    pub owasp_checks: Option<String>,
+
     /// Self-update to the latest release from GitHub
     #[arg(long = "update")]
     pub self_update: bool,

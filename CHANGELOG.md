@@ -4,6 +4,42 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.43.0] - 2026-05-08
+- **Fase 2 — Authenticated/Web deep.** Six new modules cover
+  protocol-level audits for the four most-targeted services and a
+  full crawl + active-probe path for web apps.
+- `--ssh-audit` speaks just enough SSH-2.0 transport (RFC 4253) to
+  receive the server's KEXINIT and enumerate KEX, host-key, cipher,
+  and MAC name-lists. Flags DH group1/group14-sha1, ssh-dss,
+  ssh-rsa-only, 3des/RC4 ciphers, hmac-md5/sha1-truncated. No KEX
+  completed, no auth attempted.
+- `--smb-audit` sends the SMBv1 NEGOTIATE listing both SMB1 and
+  SMB2 dialects, parses whichever response shape the server picks.
+  Surfaces SMBv1-enabled (EternalBlue/MS17-010 indicator) and
+  signing-not-required (NTLM-relay enabler).
+- `--rdp-audit` runs an X.224 Connection Request with RDP_NEG_REQ
+  asking for RDP+TLS+CredSSP+HybridEx. Server's RDP_NEG_RSP reveals
+  what it'll actually accept; legacy PROTOCOL_RDP-only is flagged
+  as BlueKeep-class (CVE-2019-0708).
+- `--smtp-audit` covers 25/465/587 — banner + EHLO, optional
+  STARTTLS upgrade, then re-EHLO inside TLS to compare cleartext
+  vs encrypted capability sets. Flags missing STARTTLS, AUTH
+  PLAIN/LOGIN before TLS, VRFY/EXPN open.
+- `--auth-audit` is a shortcut for all four above.
+- `--web-crawl URL` is a depth/URL-capped BFS crawler that respects
+  robots.txt by default (override with `--no-robots`), preserves
+  cookies (`--web-cookie`), and extracts links + forms + parameter
+  names. Output is a flat endpoint inventory.
+- `--owasp-scan URL` chains the crawl with active probes: reflected
+  XSS (`<svg/onload>` + token detection), error-based SQLi (single
+  quote + DB-error fingerprints for MySQL/PG/MSSQL/Oracle/SQLite),
+  open-redirect (Location-header echo), and best-effort SSRF
+  (loopback connection-error markers). `--owasp-checks` narrows the
+  set.
+- 22 new tests cover SSH/SMB/RDP classification, SMTP EHLO parsing,
+  crawler link/form extraction, robots-txt rule matching, and SQL
+  fingerprint case-insensitivity → 94/94 pass.
+
 ## [0.42.0] - 2026-05-08
 - **Fase 1 — Vuln intel foundation.** Five new sub-systems land in
   one bundle, all read-only and locally cached:
