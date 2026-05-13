@@ -67,11 +67,16 @@ mod plugin_meta;
 mod rdp_audit;
 mod os_fp_v6;
 mod random_targets;
+mod ldap_enum;
+mod netbios_ns;
 mod recommend;
 mod resume;
+mod rpc_scan;
 mod runtime_keys;
 mod sctp_scan;
 mod siem;
+mod smb_deep;
+mod snmp_enum;
 mod smb_audit;
 mod smtp_audit;
 mod ssh_audit;
@@ -512,6 +517,78 @@ async fn main() -> Result<()> {
         let timeout = std::time::Duration::from_secs(8);
         let fp = cloud_fingerprint::fingerprint(&host, timeout).await?;
         cloud_fingerprint::print_report(&fp);
+        return Ok(());
+    }
+    if let Some(host_spec) = &args.snmp_enum {
+        let host_spec = host_spec.clone();
+        let dur = args.timeout();
+        let extras: Vec<String> = args
+            .snmp_community
+            .as_deref()
+            .map(|s| s.split(',').map(|x| x.trim().to_string()).collect())
+            .unwrap_or_default();
+        let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
+        for t in &targets {
+            match snmp_enum::enumerate(t.ip, &extras, dur).await? {
+                Some(f) => snmp_enum::print_finding(&t.display(), &f),
+                None => println!("[snmp-enum] {} — no community matched", t.display()),
+            }
+        }
+        return Ok(());
+    }
+    if let Some(host_spec) = &args.nbt_enum {
+        let host_spec = host_spec.clone();
+        let dur = args.timeout();
+        let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
+        for t in &targets {
+            match netbios_ns::query(t.ip, dur).await? {
+                Some(f) => netbios_ns::print_finding(&f),
+                None => println!("[nbt-enum] {} — no NBSTAT reply", t.display()),
+            }
+        }
+        return Ok(());
+    }
+    if let Some(host_spec) = &args.ldap_enum {
+        let host_spec = host_spec.clone();
+        let port = args.ldap_port;
+        let dur = args.timeout();
+        let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
+        for t in &targets {
+            match ldap_enum::enumerate(t.ip, port, dur).await? {
+                Some(f) => ldap_enum::print_finding(&f),
+                None => println!("[ldap-enum] {} — anonymous bind refused", t.display()),
+            }
+        }
+        return Ok(());
+    }
+    if let Some(host_spec) = &args.rpc_dump {
+        let host_spec = host_spec.clone();
+        let dur = args.timeout();
+        let use_udp = args.rpc_udp;
+        let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
+        for t in &targets {
+            let r = if use_udp {
+                rpc_scan::dump_udp(t.ip, dur).await
+            } else {
+                rpc_scan::dump_tcp(t.ip, dur).await
+            };
+            match r {
+                Ok(d) => rpc_scan::print_dump(&d),
+                Err(e) => eprintln!("[!] -sR {}: {}", t.display(), e),
+            }
+        }
+        return Ok(());
+    }
+    if let Some(host_spec) = &args.smb_deep {
+        let host_spec = host_spec.clone();
+        let dur = args.timeout();
+        let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
+        for t in &targets {
+            match smb_deep::deep_enum(t.ip, 445, dur).await? {
+                Some(f) => smb_deep::print_finding(&f),
+                None => println!("[smb-deep] {} — no NTLMSSP CHALLENGE", t.display()),
+            }
+        }
         return Ok(());
     }
     if let Some(spec) = &args.os_fp_v6 {

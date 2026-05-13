@@ -87,6 +87,14 @@ pub fn print_guide() {
     line("--stylesheet URL      Embedda XSL nell'XML output (browser-friendly)");
     line("--iR N                N target IPv4 pubblici random (richiede --internet-consent)");
     line("--internet-consent    Conferma autorizzazione per --iR");
+    line("--snmp-enum HOST      SNMP v1 enum (community common + MIB-2 system)");
+    line("--snmp-community CSV  Community extra per --snmp-enum");
+    line("--nbt-enum HOST       NetBIOS NBSTAT (UDP/137): hostname/workgroup/MAC");
+    line("--ldap-enum HOST      LDAP anonymous bind + rootDSE");
+    line("--ldap-port N         Override porta LDAP (default 389)");
+    line("--sR HOST             RPC portmap dump (NFS/mountd/nlockmgr/…)");
+    line("--rpc-udp             Usa UDP/111 invece di TCP/111 per --sR");
+    line("--smb-deep HOST       SMB pre-auth deep enum (NTLMSSP CHALLENGE)");
     line("--sI ZOMBIE[:PORT]    Idle/zombie scan (spoof via host con IPID incrementale)");
     line("--sO                  IP protocol scan (TCP/UDP/ICMP/GRE/OSPF/SCTP…)");
     example("rustymap --sT 10.0.0.5");
@@ -103,6 +111,12 @@ pub fn print_guide() {
     example("rustymap --resume-from scan.state          # ripende dopo CTRL-C");
     example("rustymap --oX scan.xml --stylesheet rustymap.xsl 10.0.0.5");
     example("rustymap --iR 100 --internet-consent --top-ports 10");
+    example("rustymap --snmp-enum 10.0.0.5                          # SNMP system MIB");
+    example("rustymap --snmp-enum 10.0.0.5 --snmp-community lab,monitor");
+    example("rustymap --nbt-enum 10.0.0.5                           # NetBIOS host info");
+    example("rustymap --ldap-enum dc01.example.com                  # rootDSE AD");
+    example("rustymap --sR 10.0.0.5                                 # RPC portmap dump");
+    example("rustymap --smb-deep 10.0.0.5                           # NTLMSSP info");
     example("rustymap --sI 192.168.1.100:80 10.0.0.5");
 
     section("HOST DISCOVERY");

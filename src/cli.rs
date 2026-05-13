@@ -159,6 +159,43 @@ pub struct Cli {
     #[arg(long = "internet-consent")]
     pub internet_consent: bool,
 
+    /// SNMP v1 enumeration: tries common community strings against
+    /// UDP/161 and fetches MIB-2 system OIDs on the first match.
+    #[arg(long = "snmp-enum", value_name = "HOST")]
+    pub snmp_enum: Option<String>,
+
+    /// Additional community strings for --snmp-enum (comma-separated).
+    /// Curated defaults (public, private, cisco, …) are always tried.
+    #[arg(long = "snmp-community", value_name = "CSV")]
+    pub snmp_community: Option<String>,
+
+    /// NetBIOS Name Service NBSTAT query (UDP/137). Returns the
+    /// remote name table + MAC address + role flags.
+    #[arg(long = "nbt-enum", value_name = "HOST")]
+    pub nbt_enum: Option<String>,
+
+    /// LDAP anonymous bind + rootDSE enumeration. Default port 389.
+    #[arg(long = "ldap-enum", value_name = "HOST")]
+    pub ldap_enum: Option<String>,
+
+    /// LDAP port override (default 389; use 636 for LDAPS).
+    #[arg(long = "ldap-port", default_value_t = 389)]
+    pub ldap_port: u16,
+
+    /// RPC portmap dump (`-sR` in nmap). TCP/UDP 111 — enumerates
+    /// every registered RPC program (NFS, mountd, nlockmgr, …).
+    #[arg(long = "sR", value_name = "HOST")]
+    pub rpc_dump: Option<String>,
+
+    /// Use UDP/111 for --sR instead of TCP/111.
+    #[arg(long = "rpc-udp")]
+    pub rpc_udp: bool,
+
+    /// SMB pre-auth deep enum via NTLMSSP CHALLENGE. Pulls NetBIOS
+    /// + DNS hostname / domain / forest + OS version. No credentials.
+    #[arg(long = "smb-deep", value_name = "HOST")]
+    pub smb_deep: Option<String>,
+
     /// Idle (zombie) scan — spoofs probes via a zombie with incremental IP ID (root/admin)
     #[arg(long = "sI", value_name = "ZOMBIE[:PORT]", group = "scan_type")]
     pub scan_idle: Option<String>,

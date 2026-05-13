@@ -4,6 +4,50 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.56.0] - 2026-05-09
+- **Fase 15 — Deep service enumeration.** Five protocol probes that
+  go beyond banner-grab and expose what each service is actually
+  willing to tell a pre-auth caller. All hand-rolled — zero new
+  deps for SNMP / LDAP / RPC / NetBIOS / SMB-deep.
+- `--snmp-enum HOST [--snmp-community CSV]`: SNMP v1 enum with
+  hand-rolled ASN.1 BER. Tries a curated community list (`public`,
+  `private`, `community`, `cisco`, `manager`, `default`, `router`,
+  `admin`, `switch`) plus user-supplied extras. On a hit, fetches
+  MIB-2 `sysDescr` / `sysName` / `sysLocation` / `sysContact` /
+  `sysUpTime` and prints a formatted view. Default community usage
+  surfaces a red warning.
+- `--nbt-enum HOST`: NetBIOS Name Service NBSTAT query on UDP/137.
+  First-half/second-half nibble encoding of the wildcard `*` name,
+  decodes the responder's name table + MAC address + role flags
+  (Workstation / Workgroup / Domain Master Browser / File Server /
+  …) + currently logged-on user (suffix 0x03).
+- `--ldap-enum HOST [--ldap-port N]`: anonymous LDAP bind + rootDSE
+  search. Hand-rolled BER for the LDAPv3 BindRequest +
+  SearchRequest. Pulls `namingContexts`, `supportedSASLMechanisms`,
+  `supportedLDAPVersion`, `defaultNamingContext`, `dnsHostName`,
+  `serverName`, `domainFunctionality`. Detects Active Directory
+  from DC-style naming contexts.
+- `--sR HOST [--rpc-udp]`: ONC-RPC portmap DUMP procedure
+  (program 100000 / version 2 / procedure 4) on TCP or UDP 111.
+  Lists every registered RPC program with version + protocol +
+  port. Known-program name table covers NFS / mountd / nlockmgr /
+  status / cmsd / ttdbserver / showmount / autofs + Solaris / IRIX
+  legacy programs. Yellow-highlights NFS exposure.
+- `--smb-deep HOST`: SMB pre-auth deep enumeration via NTLMSSP
+  CHALLENGE. Sends SMBv1 NEGOTIATE + Session Setup ANDX carrying
+  an NTLMSSP NEGOTIATE (Type 1) blob; parses the server's Type 2
+  CHALLENGE reply for NetBIOS computer / domain, DNS hostname /
+  domain / forest, and Windows version major.minor.build. Useful
+  for AD domain mapping without credentials.
+- 28 new tests cover BER integer encoding (positive / negative /
+  boundary cases), OID encoding against RFC reference vectors,
+  multi-byte sub-identifiers, BER length short/long form, SNMP
+  request layout, NetBIOS wildcard encoding, suffix classification,
+  LDAP bind structure, RPC build_call layout + parse_dump_reply
+  round-trip + wrong-xid rejection, NTLMSSP magic location with
+  type-2 gate + type-1 refusal, UTF-16LE decode, AV-pair parser.
+  271/271 pass.
+
 ## [0.55.0] - 2026-05-09
 - **Fase 14 — Resumability & runtime UX.** Four ergonomic adds for
   longer-running scans and cross-session continuity.

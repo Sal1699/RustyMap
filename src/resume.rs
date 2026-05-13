@@ -46,6 +46,7 @@ pub struct ScanState {
 }
 
 impl ScanState {
+    #[allow(dead_code)]
     pub fn new(
         scan_type: &str,
         ports: Vec<u16>,
@@ -66,6 +67,7 @@ impl ScanState {
     }
 
     /// Move a result from pending to completed by IP match.
+    #[allow(dead_code)]
     pub fn record(&mut self, result: HostResult) {
         self.pending.retain(|t| t.ip != result.target.ip);
         self.completed.push(result);
