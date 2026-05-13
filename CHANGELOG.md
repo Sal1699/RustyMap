@@ -4,6 +4,39 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.55.0] - 2026-05-09
+- **Fase 14 — Resumability & runtime UX.** Four ergonomic adds for
+  longer-running scans and cross-session continuity.
+- `--checkpoint FILE.state` writes a JSON state file at scan-end (and
+  could in future be flushed periodically by the scanner inner loop)
+  containing scan-type, ports, args, completed `HostResult`s, and
+  pending targets. Atomic save via `tmp + rename` so a crashed flush
+  doesn't corrupt the file.
+- `--resume-from FILE.state` restarts a scan from where the previous
+  one stopped — pending targets become the new positional list,
+  completed results fold into the report output. Schema-versioned
+  (refuses to load a future-schema file rather than mis-resume).
+- `src/runtime_keys.rs` — runtime keypress handler:
+  - `v` / `V` → bump verbosity (capped at 3)
+  - `p` → toggle paused
+  - `s` → print snapshot of current state
+  - `?` / `h` → show help banner
+  Disabled when stdin is not a TTY.
+- `--stylesheet URL` for `--oX` output emits an
+  `<?xml-stylesheet type="text/xsl" href="..."?>` PI at the top of
+  the XML, so opening it in any browser renders the report through
+  the supplied XSL (point at nmap's bundled `nmap.xsl` for instant
+  browser-rendered output).
+- `--iR N` generates N random public IPv4 targets, skipping every
+  reserved range up through 2026 (RFC 1918 / 5735 / 6598 / 6890,
+  TEST-NETs, multicast, link-local, CGNAT, benchmarking,
+  documentation). Hard-gated behind `--internet-consent` — refuses
+  to run without it.
+- 16 new tests cover state save/load round-trip, schema-version
+  refusal, RuntimeState verbosity-cap & pause-toggle behaviour,
+  is_reserved across every excluded block, generate() consent gate
+  + zero-N case + producing only public addresses. 243/243 pass.
+
 ## [0.54.0] - 2026-05-09
 - **Fase 13 — IPv6 maturity.** Closes the lower-hanging IPv6 gaps;
   raw-socket IPv6 (SYN/SCTP/UDP raw) stays a separate roadmap item.

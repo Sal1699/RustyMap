@@ -82,6 +82,11 @@ pub fn print_guide() {
     line("fe80::1%eth0          IPv6 link-local con zone-ID — supportato come target");
     line("--os-fp-v6 HOST       IPv6 OS fingerprint best-effort (Linux/Windows/BSD/network)");
     line("--os-fp-v6-port N     Probe port per --os-fp-v6 (default 80)");
+    line("--checkpoint F.state  Salva progress dello scan in F.state per resume");
+    line("--resume-from F.state Riprende uno scan da un checkpoint file");
+    line("--stylesheet URL      Embedda XSL nell'XML output (browser-friendly)");
+    line("--iR N                N target IPv4 pubblici random (richiede --internet-consent)");
+    line("--internet-consent    Conferma autorizzazione per --iR");
     line("--sI ZOMBIE[:PORT]    Idle/zombie scan (spoof via host con IPID incrementale)");
     line("--sO                  IP protocol scan (TCP/UDP/ICMP/GRE/OSPF/SCTP…)");
     example("rustymap --sT 10.0.0.5");
@@ -94,6 +99,10 @@ pub fn print_guide() {
     example("rustymap --sT 'fe80::1%eth0' -p 22         # IPv6 link-local con zone");
     example("rustymap --os-fp-v6 2001:db8::42");
     example("rustymap 2001:db8::/120                    # IPv6 CIDR (cap a /112)");
+    example("rustymap --checkpoint scan.state 10.0.0.0/24");
+    example("rustymap --resume-from scan.state          # ripende dopo CTRL-C");
+    example("rustymap --oX scan.xml --stylesheet rustymap.xsl 10.0.0.5");
+    example("rustymap --iR 100 --internet-consent --top-ports 10");
     example("rustymap --sI 192.168.1.100:80 10.0.0.5");
 
     section("HOST DISCOVERY");

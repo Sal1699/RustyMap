@@ -66,7 +66,10 @@ mod pdf_out;
 mod plugin_meta;
 mod rdp_audit;
 mod os_fp_v6;
+mod random_targets;
 mod recommend;
+mod resume;
+mod runtime_keys;
 mod sctp_scan;
 mod siem;
 mod smb_audit;
@@ -880,8 +883,25 @@ async fn main() -> Result<()> {
         Some(Db::open(&path)?)
     };
 
-    // 1) Expand targets
+    // 1) Expand targets — three sources can contribute:
+    //   --resume-from FILE.state  (the pending list of an interrupted run)
+    //   --iR N                    (random public IPv4)
+    //   positional args           (normal CIDR/host/range/DNS)
     let mut targets = target::expand_targets(&args.targets, !args.no_dns).await?;
+    if args.random_targets > 0 {
+        let extras = random_targets::generate(args.random_targets, args.internet_consent)?;
+        eprintln!("[iR] generated {} random public IPv4 targets", extras.len());
+        targets.extend(extras);
+    }
+    let mut resumed_completed: Vec<scanner::HostResult> = Vec::new();
+    if let Some(path) = &args.resume_from {
+        let state = resume::load(std::path::Path::new(path))?;
+        resume::print_progress(&state);
+        resumed_completed = state.completed.clone();
+        // Override targets with the pending list — caller's positional
+        // args are ignored when resuming so we don't double-scan hosts.
+        targets = state.pending;
+    }
     if args.ipv4_only {
         targets.retain(|t| t.ip.is_ipv4());
     } else if args.ipv6_only {
@@ -1496,8 +1516,32 @@ async fn main() -> Result<()> {
         }
     }
 
-    // 5) Output
-    let mut sorted = results;
+    // 5) Output — fold in any results carried forward from --resume-from
+    // so reports cover the full host list, not just this session.
+    let mut sorted: Vec<HostResult> = results;
+    if !resumed_completed.is_empty() {
+        sorted.extend(resumed_completed.clone());
+    }
+    // Optional checkpoint flush at scan-end (covers the "scan ran to
+    // completion successfully" case too — file becomes the canonical
+    // record).
+    if let Some(path) = &args.checkpoint {
+        let state = resume::ScanState {
+            schema_version: 1,
+            started_at: started_at.to_rfc3339(),
+            last_flushed_at: chrono::Local::now().to_rfc3339(),
+            scan_type: scan_type_str.clone(),
+            ports: port_list.to_vec(),
+            args_line: std::env::args().collect::<Vec<_>>().join(" "),
+            completed: sorted.clone(),
+            pending: Vec::new(),
+        };
+        if let Err(e) = resume::save(std::path::Path::new(path), &state) {
+            eprintln!("[!] checkpoint write failed: {}", e);
+        } else if args.verbose > 0 {
+            eprintln!("[checkpoint] state written to {}", path);
+        }
+    }
     sorted.sort_by_key(|h| h.target.ip);
     for h in &sorted {
         let mut h_view = h.clone();
@@ -1893,7 +1937,10 @@ async fn main() -> Result<()> {
     }
     if let Some(p) = &args.output_xml {
         let args_line: String = std::env::args().collect::<Vec<_>>().join(" ");
-        xml_out::write_xml(p, &sorted, &scan_type_str, started_at, elapsed, &args_line)?;
+        xml_out::write_xml_styled(
+            p, &sorted, &scan_type_str, started_at, elapsed, &args_line,
+            args.stylesheet.as_deref(),
+        )?;
     }
     if let Some(p) = &args.output_markdown {
         report::write_markdown(p, &sorted, &scan_type_str, started_at, elapsed, &diffs)?;

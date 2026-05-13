@@ -132,6 +132,33 @@ pub struct Cli {
     #[arg(long = "os-fp-v6-port", default_value_t = 80)]
     pub os_fp_v6_port: u16,
 
+    /// Checkpoint scan progress to FILE.state every N targets so the
+    /// run can be resumed after interruption.
+    #[arg(long = "checkpoint", value_name = "FILE.state")]
+    pub checkpoint: Option<String>,
+
+    /// Resume an interrupted scan from a checkpoint file written by
+    /// --checkpoint. Skips targets already completed and continues
+    /// with the rest.
+    #[arg(long = "resume-from", value_name = "FILE.state")]
+    pub resume_from: Option<String>,
+
+    /// Embed an XSL stylesheet PI in --oX output so opening the file
+    /// in a browser renders the report.
+    #[arg(long = "stylesheet", value_name = "URL")]
+    pub stylesheet: Option<String>,
+
+    /// Generate N random *public* IPv4 targets for measurement scans.
+    /// Skips RFC 1918 / 5735 / 6598 / 6890 reserved ranges. Refuses
+    /// to run without --internet-consent.
+    #[arg(long = "iR", value_name = "N", default_value_t = 0)]
+    pub random_targets: usize,
+
+    /// Confirms authorisation for `--iR` random Internet scanning.
+    /// Required by the safety gate.
+    #[arg(long = "internet-consent")]
+    pub internet_consent: bool,
+
     /// Idle (zombie) scan — spoofs probes via a zombie with incremental IP ID (root/admin)
     #[arg(long = "sI", value_name = "ZOMBIE[:PORT]", group = "scan_type")]
     pub scan_idle: Option<String>,

@@ -43,6 +43,7 @@ mod tests {
     }
 }
 
+#[allow(dead_code)]
 pub fn write_xml(
     path: &str,
     hosts: &[HostResult],
@@ -51,12 +52,35 @@ pub fn write_xml(
     elapsed_secs: f64,
     args_line: &str,
 ) -> Result<()> {
+    write_xml_styled(path, hosts, scan_type, started_at, elapsed_secs, args_line, None)
+}
+
+/// Like `write_xml`, but emits an `<?xml-stylesheet href=...?>`
+/// processing instruction so opening the file in a browser renders
+/// the report through the supplied XSL. nmap ships a stylesheet at
+/// /usr/share/nmap/nmap.xsl; rustymap users supply their own URL.
+pub fn write_xml_styled(
+    path: &str,
+    hosts: &[HostResult],
+    scan_type: &str,
+    started_at: chrono::DateTime<chrono::Local>,
+    elapsed_secs: f64,
+    args_line: &str,
+    stylesheet: Option<&str>,
+) -> Result<()> {
     let mut out = String::new();
     let start_ts = started_at.timestamp();
     let end_ts = started_at.timestamp() + elapsed_secs as i64;
     let scan_type_lower = scan_type.to_ascii_lowercase();
 
     writeln!(out, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")?;
+    if let Some(href) = stylesheet {
+        writeln!(
+            out,
+            "<?xml-stylesheet type=\"text/xsl\" href=\"{}\"?>",
+            escape(href)
+        )?;
+    }
     writeln!(
         out,
         "<nmaprun scanner=\"rustymap\" args=\"{}\" start=\"{}\" version=\"{}\" xmloutputversion=\"1.05\">",
