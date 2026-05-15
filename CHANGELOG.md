@@ -4,6 +4,42 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.59.0] - 2026-05-09
+- **Fase 18 — Broadcast & multicast discovery.** Five protocols
+  that an attacker (or auditor) wants to fire **once per LAN**
+  rather than per-host. All bind 0.0.0.0:0 with the appropriate
+  multicast / broadcast socket flag; no privileges required.
+- `--dhcp-discover` broadcasts a DHCP DISCOVER (RFC 2131) and
+  harvests every DHCP OFFER on the segment. Decodes server IP,
+  offered IP, subnet mask, router, DNS servers, domain name,
+  lease seconds. Multiple replies → **rogue DHCP server** signal.
+- `--mdns-discover` sends a PTR query for
+  `_services._dns-sd._udp.local` to 224.0.0.251:5353. Strict mDNS
+  responders that ignore the unicast variant in `iot_discover`
+  answer here. Parses DNS-compression pointers, builds a
+  responder → service-types → instance-names map.
+- `--llmnr-probe [--llmnr-probe-name NAME]` sends an LLMNR A
+  query for a deliberately-unique name to 224.0.0.252:5355. Any
+  host that volunteers an A-record for that name is poisoning-
+  vulnerable (Responder / Inveigh surface).
+- `--wsdd-probe` sends a SOAP-over-UDP WS-Discovery Probe to
+  239.255.255.250:3702. Decodes ProbeMatches replies for
+  `<wsa:Address>` + `<wsd:Types>` — covers Windows desktops,
+  network printers, IP cameras, MFP scanners.
+- `--nbt-broadcast` blasts an NBSTAT wildcard query to
+  255.255.255.255:137. Reuses the parser from `netbios_ns.rs`
+  via the new `parse_nbstat_for_broadcast` re-export.
+- `--discover-wait SEC` controls how long each probe collects
+  replies (default 3 seconds).
+- 18 new tests cover DHCP packet layout + offer parser
+  (yiaddr / server-id / mask / router / DNS / lease) +
+  wrong-xid + missing-magic rejection; mDNS query layout +
+  full reply round-trip + compression-pointer skip; LLMNR
+  query layout + A-record extraction + wrong-xid + no-answers;
+  WSDD probe canonical tags + namespaced/namespaceless tag
+  extraction + missing-tag + whitespace trim; NBT broadcast
+  layout + wildcard `*` → `CK` encoding. 342/342 pass.
+
 ## [0.58.0] - 2026-05-09
 - **Fase 17 — Vulnerability NSE-equivalents.** Five protocol-level
   vuln checks ported from the `nse/vuln` category, plus a glue

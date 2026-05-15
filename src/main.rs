@@ -67,6 +67,11 @@ mod plugin_meta;
 mod rdp_audit;
 mod os_fp_v6;
 mod random_targets;
+mod broadcast_dhcp;
+mod broadcast_llmnr;
+mod broadcast_mdns;
+mod broadcast_netbios;
+mod broadcast_wsdd;
 mod cms_detect;
 mod http_csp_cors;
 mod http_methods;
@@ -685,6 +690,36 @@ async fn main() -> Result<()> {
             let f = vuln_known_keys::probe(t.ip, port, t.hostname.as_deref(), dur).await;
             vuln_known_keys::print_finding(&f);
         }
+        return Ok(());
+    }
+    if args.dhcp_discover {
+        let dur = std::time::Duration::from_secs(args.discover_wait_secs);
+        let offers = broadcast_dhcp::discover(dur).await?;
+        broadcast_dhcp::print_offers(&offers);
+        return Ok(());
+    }
+    if args.mdns_discover {
+        let dur = std::time::Duration::from_secs(args.discover_wait_secs);
+        let r = broadcast_mdns::discover(dur).await?;
+        broadcast_mdns::print_finding(&r);
+        return Ok(());
+    }
+    if args.llmnr_probe {
+        let dur = std::time::Duration::from_secs(args.discover_wait_secs);
+        let r = broadcast_llmnr::discover(&args.llmnr_probe_name, dur).await?;
+        broadcast_llmnr::print_finding(&r);
+        return Ok(());
+    }
+    if args.wsdd_probe {
+        let dur = std::time::Duration::from_secs(args.discover_wait_secs);
+        let r = broadcast_wsdd::discover(dur).await?;
+        broadcast_wsdd::print_finding(&r);
+        return Ok(());
+    }
+    if args.nbt_broadcast {
+        let dur = std::time::Duration::from_secs(args.discover_wait_secs);
+        let r = broadcast_netbios::sweep(dur).await?;
+        broadcast_netbios::print_findings(&r);
         return Ok(());
     }
     if let Some(spec) = &args.cve_for {

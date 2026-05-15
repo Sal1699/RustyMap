@@ -95,6 +95,12 @@ pub async fn query(host: IpAddr, dur: Duration) -> Result<Option<NbtFinding>> {
     Ok(parse_nbstat_response(&buf[..n], host))
 }
 
+/// Alias used by `broadcast_netbios::sweep` so callers outside this
+/// module can reuse the parser.
+pub fn parse_nbstat_for_broadcast(buf: &[u8], host: IpAddr) -> Option<NbtFinding> {
+    parse_nbstat_response(buf, host)
+}
+
 fn parse_nbstat_response(buf: &[u8], host: IpAddr) -> Option<NbtFinding> {
     if buf.len() < 12 {
         return None;

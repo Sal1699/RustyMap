@@ -107,6 +107,13 @@ pub fn print_guide() {
     line("--vuln-known-key HOST SPKI SHA-256 vs DB chiavi compromesse (Debian PRNG ecc.)");
     line("--cve-for BANNER      Match product/version contro NVD cache (CVE + CVSS + KEV)");
     line("--cve-for-limit N     Tetto risultati --cve-for (default 25)");
+    line("--dhcp-discover       Broadcast DHCP DISCOVER → harvest DHCP server offers");
+    line("--mdns-discover       Multicast mDNS (224.0.0.251:5353) — Bonjour/Avahi inventory");
+    line("--llmnr-probe         LLMNR poisoning surface check (Responder-style)");
+    line("--llmnr-probe-name X  Custom name per --llmnr-probe");
+    line("--wsdd-probe          WS-Discovery (Windows + printer multicast)");
+    line("--nbt-broadcast       NetBIOS broadcast sweep");
+    line("--discover-wait SEC   Wait time per i probe multicast/broadcast (default 3)");
     line("--sI ZOMBIE[:PORT]    Idle/zombie scan (spoof via host con IPID incrementale)");
     line("--sO                  IP protocol scan (TCP/UDP/ICMP/GRE/OSPF/SCTP…)");
     example("rustymap --sT 10.0.0.5");
@@ -140,6 +147,11 @@ pub fn print_guide() {
     example("rustymap --vuln-known-key 10.0.0.5");
     example("rustymap --cve-for 'openssh 7.4p1'");
     example("rustymap --cve-for nginx:1.18.0");
+    example("rustymap --dhcp-discover                  # rogue-DHCP check");
+    example("rustymap --mdns-discover --discover-wait 5");
+    example("rustymap --llmnr-probe                    # LLMNR poison check");
+    example("rustymap --wsdd-probe                     # Windows discovery");
+    example("rustymap --nbt-broadcast                  # NBT sweep");
     example("rustymap --sI 192.168.1.100:80 10.0.0.5");
 
     section("HOST DISCOVERY");

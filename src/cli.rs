@@ -260,6 +260,41 @@ pub struct Cli {
     #[arg(long = "cve-for-limit", default_value_t = 25)]
     pub cve_for_limit: usize,
 
+    /// DHCP DISCOVER broadcast — harvest DHCP server offers (rogue
+    /// server check + DHCP option inventory).
+    #[arg(long = "dhcp-discover")]
+    pub dhcp_discover: bool,
+
+    /// mDNS multicast discovery (224.0.0.251:5353). Sends a PTR
+    /// query for `_services._dns-sd._udp.local`; collects responses
+    /// from every Bonjour/Avahi/strict responder on the LAN.
+    #[arg(long = "mdns-discover")]
+    pub mdns_discover: bool,
+
+    /// LLMNR multicast probe (224.0.0.252:5355). Asks for a bogus
+    /// name; anything that answers is poisoning-vulnerable.
+    #[arg(long = "llmnr-probe")]
+    pub llmnr_probe: bool,
+
+    /// Override the probe name for --llmnr-probe (default a
+    /// deliberately unique sentinel).
+    #[arg(long = "llmnr-probe-name", default_value = "rustymap-LLMNR-probe")]
+    pub llmnr_probe_name: String,
+
+    /// WS-Discovery probe (239.255.255.250:3702). Enumerates Windows
+    /// hosts and modern printers/cameras on the segment.
+    #[arg(long = "wsdd-probe")]
+    pub wsdd_probe: bool,
+
+    /// NetBIOS Name Service broadcast sweep (UDP/137 to 255.255.255.255).
+    #[arg(long = "nbt-broadcast")]
+    pub nbt_broadcast: bool,
+
+    /// Seconds to wait for replies on broadcast/multicast discovery
+    /// (default 3).
+    #[arg(long = "discover-wait", default_value_t = 3u64)]
+    pub discover_wait_secs: u64,
+
     /// Idle (zombie) scan — spoofs probes via a zombie with incremental IP ID (root/admin)
     #[arg(long = "sI", value_name = "ZOMBIE[:PORT]", group = "scan_type")]
     pub scan_idle: Option<String>,
