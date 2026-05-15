@@ -4,6 +4,47 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.57.0] - 2026-05-09
+- **Fase 16 — Web deep enum.** Five web-specific probes that go
+  beyond the existing `--http-enum` path-walker and analyse the
+  *behaviour* of the target's HTTP server.
+- `--cms-detect URL`: WordPress / Joomla / Drupal fingerprint.
+  Multi-signal: homepage meta-generator tag (most reliable), CMS-
+  specific paths (`/wp-login.php`, `/administrator/manifests/files/
+  joomla.xml`, `/CHANGELOG.txt`, `/core/CHANGELOG.txt`), cookie
+  patterns (`joomla_user_state`), response headers (`X-Drupal-Cache`,
+  `X-Generator`). Pulls version when the install left it readable.
+  Confidence-scored.
+- `--http-methods URL`: OPTIONS request followed by direct probes of
+  PUT / DELETE / MOVE / COPY / MKCOL / PROPFIND / TRACE / PATCH
+  against a non-existent path (so 404/405 cleanly without touching
+  real content). Classifies each as ACCEPTED / LISTED / REFUSED /
+  UNKNOWN with severity bucket. PUT-accepted highlighted as
+  critical (remote-write / RCE).
+- `--shellshock URL` (CVE-2014-6271): exploit payload in User-Agent
+  + Cookie + Referer simultaneously, fired against 10 common CGI
+  prefixes (`/cgi-bin/`, `/cgi-sys/`, `/cgi-mod/`, `/scripts/`,
+  `/cgi-bin/printenv`, …). Randomised token to bypass caches.
+  Looks for token echo in response headers AND body.
+- `--webdav-probe URL`: PROPFIND with minimal `<D:propfind>` body.
+  207 Multi-Status or `DAV` response header → WebDAV enabled. Flags
+  IIS 6.0 advertising WebDAV (CVE-2017-7269 PROPFIND auth-bypass /
+  RCE) and any anonymous-writable Allow header listing PUT / MOVE /
+  COPY / DELETE / MKCOL.
+- `--csp-cors URL`: deep audit of `Content-Security-Policy` (and
+  `-Report-Only` variant) for `'unsafe-inline'` / `'unsafe-eval'` /
+  wildcard sources / missing default-src / missing frame-ancestors /
+  missing-or-non-none object-src / `http:` under HTTPS pages. CORS
+  side: Origin-reflection probe with a synthetic external origin,
+  flags credential-theft patterns (Allow-Origin echo +
+  Allow-Credentials: true, wildcard + creds, null + creds).
+- 25 new tests cover meta-generator parser (case-insensitive),
+  CMS readme/XML/CHANGELOG version extractors, HTTP-methods Allow
+  parsing + severity buckets, Shellshock token format, CSP audit
+  across 6 weakness patterns + clean-policy negative case, CORS
+  audit across reflection/wildcard+creds/specific-origin cases.
+  296/296 pass.
+
 ## [0.56.0] - 2026-05-09
 - **Fase 15 — Deep service enumeration.** Five protocol probes that
   go beyond banner-grab and expose what each service is actually

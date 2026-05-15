@@ -27,6 +27,7 @@ use tokio::time::timeout;
 // ── BER tags ─────
 const TAG_INTEGER: u8 = 0x02;
 const TAG_OCTET_STRING: u8 = 0x04;
+#[allow(dead_code)]
 const TAG_NULL: u8 = 0x05;
 const TAG_ENUMERATED: u8 = 0x0a;
 const TAG_SEQUENCE: u8 = 0x30;

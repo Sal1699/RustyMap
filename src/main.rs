@@ -67,6 +67,11 @@ mod plugin_meta;
 mod rdp_audit;
 mod os_fp_v6;
 mod random_targets;
+mod cms_detect;
+mod http_csp_cors;
+mod http_methods;
+mod http_shellshock;
+mod http_webdav;
 mod ldap_enum;
 mod netbios_ns;
 mod recommend;
@@ -589,6 +594,43 @@ async fn main() -> Result<()> {
                 None => println!("[smb-deep] {} — no NTLMSSP CHALLENGE", t.display()),
             }
         }
+        return Ok(());
+    }
+    if let Some(u) = &args.cms_detect {
+        let url = u.clone();
+        let dur = args.timeout();
+        match cms_detect::detect(&url, dur).await? {
+            Some(f) => cms_detect::print_finding(&f),
+            None => println!("[cms-detect] {} — no CMS signal", url),
+        }
+        return Ok(());
+    }
+    if let Some(u) = &args.http_methods {
+        let url = u.clone();
+        let dur = args.timeout();
+        let f = http_methods::enumerate(&url, dur).await?;
+        http_methods::print_finding(&f);
+        return Ok(());
+    }
+    if let Some(u) = &args.shellshock {
+        let url = u.clone();
+        let dur = args.timeout();
+        let f = http_shellshock::probe(&url, dur).await?;
+        http_shellshock::print_finding(&f);
+        return Ok(());
+    }
+    if let Some(u) = &args.webdav_probe {
+        let url = u.clone();
+        let dur = args.timeout();
+        let f = http_webdav::probe(&url, dur).await?;
+        http_webdav::print_finding(&f);
+        return Ok(());
+    }
+    if let Some(u) = &args.csp_cors {
+        let url = u.clone();
+        let dur = args.timeout();
+        let f = http_csp_cors::analyze(&url, dur).await?;
+        http_csp_cors::print_finding(&f);
         return Ok(());
     }
     if let Some(spec) = &args.os_fp_v6 {

@@ -196,6 +196,35 @@ pub struct Cli {
     #[arg(long = "smb-deep", value_name = "HOST")]
     pub smb_deep: Option<String>,
 
+    /// CMS fingerprint (WordPress / Joomla / Drupal). Pulls a version
+    /// when the install leaves a recognisable marker (meta-generator,
+    /// readme.html, CHANGELOG.txt, manifests).
+    #[arg(long = "cms-detect", value_name = "URL")]
+    pub cms_detect: Option<String>,
+
+    /// HTTP method enumeration: OPTIONS + probe of PUT/DELETE/MOVE/
+    /// COPY/MKCOL/PROPFIND/TRACE/PATCH against a non-existent path.
+    /// Flags PUT-accepted as critical.
+    #[arg(long = "http-methods", value_name = "URL")]
+    pub http_methods: Option<String>,
+
+    /// Shellshock probe (CVE-2014-6271). Sends an exploit payload in
+    /// header positions a bash-CGI host would pass through, scans
+    /// common CGI paths, looks for token echo in the response.
+    #[arg(long = "shellshock", value_name = "URL")]
+    pub shellshock: Option<String>,
+
+    /// WebDAV probe: PROPFIND + Allow/DAV header parse. Flags IIS 6.0
+    /// (CVE-2017-7269) and anonymous-writable shares.
+    #[arg(long = "webdav-probe", value_name = "URL")]
+    pub webdav_probe: Option<String>,
+
+    /// Deep CSP/CORS audit: unsafe-inline / unsafe-eval / wildcards /
+    /// missing directives in CSP, Origin reflection with credentials
+    /// in CORS.
+    #[arg(long = "csp-cors", value_name = "URL")]
+    pub csp_cors: Option<String>,
+
     /// Idle (zombie) scan — spoofs probes via a zombie with incremental IP ID (root/admin)
     #[arg(long = "sI", value_name = "ZOMBIE[:PORT]", group = "scan_type")]
     pub scan_idle: Option<String>,

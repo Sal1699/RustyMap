@@ -95,6 +95,11 @@ pub fn print_guide() {
     line("--sR HOST             RPC portmap dump (NFS/mountd/nlockmgr/…)");
     line("--rpc-udp             Usa UDP/111 invece di TCP/111 per --sR");
     line("--smb-deep HOST       SMB pre-auth deep enum (NTLMSSP CHALLENGE)");
+    line("--cms-detect URL      Identifica WordPress/Joomla/Drupal + versione");
+    line("--http-methods URL    OPTIONS + probe PUT/DELETE/MOVE/TRACE/PATCH");
+    line("--shellshock URL      Probe CVE-2014-6271 su path CGI comuni");
+    line("--webdav-probe URL    PROPFIND + flag IIS6 CVE-2017-7269 + write-methods");
+    line("--csp-cors URL        Deep audit CSP weaknesses + CORS Origin-reflection");
     line("--sI ZOMBIE[:PORT]    Idle/zombie scan (spoof via host con IPID incrementale)");
     line("--sO                  IP protocol scan (TCP/UDP/ICMP/GRE/OSPF/SCTP…)");
     example("rustymap --sT 10.0.0.5");
@@ -117,6 +122,11 @@ pub fn print_guide() {
     example("rustymap --ldap-enum dc01.example.com                  # rootDSE AD");
     example("rustymap --sR 10.0.0.5                                 # RPC portmap dump");
     example("rustymap --smb-deep 10.0.0.5                           # NTLMSSP info");
+    example("rustymap --cms-detect https://target.example.com");
+    example("rustymap --http-methods https://target/api/");
+    example("rustymap --shellshock https://target.example.com");
+    example("rustymap --webdav-probe http://target/dav/");
+    example("rustymap --csp-cors https://target.example.com");
     example("rustymap --sI 192.168.1.100:80 10.0.0.5");
 
     section("HOST DISCOVERY");
