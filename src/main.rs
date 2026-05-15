@@ -82,6 +82,11 @@ mod sctp_scan;
 mod siem;
 mod smb_deep;
 mod snmp_enum;
+mod version_cve_match;
+mod vuln_known_keys;
+mod vuln_smb_ms17_010;
+mod vuln_ssl_ccs;
+mod vuln_ssl_dh;
 mod smb_audit;
 mod smtp_audit;
 mod ssh_audit;
@@ -631,6 +636,72 @@ async fn main() -> Result<()> {
         let dur = args.timeout();
         let f = http_csp_cors::analyze(&url, dur).await?;
         http_csp_cors::print_finding(&f);
+        return Ok(());
+    }
+    if let Some(host_spec) = &args.vuln_ms17_010 {
+        let host_spec = host_spec.clone();
+        let dur = args.timeout();
+        let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
+        for t in &targets {
+            match vuln_smb_ms17_010::probe(t.ip, 445, dur).await {
+                Ok(f) => vuln_smb_ms17_010::print_finding(&f),
+                Err(e) => eprintln!("[!] vuln-ms17-010 {}: {}", t.display(), e),
+            }
+        }
+        return Ok(());
+    }
+    if let Some(host_spec) = &args.vuln_ssl_ccs {
+        let host_spec = host_spec.clone();
+        let port = args.vuln_ssl_port;
+        let dur = args.timeout();
+        let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
+        for t in &targets {
+            match vuln_ssl_ccs::probe(t.ip, port, dur).await {
+                Ok(f) => vuln_ssl_ccs::print_finding(&f),
+                Err(e) => eprintln!("[!] vuln-ssl-ccs {}: {}", t.display(), e),
+            }
+        }
+        return Ok(());
+    }
+    if let Some(host_spec) = &args.vuln_ssl_dh {
+        let host_spec = host_spec.clone();
+        let port = args.vuln_ssl_port;
+        let dur = args.timeout();
+        let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
+        for t in &targets {
+            match vuln_ssl_dh::probe(t.ip, port, dur).await {
+                Ok(f) => vuln_ssl_dh::print_finding(&f),
+                Err(e) => eprintln!("[!] vuln-ssl-dh {}: {}", t.display(), e),
+            }
+        }
+        return Ok(());
+    }
+    if let Some(host_spec) = &args.vuln_known_key {
+        let host_spec = host_spec.clone();
+        let port = args.vuln_ssl_port;
+        let dur = args.timeout();
+        let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
+        for t in &targets {
+            let f = vuln_known_keys::probe(t.ip, port, t.hostname.as_deref(), dur).await;
+            vuln_known_keys::print_finding(&f);
+        }
+        return Ok(());
+    }
+    if let Some(spec) = &args.cve_for {
+        let (product, version) = if let Some((p, v)) = spec.split_once(':') {
+            (p.trim().to_string(), v.trim().to_string())
+        } else if let Some(b) = version_cve_match::parse_banner(spec) {
+            b
+        } else {
+            return Err(anyhow!(
+                "--cve-for expects 'product:version' or a banner like 'openssh 7.4p1'"
+            ));
+        };
+        let limit = args.cve_for_limit;
+        let m = tokio::task::spawn_blocking(move || {
+            version_cve_match::lookup(&product, &version, limit)
+        }).await??;
+        version_cve_match::print_match(&m);
         return Ok(());
     }
     if let Some(spec) = &args.os_fp_v6 {

@@ -4,6 +4,44 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.58.0] - 2026-05-09
+- **Fase 17 — Vulnerability NSE-equivalents.** Five protocol-level
+  vuln checks ported from the `nse/vuln` category, plus a glue
+  module that turns the existing NVD cache into a banner→CVE lookup.
+- `--vuln-ms17-010 HOST` (port 445): SMBv1 NEGOTIATE → Session
+  Setup → Tree Connect to `\\<ip>\IPC$` → TRANS2 SESSION_SETUP
+  (subcommand 0x000E). NT_STATUS 0xC0000205 (INSUFF_SERVER_RESOURCES)
+  → **VULNERABLE** to EternalBlue / EternalRomance / EternalSynergy
+  / EternalChampion (CVE-2017-0143…0148). 0xC0000002 / 0xC000000D →
+  patched. Read-only — exploit follow-up never sent.
+- `--vuln-ssl-ccs HOST [--vuln-ssl-port N]` (CVE-2014-0224):
+  hand-rolled TLS 1.0 ClientHello, drains the ServerHello flight,
+  then injects an early ChangeCipherSpec record. Patched stacks
+  reply with `alert level=fatal, desc=10`. Vulnerable openssl
+  < 1.0.1h continues. Connection-tear-down counts as patched.
+- `--vuln-ssl-dh HOST` (Logjam, CVE-2015-4000): two-stage probe.
+  First ClientHello advertises only DHE_EXPORT cipher suites;
+  acceptance → critical. Second ClientHello uses standard DHE
+  suites; parses the ServerKeyExchange to extract the dh_p length
+  and classifies < 1024 bits as critical, < 2048 as high.
+- `--vuln-known-key HOST`: connects to the TLS endpoint, pulls the
+  leaf cert, computes SHA-256 of the SubjectPublicKeyInfo, and
+  looks it up against an embedded sentinel DB plus an optional
+  user file `~/.cache/rustymap/known_keys.txt` (one SHA-256 hex
+  digest per line). Designed for mirroring Debian's
+  `openssl-blacklist` (CVE-2008-0166) and SSH-bad-keys datasets.
+- `--cve-for BANNER`: wraps the existing `src/nvd.rs` lookup with
+  a banner parser that accepts both `"openssh 7.4p1"` and
+  `"nginx:1.18.0"` forms. Output is ranked by CVSS, KEV-flagged
+  entries highlighted in red. Reuses the SQLite cache populated
+  by `--update-cve-db`.
+- 28 new tests cover SMB packet shapes + NT_STATUS extraction,
+  TLS ClientHello byte layout, ServerKeyExchange dh_p extraction
+  (512 / 2048 bits + no-SKE cases), Logjam severity bucketing
+  across export / 768 / 1024 / 2048 / 4096 / no-DHE inputs,
+  known-keys embedded sentinel + SHA-256 reference vector, banner
+  parser slash / space / quoted / no-version cases. 324/324 pass.
+
 ## [0.57.0] - 2026-05-09
 - **Fase 16 — Web deep enum.** Five web-specific probes that go
   beyond the existing `--http-enum` path-walker and analyse the

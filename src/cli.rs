@@ -225,6 +225,41 @@ pub struct Cli {
     #[arg(long = "csp-cors", value_name = "URL")]
     pub csp_cors: Option<String>,
 
+    /// SMB MS17-010 / EternalBlue vulnerability indicator. Trans2
+    /// session-setup probe — STATUS_INSUFF_SERVER_RESOURCES =
+    /// vulnerable, STATUS_NOT_IMPLEMENTED = patched.
+    #[arg(long = "vuln-ms17-010", value_name = "HOST")]
+    pub vuln_ms17_010: Option<String>,
+
+    /// TLS ChangeCipherSpec injection (CVE-2014-0224). Vulnerable
+    /// openssl < 1.0.1h accepts an early CCS record.
+    #[arg(long = "vuln-ssl-ccs", value_name = "HOST")]
+    pub vuln_ssl_ccs: Option<String>,
+
+    /// Logjam check — TLS DH parameter audit (CVE-2015-4000).
+    /// Tries export-DHE first; if rejected, captures DH prime length
+    /// and classifies < 1024 bits as critical.
+    #[arg(long = "vuln-ssl-dh", value_name = "HOST")]
+    pub vuln_ssl_dh: Option<String>,
+
+    /// Probe port for --vuln-ssl-* checks (default 443).
+    #[arg(long = "vuln-ssl-port", default_value_t = 443)]
+    pub vuln_ssl_port: u16,
+
+    /// Compromised-pubkey lookup. SHA-256 of the leaf cert's SPKI vs
+    /// embedded DB + ~/.cache/rustymap/known_keys.txt.
+    #[arg(long = "vuln-known-key", value_name = "HOST")]
+    pub vuln_known_key: Option<String>,
+
+    /// Version → CVE matcher against the local NVD cache. Pass either
+    /// a banner ("openssh 7.4p1") or "PRODUCT:VERSION".
+    #[arg(long = "cve-for", value_name = "BANNER")]
+    pub cve_for: Option<String>,
+
+    /// Result cap for --cve-for (default 25).
+    #[arg(long = "cve-for-limit", default_value_t = 25)]
+    pub cve_for_limit: usize,
+
     /// Idle (zombie) scan — spoofs probes via a zombie with incremental IP ID (root/admin)
     #[arg(long = "sI", value_name = "ZOMBIE[:PORT]", group = "scan_type")]
     pub scan_idle: Option<String>,

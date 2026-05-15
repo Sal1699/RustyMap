@@ -100,6 +100,13 @@ pub fn print_guide() {
     line("--shellshock URL      Probe CVE-2014-6271 su path CGI comuni");
     line("--webdav-probe URL    PROPFIND + flag IIS6 CVE-2017-7269 + write-methods");
     line("--csp-cors URL        Deep audit CSP weaknesses + CORS Origin-reflection");
+    line("--vuln-ms17-010 HOST  EternalBlue indicator (Trans2 SESSION_SETUP probe)");
+    line("--vuln-ssl-ccs HOST   TLS ChangeCipherSpec injection (CVE-2014-0224)");
+    line("--vuln-ssl-dh HOST    Logjam: DHE_EXPORT acceptance + DH prime bit-length");
+    line("--vuln-ssl-port N     Override porta TLS per --vuln-ssl-* (default 443)");
+    line("--vuln-known-key HOST SPKI SHA-256 vs DB chiavi compromesse (Debian PRNG ecc.)");
+    line("--cve-for BANNER      Match product/version contro NVD cache (CVE + CVSS + KEV)");
+    line("--cve-for-limit N     Tetto risultati --cve-for (default 25)");
     line("--sI ZOMBIE[:PORT]    Idle/zombie scan (spoof via host con IPID incrementale)");
     line("--sO                  IP protocol scan (TCP/UDP/ICMP/GRE/OSPF/SCTP…)");
     example("rustymap --sT 10.0.0.5");
@@ -127,6 +134,12 @@ pub fn print_guide() {
     example("rustymap --shellshock https://target.example.com");
     example("rustymap --webdav-probe http://target/dav/");
     example("rustymap --csp-cors https://target.example.com");
+    example("rustymap --vuln-ms17-010 10.0.0.5");
+    example("rustymap --vuln-ssl-ccs 10.0.0.5 --vuln-ssl-port 443");
+    example("rustymap --vuln-ssl-dh 10.0.0.5");
+    example("rustymap --vuln-known-key 10.0.0.5");
+    example("rustymap --cve-for 'openssh 7.4p1'");
+    example("rustymap --cve-for nginx:1.18.0");
     example("rustymap --sI 192.168.1.100:80 10.0.0.5");
 
     section("HOST DISCOVERY");
