@@ -132,7 +132,7 @@ pub fn print_guide() {
     line("--msf-fire-exploits   Promuove --msf-fire ad esecuzione exploit-class");
     line("--msf-fire-allow-low  Consente moduli rank=manual/low");
     line("--msf-fire-opt K=V    Datastore option per --msf-fire (ripetibile)");
-    line("--brute-protocol P    Bruteforce: ftp|http-basic|http-form|telnet|smtp|pop3|imap|snmp|ssh|smb|mysql|postgres|ldap|vnc");
+    line("--brute-protocol P    Bruteforce: ftp|http-basic|http-form|telnet|smtp|pop3|imap|snmp|ssh|smb|mysql|mssql|postgres|ldap|vnc|rdp");
     line("--brute-target H[:P]  Target per --brute-protocol (porta default per protocol)");
     line("--brute-userlist F    File con username (uno per riga)");
     line("--brute-passlist F    File con password (uno per riga)");
@@ -204,6 +204,8 @@ pub fn print_guide() {
     example("rustymap --brute-protocol postgres --brute-target pg.lab --brute-default-creds-only");
     example("rustymap --brute-protocol ldap --brute-target dc01:389 --brute-pair 'cn=admin,dc=lab:secret' --brute-confirm-authorized");
     example("rustymap --brute-protocol vnc --brute-target 10.0.0.5 --brute-passlist common.txt --brute-confirm-authorized");
+    example("rustymap --brute-protocol mssql --brute-target sql.lab --brute-userpass mssql-defaults.txt --brute-confirm-authorized");
+    example("rustymap --brute-protocol rdp --brute-target 10.0.0.5 --brute-pair 'Administrator:Passw0rd!' --brute-confirm-authorized");
     example("rustymap --sI 192.168.1.100:80 10.0.0.5");
 
     section("HOST DISCOVERY");
@@ -460,7 +462,12 @@ pub fn print_guide() {
     line("--script-help         Catalogo script Rhai (built-in + utente)");
     line("                      Script API (active probes):");
     line("                       tcp_send(host, port, payload, timeout_ms) -> str");
+    line("                       udp_send(host, port, payload, timeout_ms) -> str");
     line("                       http_get(url, timeout_ms) -> {status, body, headers}");
+    line("                       hex_encode/decode, base64_encode/decode");
+    line("                       md5, sha1, sha256, hmac_sha256(key, msg) -> hex");
+    line("                       regex_match/capture/find_all(pattern, text)");
+    line("                       sleep_ms(n), is_private_ip(s)");
     line("--confirm-large       Permette target list > 4096 host");
     example("rustymap --sT --sV --cve-db cves.json 10.0.0.5");
     example("rustymap --sT --script rules/ 10.0.0.5");

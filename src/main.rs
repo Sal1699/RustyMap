@@ -75,8 +75,10 @@ mod brute;
 mod brute_defaults;
 mod brute_ldap;
 mod brute_mail_snmp;
+mod brute_mssql;
 mod brute_mysql;
 mod brute_postgres;
+mod brute_rdp;
 mod brute_smb;
 mod brute_ssh;
 mod brute_tcp_text;
@@ -757,9 +759,11 @@ async fn main() -> Result<()> {
             "postgres" | "postgresql" => 5432,
             "ldap" => 389,
             "vnc" => 5900,
+            "mssql" => 1433,
+            "rdp" => 3389,
             "http-basic" | "http-form" => 0,
             _ => return Err(anyhow!(
-                "--brute-protocol unknown: '{}'. One of: ftp|http-basic|http-form|telnet|smtp|pop3|imap|snmp|ssh|smb|mysql|postgres|ldap|vnc",
+                "--brute-protocol unknown: '{}'. One of: ftp|http-basic|http-form|telnet|smtp|pop3|imap|snmp|ssh|smb|mysql|mssql|postgres|ldap|vnc|rdp",
                 proto
             )),
         };
@@ -858,6 +862,8 @@ async fn main() -> Result<()> {
             }
             "ldap" => brute::run(brute_ldap::LdapAdapter, cfg, pairs).await?,
             "vnc" => brute::run(brute_vnc::VncAdapter, cfg, pairs).await?,
+            "mssql" => brute::run(brute_mssql::MssqlAdapter::default(), cfg, pairs).await?,
+            "rdp" => brute::run(brute_rdp::RdpAdapter::default(), cfg, pairs).await?,
             "http-basic" => {
                 let url = args
                     .brute_http_url

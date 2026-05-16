@@ -175,26 +175,34 @@ pub fn builtin_scripts() -> Vec<(&'static str, &'static str)> {
         ("active-elasticsearch-version", include_str!("../scripts/active-elasticsearch-version.rhai")),
         ("active-http-title", include_str!("../scripts/active-http-title.rhai")),
         ("active-redis-info", include_str!("../scripts/active-redis-info.rhai")),
+        ("android-adb-exposed", include_str!("../scripts/android-adb-exposed.rhai")),
         ("anonymous-ftp", include_str!("../scripts/anonymous-ftp.rhai")),
         ("backup-exposed", include_str!("../scripts/backup-exposed.rhai")),
         ("cleartext-protocols", include_str!("../scripts/cleartext-protocols.rhai")),
+        ("clickhouse-no-auth", include_str!("../scripts/clickhouse-no-auth.rhai")),
         ("cookie-flags-audit", include_str!("../scripts/cookie-flags-audit.rhai")),
+        ("couchdb-no-auth", include_str!("../scripts/couchdb-no-auth.rhai")),
         ("default-cred-likely", include_str!("../scripts/default-cred-likely.rhai")),
         ("dns-zone-transfer-hint", include_str!("../scripts/dns-zone-transfer-hint.rhai")),
         ("docker-api-exposed", include_str!("../scripts/docker-api-exposed.rhai")),
         ("elasticsearch-open", include_str!("../scripts/elasticsearch-open.rhai")),
+        ("etcd-v3-no-auth", include_str!("../scripts/etcd-v3-no-auth.rhai")),
         ("exposed-management", include_str!("../scripts/exposed-management.rhai")),
+        ("flink-dashboard-exposed", include_str!("../scripts/flink-dashboard-exposed.rhai")),
+        ("gitea-public-signup", include_str!("../scripts/gitea-public-signup.rhai")),
         ("graphql-introspection", include_str!("../scripts/graphql-introspection.rhai")),
         ("hashicorp-exposed", include_str!("../scripts/hashicorp-exposed.rhai")),
         ("http-admin-paths", include_str!("../scripts/http-admin-paths.rhai")),
         ("http-cors-wildcard", include_str!("../scripts/http-cors-wildcard.rhai")),
         ("http-missing-security-headers", include_str!("../scripts/http-missing-security-headers.rhai")),
+        ("influxdb-no-auth", include_str!("../scripts/influxdb-no-auth.rhai")),
         ("ipmi-exposed", include_str!("../scripts/ipmi-exposed.rhai")),
         ("jenkins-anonymous", include_str!("../scripts/jenkins-anonymous.rhai")),
         ("jwt-alg-none", include_str!("../scripts/jwt-alg-none.rhai")),
         ("k8s-api-exposed", include_str!("../scripts/k8s-api-exposed.rhai")),
         ("kafka-no-auth", include_str!("../scripts/kafka-no-auth.rhai")),
         ("kibana-no-auth", include_str!("../scripts/kibana-no-auth.rhai")),
+        ("memcached-info", include_str!("../scripts/memcached-info.rhai")),
         ("modern-auth-exposed", include_str!("../scripts/modern-auth-exposed.rhai")),
         ("mongodb-no-auth", include_str!("../scripts/mongodb-no-auth.rhai")),
         ("mqtt-anonymous", include_str!("../scripts/mqtt-anonymous.rhai")),
@@ -204,14 +212,17 @@ pub fn builtin_scripts() -> Vec<(&'static str, &'static str)> {
         ("openldap-exposed", include_str!("../scripts/openldap-exposed.rhai")),
         ("portainer-exposed", include_str!("../scripts/portainer-exposed.rhai")),
         ("prometheus-no-auth", include_str!("../scripts/prometheus-no-auth.rhai")),
+        ("prometheus-pushgateway-exposed", include_str!("../scripts/prometheus-pushgateway-exposed.rhai")),
         ("rabbitmq-management", include_str!("../scripts/rabbitmq-management.rhai")),
         ("redis-no-auth", include_str!("../scripts/redis-no-auth.rhai")),
         ("rsync-exposed", include_str!("../scripts/rsync-exposed.rhai")),
         ("smb-exposed", include_str!("../scripts/smb-exposed.rhai")),
         ("smtp-open-relay", include_str!("../scripts/smtp-open-relay.rhai")),
         ("snmp-public", include_str!("../scripts/snmp-public.rhai")),
+        ("spark-master-ui-exposed", include_str!("../scripts/spark-master-ui-exposed.rhai")),
         ("tls-cert-issues", include_str!("../scripts/tls-cert-issues.rhai")),
         ("tls-deprecated", include_str!("../scripts/tls-deprecated.rhai")),
+        ("vault-no-auth", include_str!("../scripts/vault-no-auth.rhai")),
         ("vnc-no-auth", include_str!("../scripts/vnc-no-auth.rhai")),
     ]
 }
@@ -244,6 +255,9 @@ fn trace_event(script: &str, host: &str, status: &str, detail: &str) {
 /// the same active-probe API as the built-ins.
 fn build_engine() -> Engine {
     let mut engine = Engine::new();
+    // The default expression depth (64/32) trips on our larger built-ins
+    // (cookie-flags-audit, etc.) when string interpolation nests deeply.
+    engine.set_max_expr_depths(128, 64);
 
     // tcp_send(host, port, payload_string, timeout_ms) -> reply_string
     // Truncates the reply to 8 KiB. Returns "" on any failure.
@@ -271,6 +285,139 @@ fn build_engine() -> Engine {
         match s.read(&mut buf) {
             Ok(n) => String::from_utf8_lossy(&buf[..n]).into_owned(),
             Err(_) => String::new(),
+        }
+    });
+
+    // udp_send(host, port, payload_string, timeout_ms) -> reply_string
+    // Truncates the reply to 8 KiB. Returns "" on any failure.
+    engine.register_fn("udp_send", |host: &str, port: i64, payload: &str, timeout_ms: i64| -> String {
+        let timeout = Duration::from_millis(timeout_ms.clamp(50, 30_000) as u64);
+        let port = port.clamp(1, 65535) as u16;
+        let mut addrs = match (host, port).to_socket_addrs() {
+            Ok(a) => a,
+            Err(_) => return String::new(),
+        };
+        let addr = match addrs.next() {
+            Some(a) => a,
+            None => return String::new(),
+        };
+        let sock = match std::net::UdpSocket::bind(if addr.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" }) {
+            Ok(s) => s,
+            Err(_) => return String::new(),
+        };
+        let _ = sock.set_read_timeout(Some(timeout));
+        let _ = sock.set_write_timeout(Some(timeout));
+        if sock.send_to(payload.as_bytes(), addr).is_err() {
+            return String::new();
+        }
+        let mut buf = [0u8; 8192];
+        match sock.recv_from(&mut buf) {
+            Ok((n, _)) => String::from_utf8_lossy(&buf[..n]).into_owned(),
+            Err(_) => String::new(),
+        }
+    });
+
+    // hex_encode(s) / hex_decode(s) — operate on raw bytes of s
+    engine.register_fn("hex_encode", |s: &str| -> String {
+        s.as_bytes().iter().map(|b| format!("{:02x}", b)).collect()
+    });
+    engine.register_fn("hex_decode", |s: &str| -> String {
+        let mut out = Vec::with_capacity(s.len() / 2);
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i + 1 < bytes.len() {
+            let hi = (bytes[i] as char).to_digit(16);
+            let lo = (bytes[i + 1] as char).to_digit(16);
+            match (hi, lo) {
+                (Some(h), Some(l)) => out.push((h * 16 + l) as u8),
+                _ => return String::new(),
+            }
+            i += 2;
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    });
+
+    // base64_encode / base64_decode
+    engine.register_fn("base64_encode", |s: &str| -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(s.as_bytes())
+    });
+    engine.register_fn("base64_decode", |s: &str| -> String {
+        use base64::Engine as _;
+        match base64::engine::general_purpose::STANDARD.decode(s) {
+            Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+            Err(_) => String::new(),
+        }
+    });
+
+    // Hash helpers — return lowercase-hex digests.
+    engine.register_fn("md5", |s: &str| -> String {
+        use md5::Digest;
+        let mut h = md5::Md5::new();
+        h.update(s.as_bytes());
+        h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+    });
+    engine.register_fn("sha1", |s: &str| -> String {
+        use sha1::Digest;
+        let mut h = sha1::Sha1::new();
+        h.update(s.as_bytes());
+        h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+    });
+    engine.register_fn("sha256", |s: &str| -> String {
+        use sha2::Digest;
+        let mut h = sha2::Sha256::new();
+        h.update(s.as_bytes());
+        h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+    });
+    engine.register_fn("hmac_sha256", |key: &str, msg: &str| -> String {
+        use hmac::Mac;
+        let mut mac = match hmac::Hmac::<sha2::Sha256>::new_from_slice(key.as_bytes()) {
+            Ok(m) => m,
+            Err(_) => return String::new(),
+        };
+        mac.update(msg.as_bytes());
+        mac.finalize().into_bytes().iter().map(|b| format!("{:02x}", b)).collect()
+    });
+
+    // Regex helpers — failed compiles return false/empty as appropriate.
+    engine.register_fn("regex_match", |pattern: &str, text: &str| -> bool {
+        regex::Regex::new(pattern).map(|r| r.is_match(text)).unwrap_or(false)
+    });
+    engine.register_fn("regex_capture", |pattern: &str, text: &str| -> String {
+        let r = match regex::Regex::new(pattern) {
+            Ok(r) => r,
+            Err(_) => return String::new(),
+        };
+        r.captures(text)
+            .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+            .unwrap_or_default()
+    });
+    engine.register_fn("regex_find_all", |pattern: &str, text: &str| -> Array {
+        let r = match regex::Regex::new(pattern) {
+            Ok(r) => r,
+            Err(_) => return Array::new(),
+        };
+        r.find_iter(text)
+            .map(|m| Dynamic::from(m.as_str().to_string()))
+            .collect()
+    });
+
+    // sleep_ms(ms) — clamped to 5s so a runaway script can't stall the run.
+    engine.register_fn("sleep_ms", |ms: i64| {
+        let dur = Duration::from_millis(ms.clamp(0, 5_000) as u64);
+        std::thread::sleep(dur);
+    });
+
+    // is_private_ip(s) — checks RFC1918 / link-local / loopback / ULA.
+    engine.register_fn("is_private_ip", |s: &str| -> bool {
+        match s.parse::<std::net::IpAddr>() {
+            Ok(std::net::IpAddr::V4(a)) => {
+                a.is_private() || a.is_loopback() || a.is_link_local()
+            }
+            Ok(std::net::IpAddr::V6(a)) => {
+                a.is_loopback() || (a.segments()[0] & 0xfe00) == 0xfc00 // ULA fc00::/7
+            }
+            Err(_) => false,
         }
     });
 
@@ -473,5 +620,48 @@ pub fn print_findings(findings: &[Finding]) {
             None => f.host.clone(),
         };
         println!("  [{}] {} ({}) — {}", f.severity, loc, f.script, f.message);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_builtin_scripts_parse() {
+        let engine = build_engine();
+        for (name, src) in builtin_scripts() {
+            engine
+                .compile(src)
+                .unwrap_or_else(|e| panic!("builtin script {} failed to parse: {}", name, e));
+        }
+    }
+
+    #[test]
+    fn new_sdk_primitives_work() {
+        let engine = build_engine();
+        // Smoke-test the encoding + hash + regex helpers via eval.
+        let hex: String = engine.eval(r#"hex_encode("ab")"#).unwrap();
+        assert_eq!(hex, "6162");
+        let back: String = engine.eval(r#"hex_decode("6162")"#).unwrap();
+        assert_eq!(back, "ab");
+        let b64: String = engine.eval(r#"base64_encode("hi")"#).unwrap();
+        assert_eq!(b64, "aGk=");
+        let b64b: String = engine.eval(r#"base64_decode("aGk=")"#).unwrap();
+        assert_eq!(b64b, "hi");
+        let md: String = engine.eval(r#"md5("abc")"#).unwrap();
+        assert_eq!(md, "900150983cd24fb0d6963f7d28e17f72");
+        let sh1: String = engine.eval(r#"sha1("abc")"#).unwrap();
+        assert_eq!(sh1, "a9993e364706816aba3e25717850c26c9cd0d89d");
+        let sh256: String = engine.eval(r#"sha256("abc")"#).unwrap();
+        assert_eq!(sh256, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        let rm: bool = engine.eval(r#"regex_match("foo\\d+", "foo42")"#).unwrap();
+        assert!(rm);
+        let rc: String = engine.eval(r#"regex_capture("v(\\d+)", "v123")"#).unwrap();
+        assert_eq!(rc, "123");
+        let priv1: bool = engine.eval(r#"is_private_ip("10.1.2.3")"#).unwrap();
+        assert!(priv1);
+        let priv2: bool = engine.eval(r#"is_private_ip("8.8.8.8")"#).unwrap();
+        assert!(!priv2);
     }
 }

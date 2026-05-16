@@ -4,6 +4,62 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.65.0] - 2026-05-16
+- **Fase 23 — Rhai SDK expansion + NSE port batch.** Two more
+  bruteforce adapters (MSSQL TDS, RDP CredSSP), a wider Rhai
+  scripting SDK, and nine new built-in scripts using it.
+- `src/brute_mssql.rs` — MSSQL SQL Server Authentication via
+  TDS 7.4. PRELOGIN (type 0x12) advertises ENCRYPTION=NOT_SUP
+  so the server speaks cleartext for our LOGIN7 (type 0x10).
+  Password obfuscation per [MS-TDS] §2.2.6.4: `swap_nibbles(b)
+  ^ 0xA5` per byte over the UTF-16LE password. Response
+  classifier walks the token stream: `0xAD` (LOGINACK) →
+  success, `0xAA` (ERROR) → failure. Default port 1433.
+- `src/brute_rdp.rs` — RDP NLA via CredSSP / TSRequest
+  ([MS-CSSP]) — best-effort, with explicit limitation: full
+  pubKeyAuth (RC4 of TLS SPKI under NTLM session key) is not
+  implemented. Flow: X.224 CR with PROTOCOL_HYBRID → TLS
+  (accept-all verifier) → BER-encoded TSRequest version=6 with
+  NTLM NEGOTIATE → read CHALLENGE → send AUTHENTICATE → read
+  reply. NTSTATUS in the `[4] errorCode` field classified:
+  `0xC000006D` / `0xC000006A` / `0xC0000064` / `0xC0000071` /
+  `0xC0000234` / `0xC0000022` → false. A reply with no
+  errorCode is treated as probable success but is **not**
+  authoritative — document this in the security advisory before
+  acting on a hit. Default port 3389.
+- `--brute-protocol` now accepts `mssql` (1433) and `rdp`
+  (3389) on top of the v0.64 set. Total adapters: 15
+  (ftp, http-basic, http-form, telnet, smtp, pop3, imap, snmp,
+  ssh, smb, mysql, postgres, ldap, vnc, mssql, rdp).
+- **Rhai scripting SDK expansion** (`src/scripting.rs`). New
+  primitives registered on every engine:
+  - `udp_send(host, port, payload, timeout_ms) -> str`
+  - `hex_encode/hex_decode`, `base64_encode/base64_decode`
+  - `md5`, `sha1`, `sha256`, `hmac_sha256(key, msg) -> hex`
+  - `regex_match`, `regex_capture`, `regex_find_all`
+  - `sleep_ms(n)` (capped at 5s), `is_private_ip(s)`
+  - Bumped `set_max_expr_depths(128, 64)` — the default 64/32
+    was tripping on built-ins with deep string-interpolation
+    chains (cookie-flags-audit).
+- **Nine new built-in Rhai scripts** using the new SDK:
+  `memcached-info` (UDP amplification probe via stats),
+  `clickhouse-no-auth` (HTTP /play SELECT), `etcd-v3-no-auth`
+  (auth/status enabled=false), `influxdb-no-auth`
+  (SHOW DATABASES), `vault-no-auth` (uninitialized + unsealed
+  detection), `prometheus-pushgateway-exposed`,
+  `couchdb-no-auth` (_all_dbs anonymous), `android-adb-exposed`
+  (A_CNXN handshake), `gitea-public-signup`,
+  `flink-dashboard-exposed`, `spark-master-ui-exposed`. All
+  scripts carry the `@name @description @category @severity
+  @tags @cve @author` metadata block.
+- 18 new tests: MSSQL obfuscation correctness, PRELOGIN /
+  LOGIN7 packet layout, LOGINACK vs ERROR classifier (9 in
+  total); RDP X.224 CR layout, CredSSP detection in CC,
+  TSRequest BER structure, version field, error-code parser
+  (7); scripting SDK smoke test (hex / base64 / md5 / sha1 /
+  sha256 / regex / is_private_ip), all built-in scripts parse
+  (2). 467/467 pass.
+
 ## [0.64.0] - 2026-05-09
 - **Fase 22 completion — credential bruteforce adapters wave 2.**
   Six new protocols on top of the v0.63 framework. MSSQL (TDS)
