@@ -73,8 +73,14 @@ mod osdb_submit;
 mod random_targets;
 mod brute;
 mod brute_defaults;
+mod brute_ldap;
 mod brute_mail_snmp;
+mod brute_mysql;
+mod brute_postgres;
+mod brute_smb;
+mod brute_ssh;
 mod brute_tcp_text;
+mod brute_vnc;
 mod broadcast_dhcp;
 mod broadcast_llmnr;
 mod broadcast_mdns;
@@ -745,9 +751,15 @@ async fn main() -> Result<()> {
             "imap" => 143,
             "telnet" => 23,
             "snmp" => 161,
-            "http-basic" | "http-form" => 0, // URL-based, not socket-based
+            "ssh" => 22,
+            "smb" => 445,
+            "mysql" => 3306,
+            "postgres" | "postgresql" => 5432,
+            "ldap" => 389,
+            "vnc" => 5900,
+            "http-basic" | "http-form" => 0,
             _ => return Err(anyhow!(
-                "--brute-protocol unknown: '{}'. One of: ftp|http-basic|http-form|telnet|smtp|pop3|imap|snmp",
+                "--brute-protocol unknown: '{}'. One of: ftp|http-basic|http-form|telnet|smtp|pop3|imap|snmp|ssh|smb|mysql|postgres|ldap|vnc",
                 proto
             )),
         };
@@ -838,6 +850,14 @@ async fn main() -> Result<()> {
             "pop3" => brute::run(brute_mail_snmp::Pop3Adapter, cfg, pairs).await?,
             "imap" => brute::run(brute_mail_snmp::ImapAdapter, cfg, pairs).await?,
             "snmp" => brute::run(brute_mail_snmp::SnmpAdapter, cfg, pairs).await?,
+            "ssh" => brute::run(brute_ssh::SshAdapter, cfg, pairs).await?,
+            "smb" => brute::run(brute_smb::SmbAdapter::default(), cfg, pairs).await?,
+            "mysql" => brute::run(brute_mysql::MysqlAdapter, cfg, pairs).await?,
+            "postgres" | "postgresql" => {
+                brute::run(brute_postgres::PostgresAdapter::default(), cfg, pairs).await?
+            }
+            "ldap" => brute::run(brute_ldap::LdapAdapter, cfg, pairs).await?,
+            "vnc" => brute::run(brute_vnc::VncAdapter, cfg, pairs).await?,
             "http-basic" => {
                 let url = args
                     .brute_http_url

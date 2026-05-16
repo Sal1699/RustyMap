@@ -1,6 +1,6 @@
 [package]
 name = "rustymap"
-version = "0.63.0"
+version = "0.64.0"
 edition = "2021"
 description = "A Rust port of nmap for network exploration and security auditing"
 license = "MIT"
@@ -60,6 +60,13 @@ crc32c = "0.6"
 rmp-serde = "1"
 rmpv = { version = "1", features = ["with-serde"] }
 async-trait = "0.1"
+md-5 = "0.10"
+md4 = "0.10"
+sha1 = "0.10"
+hmac = "0.12"
+des = "0.8"
+russh = "0.45"
+russh-keys = "0.45"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -4,6 +4,59 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.64.0] - 2026-05-09
+- **Fase 22 completion — credential bruteforce adapters wave 2.**
+  Six new protocols on top of the v0.63 framework. MSSQL (TDS)
+  and RDP (CredSSP) deferred to a future patch; both need
+  significant protocol-engineering work and warrant a separate
+  release window.
+- `src/brute_ssh.rs` — SSH password auth via the Pure-Rust
+  `russh` client. Permissive host-key handler (we only care
+  whether credentials work, not whether server identity is
+  trusted). Adds ~30s to clean compile time and ~200 KB to the
+  binary; trade we accept because SSH brute is the highest-value
+  adapter.
+- `src/brute_smb.rs` — Full NTLMSSP three-message flow with
+  NTLMv2 response: NEGOTIATE → CHALLENGE → AUTHENTICATE. Computes
+  NT hash (MD4 of UTF-16LE password), NTLMv2 hash (HMAC-MD5 of
+  NT hash over uppercase user || domain), and response (HMAC-MD5
+  over server-challenge || blob). NT_STATUS 0x00000000 →
+  success; 0xC000006D / 0xC000006A → bad credentials.
+- `src/brute_mysql.rs` — `mysql_native_password` scramble:
+  `SHA1(pw) XOR SHA1(salt || SHA1(SHA1(pw)))`. Extracts the
+  20-byte salt from the v10 handshake (salt1 || salt2), builds
+  HandshakeResponse41, reads OK (0x00) vs ERR (0xff).
+- `src/brute_postgres.rs` — PostgreSQL v3.0 startup, handles
+  AuthenticationOk (`R 0`), CleartextPassword (`R 3`), and
+  MD5Password (`R 5` + 4-byte salt). MD5 path:
+  `"md5" + md5_hex( md5_hex(pw + user) + salt )`. SASL/SCRAM
+  (`R 10`) returns false — out of scope for this release.
+- `src/brute_ldap.rs` — Simple-bind via BER. resultCode 0 →
+  success; 49 (invalidCredentials) → fail. Reuses the same BER
+  layout as `src/ldap_enum.rs`.
+- `src/brute_vnc.rs` — RFB 3.x challenge-response DES. Famous
+  VNC bit-reversed-byte key derivation handled; password padded
+  to 8 bytes or truncated, then bit-reversed per byte, then used
+  as the DES key on the two 8-byte halves of the 16-byte
+  challenge.
+- `--brute-protocol` now accepts: `ssh | smb | mysql |
+  postgres | postgresql | ldap | vnc` in addition to the v0.63
+  set. Default port mapping extended (22 / 445 / 3306 / 5432 /
+  389 / 5900).
+- New deps: `russh`, `russh-keys`, `md-5`, `md-4`, `sha1`,
+  `hmac`, `des`. Total ~250 KB binary impact + ~30s compile
+  time on clean build.
+- 31 new tests: LDAP bind-result parser (success / invalid-creds /
+  malformed); VNC bit-reverse known vectors + key padding +
+  encrypt determinism; PostgreSQL startup layout + password-msg
+  prefix + MD5 self-consistent vector + per-password/per-salt
+  variance; MySQL native scramble determinism + empty-pw zero
+  case + per-password/per-salt variance + handshake-response
+  shape + salt extractor on synthetic handshake; SMB NT-hash
+  known vectors ("password" → 8846f7ea…) + NTLMv2 determinism +
+  variance + challenge extractor + NT_STATUS parse; SSH adapter
+  protocol-string assertion. 449/449 pass.
+
 ## [0.63.0] - 2026-05-09
 - **Fase 22 — Credential bruteforce framework.** First half of
   the 14-adapter roadmap. Ships the framework + 8 adapters that

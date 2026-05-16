@@ -132,7 +132,7 @@ pub fn print_guide() {
     line("--msf-fire-exploits   Promuove --msf-fire ad esecuzione exploit-class");
     line("--msf-fire-allow-low  Consente moduli rank=manual/low");
     line("--msf-fire-opt K=V    Datastore option per --msf-fire (ripetibile)");
-    line("--brute-protocol P    Bruteforce: ftp|http-basic|http-form|telnet|smtp|pop3|imap|snmp");
+    line("--brute-protocol P    Bruteforce: ftp|http-basic|http-form|telnet|smtp|pop3|imap|snmp|ssh|smb|mysql|postgres|ldap|vnc");
     line("--brute-target H[:P]  Target per --brute-protocol (porta default per protocol)");
     line("--brute-userlist F    File con username (uno per riga)");
     line("--brute-passlist F    File con password (uno per riga)");
@@ -198,6 +198,12 @@ pub fn print_guide() {
     example("rustymap --brute-protocol snmp --brute-target 10.0.0.5 --brute-passlist communities.txt --brute-confirm-authorized");
     example("rustymap --brute-protocol http-basic --brute-http-url https://lab/admin --brute-default-creds-only");
     example("rustymap --brute-protocol http-form --brute-form-spec 'url=https://app/login,user=username,pass=password,fail=Invalid' --brute-default-creds-only");
+    example("rustymap --brute-protocol ssh --brute-target 10.0.0.5 --brute-default-creds-only");
+    example("rustymap --brute-protocol smb --brute-target 10.0.0.5 --brute-userlist u.txt --brute-passlist p.txt --brute-confirm-authorized");
+    example("rustymap --brute-protocol mysql --brute-target db.lab --brute-userpass mysql-defaults.txt --brute-confirm-authorized");
+    example("rustymap --brute-protocol postgres --brute-target pg.lab --brute-default-creds-only");
+    example("rustymap --brute-protocol ldap --brute-target dc01:389 --brute-pair 'cn=admin,dc=lab:secret' --brute-confirm-authorized");
+    example("rustymap --brute-protocol vnc --brute-target 10.0.0.5 --brute-passlist common.txt --brute-confirm-authorized");
     example("rustymap --sI 192.168.1.100:80 10.0.0.5");
 
     section("HOST DISCOVERY");
