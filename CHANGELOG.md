@@ -4,6 +4,51 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.63.0] - 2026-05-09
+- **Fase 22 — Credential bruteforce framework.** First half of
+  the 14-adapter roadmap. Ships the framework + 8 adapters that
+  require zero new dependencies. SSH / SMB / MySQL / PostgreSQL /
+  MSSQL / VNC / RDP / LDAP deferred to v0.63.1 (they need
+  protocol-heavy crates that warrant a separate dep review).
+- `src/brute.rs` — common framework: `BruteAdapter` async trait,
+  `BruteConfig` (target / timeout / rate / max-tries / consent /
+  default-creds-only / form-spec), `PairSource` (fixed list or
+  user×pass cross-product), `run()` driver with safety gate +
+  rate-limit + stop-on-success + max-tries cap + audit-trail.
+- `src/brute_defaults.rs` — ~120 vendor-default `(user, pass)`
+  pairs from SecLists / vendor manuals (Cisco / Mikrotik /
+  Ubiquiti / D-Link / HP iLO / Dell iDRAC / Supermicro / IBM IMM /
+  databases / app-management / IoT / printer defaults).
+  `--brute-default-creds-only` mode uses this list and bypasses
+  the `--brute-confirm-authorized` consent gate (low lockout risk).
+- `src/brute_tcp_text.rs` — 4 adapters:
+  - `ftp`: RFC 959 USER/PASS dialogue, 230 = success.
+  - `http-basic`: reqwest with `basic_auth()`, non-401 = success.
+  - `http-form`: configurable POST with fail-marker absence check.
+    Spec format `url=…,user=…,pass=…,fail=…`.
+  - `telnet`: prompt-driven, looks for `login:` then `Password:`
+    then absence of error markers.
+- `src/brute_mail_snmp.rs` — 4 adapters:
+  - `smtp`: EHLO + AUTH PLAIN with `\0user\0pass` base64.
+  - `pop3`: USER / PASS dialogue, +OK = success.
+  - `imap`: tagged LOGIN with proper quoting for special chars.
+  - `snmp`: SNMPv1 GET sysName.0 with the candidate community
+    string — any reply = community valid.
+- `--brute-confirm-authorized` is **mandatory** for everything
+  except `--brute-default-creds-only`. Rate-limit defaults to
+  1 attempt/sec; `--brute-rate N` to override. Hard cap
+  `--brute-max-tries 1000` by default.
+- New deps: `async-trait = "0.1"` (~5 KB, needed for the
+  `BruteAdapter` trait).
+- 18 new tests cover framework consent gate, default-creds-only
+  bypass, stop-on-success short-circuit, max-tries cap,
+  pair-source cross-product; default-creds list size + classic
+  defaults + blank-password sample; HTTP form-spec parser
+  (full / defaults / missing-url / unknown-key / no-equals);
+  IMAP quoting (alnum passthrough / special chars / escapes);
+  SNMP packet shape (SEQUENCE prefix, community + sysName.0 OID
+  embedded); adapter-protocol-string uniqueness. 418/418 pass.
+
 ## [0.62.0] - 2026-05-09
 - **Fase 21 — Metasploit integration.** Four new modules wire
   RustyMap into the exploitation phase. All four are **read-only

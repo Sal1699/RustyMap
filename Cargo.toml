@@ -1,6 +1,6 @@
 [package]
 name = "rustymap"
-version = "0.62.0"
+version = "0.63.0"
 edition = "2021"
 description = "A Rust port of nmap for network exploration and security auditing"
 license = "MIT"
@@ -59,6 +59,7 @@ printpdf = { version = "0.7", default-features = false }
 crc32c = "0.6"
 rmp-serde = "1"
 rmpv = { version = "1", features = ["with-serde"] }
+async-trait = "0.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -75,3 +76,12 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+
+# Bump opt-level on test/dev builds — the huge clap-derive Cli
+# struct blows the default Windows debug stack in some tests
+# (detect_preview ones go through Cli::try_parse_from). opt=1 is
+# enough to inline the parser branches and dodge the recursion blow.
+[profile.test]
+opt-level = 1
+[profile.dev]
+opt-level = 1

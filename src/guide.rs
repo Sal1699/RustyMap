@@ -132,6 +132,18 @@ pub fn print_guide() {
     line("--msf-fire-exploits   Promuove --msf-fire ad esecuzione exploit-class");
     line("--msf-fire-allow-low  Consente moduli rank=manual/low");
     line("--msf-fire-opt K=V    Datastore option per --msf-fire (ripetibile)");
+    line("--brute-protocol P    Bruteforce: ftp|http-basic|http-form|telnet|smtp|pop3|imap|snmp");
+    line("--brute-target H[:P]  Target per --brute-protocol (porta default per protocol)");
+    line("--brute-userlist F    File con username (uno per riga)");
+    line("--brute-passlist F    File con password (uno per riga)");
+    line("--brute-userpass F    File con coppie user:pass (uno per riga)");
+    line("--brute-pair U:P      Test pair singolo");
+    line("--brute-rate N        Tentativi/sec (default 1)");
+    line("--brute-max-tries N   Cap totale (default 1000)");
+    line("--brute-default-creds-only  Modalità sicura ~120 vendor defaults (skip consent)");
+    line("--brute-confirm-authorized  OBBLIGATORIO oltre la modalità default-creds-only");
+    line("--brute-http-url URL  URL per http-basic");
+    line("--brute-form-spec S   url=URL,user=FIELD,pass=FIELD,fail=MARKER per http-form");
     line("--sI ZOMBIE[:PORT]    Idle/zombie scan (spoof via host con IPID incrementale)");
     line("--sO                  IP protocol scan (TCP/UDP/ICMP/GRE/OSPF/SCTP…)");
     example("rustymap --sT 10.0.0.5");
@@ -181,6 +193,11 @@ pub fn print_guide() {
     example("rustymap --msf-suggest-cve CVE-2021-44228 --msf-url ... --msf-token ...");
     example("rustymap --msf-import lab --msf-url ... --msf-token ... 10.0.0.5  # scan + push");
     example("rustymap --msf-fire auxiliary/scanner/smb/smb_version --msf-fire-confirm --msf-fire-opt RHOSTS=10.0.0.5 --msf-url ... --msf-token ...");
+    example("rustymap --brute-protocol ftp --brute-target 10.0.0.5 --brute-default-creds-only");
+    example("rustymap --brute-protocol smtp --brute-target mail.lab --brute-userlist u.txt --brute-passlist p.txt --brute-confirm-authorized");
+    example("rustymap --brute-protocol snmp --brute-target 10.0.0.5 --brute-passlist communities.txt --brute-confirm-authorized");
+    example("rustymap --brute-protocol http-basic --brute-http-url https://lab/admin --brute-default-creds-only");
+    example("rustymap --brute-protocol http-form --brute-form-spec 'url=https://app/login,user=username,pass=password,fail=Invalid' --brute-default-creds-only");
     example("rustymap --sI 192.168.1.100:80 10.0.0.5");
 
     section("HOST DISCOVERY");

@@ -71,6 +71,10 @@ mod os_fp_multi;
 mod os_fp_v6;
 mod osdb_submit;
 mod random_targets;
+mod brute;
+mod brute_defaults;
+mod brute_mail_snmp;
+mod brute_tcp_text;
 mod broadcast_dhcp;
 mod broadcast_llmnr;
 mod broadcast_mdns;
@@ -731,6 +735,130 @@ async fn main() -> Result<()> {
         broadcast_netbios::print_findings(&r);
         return Ok(());
     }
+    // ── Credential bruteforce ──
+    if let Some(proto) = &args.brute_protocol {
+        let proto = proto.to_lowercase();
+        let default_port = match proto.as_str() {
+            "ftp" => 21,
+            "smtp" => 25,
+            "pop3" => 110,
+            "imap" => 143,
+            "telnet" => 23,
+            "snmp" => 161,
+            "http-basic" | "http-form" => 0, // URL-based, not socket-based
+            _ => return Err(anyhow!(
+                "--brute-protocol unknown: '{}'. One of: ftp|http-basic|http-form|telnet|smtp|pop3|imap|snmp",
+                proto
+            )),
+        };
+        // Target resolution
+        let target_sa: std::net::SocketAddr = if matches!(proto.as_str(), "http-basic" | "http-form") {
+            // For HTTP we still need a SocketAddr in cfg (audit), even
+            // if the adapter uses the URL. Synthesise a localhost stub
+            // unless the user supplied something.
+            args.brute_target
+                .as_deref()
+                .and_then(|s| {
+                    let s = if s.contains(':') { s.to_string() } else { format!("{}:80", s) };
+                    s.parse().ok()
+                })
+                .unwrap_or_else(|| "127.0.0.1:0".parse().unwrap())
+        } else {
+            let raw = args
+                .brute_target
+                .clone()
+                .ok_or_else(|| anyhow!("--brute-target HOST[:PORT] is required for {} bruteforce", proto))?;
+            let with_port = if raw.contains(':') {
+                raw
+            } else {
+                format!("{}:{}", raw, default_port)
+            };
+            let mut resolved = tokio::net::lookup_host(with_port.as_str()).await?;
+            match resolved.next() {
+                Some(sa) => sa,
+                None => return Err(anyhow!("could not resolve --brute-target '{}'", with_port)),
+            }
+        };
+
+        // Pair source
+        let pairs: brute::PairSource = if args.brute_default_creds_only {
+            brute::PairSource::Fixed(brute_defaults::default_pairs())
+        } else if let Some(spec) = &args.brute_pair {
+            let (u, p) = spec
+                .split_once(':')
+                .ok_or_else(|| anyhow!("--brute-pair expects USER:PASS"))?;
+            brute::PairSource::Fixed(vec![(u.to_string(), p.to_string())])
+        } else if let Some(up_file) = &args.brute_userpass {
+            let text = std::fs::read_to_string(up_file)?;
+            let pairs: Vec<(String, String)> = text
+                .lines()
+                .filter_map(|l| {
+                    let l = l.trim();
+                    if l.is_empty() || l.starts_with('#') { None } else { l.split_once(':') }
+                })
+                .map(|(u, p)| (u.to_string(), p.to_string()))
+                .collect();
+            brute::PairSource::Fixed(pairs)
+        } else {
+            let users: Vec<String> = match &args.brute_userlist {
+                Some(f) => std::fs::read_to_string(f)?
+                    .lines()
+                    .map(|l| l.trim().to_string())
+                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                    .collect(),
+                None => vec!["admin".into(), "root".into()],
+            };
+            let passes: Vec<String> = match &args.brute_passlist {
+                Some(f) => std::fs::read_to_string(f)?
+                    .lines()
+                    .map(|l| l.trim().to_string())
+                    .filter(|l| !l.starts_with('#'))
+                    .collect(),
+                None => return Err(anyhow!("--brute-passlist is required (or --brute-userpass / --brute-pair / --brute-default-creds-only)")),
+            };
+            brute::PairSource::Cross { users, passes }
+        };
+
+        let cfg = brute::BruteConfig {
+            target: target_sa,
+            timeout: args.timeout(),
+            rate: args.brute_rate,
+            max_tries: args.brute_max_tries,
+            stop_on_success: args.brute_stop_on_success,
+            confirm_authorized: args.brute_confirm_authorized,
+            default_creds_only: args.brute_default_creds_only,
+            form_spec: args.brute_form_spec.clone(),
+            warn_internet_routable: false,
+        };
+
+        let report = match proto.as_str() {
+            "ftp" => brute::run(brute_tcp_text::FtpAdapter, cfg, pairs).await?,
+            "telnet" => brute::run(brute_tcp_text::TelnetAdapter, cfg, pairs).await?,
+            "smtp" => brute::run(brute_mail_snmp::SmtpAdapter, cfg, pairs).await?,
+            "pop3" => brute::run(brute_mail_snmp::Pop3Adapter, cfg, pairs).await?,
+            "imap" => brute::run(brute_mail_snmp::ImapAdapter, cfg, pairs).await?,
+            "snmp" => brute::run(brute_mail_snmp::SnmpAdapter, cfg, pairs).await?,
+            "http-basic" => {
+                let url = args
+                    .brute_http_url
+                    .clone()
+                    .ok_or_else(|| anyhow!("--brute-http-url is required for http-basic"))?;
+                brute::run(brute_tcp_text::HttpBasicAdapter { url }, cfg, pairs).await?
+            }
+            "http-form" => {
+                let spec = args
+                    .brute_form_spec
+                    .clone()
+                    .ok_or_else(|| anyhow!("--brute-form-spec is required for http-form"))?;
+                let adapter = brute_tcp_text::parse_form_spec(&spec)?;
+                brute::run(adapter, cfg, pairs).await?
+            }
+            _ => unreachable!(),
+        };
+        brute::print_report(&report);
+        return Ok(());
+    }
+
     // ── Metasploit integration ──
     if args.msf_ping
         || args.msf_import.is_some()

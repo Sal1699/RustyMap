@@ -379,6 +379,65 @@ pub struct Cli {
     #[arg(long = "msf-fire-opt", value_name = "KEY=VALUE")]
     pub msf_fire_opt: Vec<String>,
 
+    /// Credential bruteforce protocol — one of:
+    /// ftp | http-basic | http-form | telnet | smtp | pop3 | imap | snmp
+    #[arg(long = "brute-protocol", value_name = "PROTO")]
+    pub brute_protocol: Option<String>,
+
+    /// Target HOST[:PORT] for --brute-protocol. Port defaults to the
+    /// protocol's well-known value.
+    #[arg(long = "brute-target", value_name = "HOST[:PORT]")]
+    pub brute_target: Option<String>,
+
+    /// Username list file (one per line). Ignored when
+    /// --brute-default-creds-only is set.
+    #[arg(long = "brute-userlist", value_name = "FILE")]
+    pub brute_userlist: Option<String>,
+
+    /// Password list file (one per line).
+    #[arg(long = "brute-passlist", value_name = "FILE")]
+    pub brute_passlist: Option<String>,
+
+    /// File of "user:pass" pairs (one per line).
+    #[arg(long = "brute-userpass", value_name = "FILE")]
+    pub brute_userpass: Option<String>,
+
+    /// Single test pair "user:pass" — useful for verifying a known
+    /// credential without writing a wordlist file.
+    #[arg(long = "brute-pair", value_name = "USER:PASS")]
+    pub brute_pair: Option<String>,
+
+    /// Attempts per second (default 1).
+    #[arg(long = "brute-rate", default_value_t = 1u32)]
+    pub brute_rate: u32,
+
+    /// Hard cap on total attempts (default 1000).
+    #[arg(long = "brute-max-tries", default_value_t = 1000)]
+    pub brute_max_tries: usize,
+
+    /// Stop at the first successful pair (default on).
+    #[arg(long = "brute-stop-on-success", default_value_t = true)]
+    pub brute_stop_on_success: bool,
+
+    /// Use the ~120-pair curated vendor-default list and skip the
+    /// --brute-confirm-authorized gate.
+    #[arg(long = "brute-default-creds-only")]
+    pub brute_default_creds_only: bool,
+
+    /// Mandatory consent flag for any bruteforce mode beyond
+    /// --brute-default-creds-only.
+    #[arg(long = "brute-confirm-authorized")]
+    pub brute_confirm_authorized: bool,
+
+    /// HTTP-form spec for --brute-protocol http-form:
+    /// `url=URL,user=FIELD,pass=FIELD,fail=MARKER`
+    #[arg(long = "brute-form-spec", value_name = "SPEC")]
+    pub brute_form_spec: Option<String>,
+
+    /// HTTP URL for --brute-protocol http-basic.
+    #[arg(long = "brute-http-url", value_name = "URL")]
+    pub brute_http_url: Option<String>,
+
     /// Idle (zombie) scan — spoofs probes via a zombie with incremental IP ID (root/admin)
     #[arg(long = "sI", value_name = "ZOMBIE[:PORT]", group = "scan_type")]
     pub scan_idle: Option<String>,
