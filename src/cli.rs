@@ -295,6 +295,34 @@ pub struct Cli {
     #[arg(long = "discover-wait", default_value_t = 3u64)]
     pub discover_wait_secs: u64,
 
+    /// Print top-N OS candidates with confidence percentages
+    /// alongside the primary OS guess (nmap-style `--osscan-guess`).
+    #[arg(long = "osscan-guess", default_value_t = 0)]
+    pub osscan_guess_top: usize,
+
+    /// Emit CPE 2.3 strings alongside the OS guess.
+    #[arg(long = "cpe-out")]
+    pub cpe_out: bool,
+
+    /// Generate a community OS-DB submission pack for HOST, using
+    /// LABEL as the human-readable fingerprint name. Output goes
+    /// to stdout, or to --osdb-submit-out FILE.
+    #[arg(long = "osdb-submit", value_name = "HOST:LABEL")]
+    pub osdb_submit: Option<String>,
+
+    /// Write --osdb-submit pack to file.
+    #[arg(long = "osdb-submit-out", value_name = "FILE")]
+    pub osdb_submit_out: Option<String>,
+
+    /// Multi-port IPv6 OS fingerprint — probes the listed ports and
+    /// combines signals (confidence ceiling 85% when ≥2 ports agree).
+    #[arg(long = "os-fp-v6-multi", value_name = "HOST")]
+    pub os_fp_v6_multi: Option<String>,
+
+    /// Ports for --os-fp-v6-multi (default 22,80,443).
+    #[arg(long = "os-fp-v6-ports", default_value = "22,80,443")]
+    pub os_fp_v6_ports: String,
+
     /// Idle (zombie) scan — spoofs probes via a zombie with incremental IP ID (root/admin)
     #[arg(long = "sI", value_name = "ZOMBIE[:PORT]", group = "scan_type")]
     pub scan_idle: Option<String>,

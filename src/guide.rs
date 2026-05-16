@@ -114,6 +114,12 @@ pub fn print_guide() {
     line("--wsdd-probe          WS-Discovery (Windows + printer multicast)");
     line("--nbt-broadcast       NetBIOS broadcast sweep");
     line("--discover-wait SEC   Wait time per i probe multicast/broadcast (default 3)");
+    line("--osscan-guess N      Top-N candidati OS con confidence%% (nmap-style)");
+    line("--cpe-out             Emette CPE 2.3 string accanto al guess OS");
+    line("--osdb-submit H:LABEL Genera submission pack per il community OS-DB");
+    line("--osdb-submit-out F   Scrive il pack su file invece di stdout");
+    line("--os-fp-v6-multi H    IPv6 OS-fp multi-port (confidence boost se ≥2 agree)");
+    line("--os-fp-v6-ports CSV  Porte per --os-fp-v6-multi (default 22,80,443)");
     line("--sI ZOMBIE[:PORT]    Idle/zombie scan (spoof via host con IPID incrementale)");
     line("--sO                  IP protocol scan (TCP/UDP/ICMP/GRE/OSPF/SCTP…)");
     example("rustymap --sT 10.0.0.5");
@@ -152,6 +158,10 @@ pub fn print_guide() {
     example("rustymap --llmnr-probe                    # LLMNR poison check");
     example("rustymap --wsdd-probe                     # Windows discovery");
     example("rustymap --nbt-broadcast                  # NBT sweep");
+    example("rustymap -O --osscan-guess 5 10.0.0.5      # top-5 OS candidates");
+    example("rustymap -O --cpe-out 10.0.0.5             # CPE 2.3 emission");
+    example("rustymap --osdb-submit '10.0.0.5:Ubuntu 22.04 server'");
+    example("rustymap --os-fp-v6-multi 2001:db8::42 --os-fp-v6-ports 22,80,443,3389");
     example("rustymap --sI 192.168.1.100:80 10.0.0.5");
 
     section("HOST DISCOVERY");

@@ -65,7 +65,10 @@ mod owasp_probes;
 mod pdf_out;
 mod plugin_meta;
 mod rdp_audit;
+mod cpe;
+mod os_fp_multi;
 mod os_fp_v6;
+mod osdb_submit;
 mod random_targets;
 mod broadcast_dhcp;
 mod broadcast_llmnr;
@@ -720,6 +723,76 @@ async fn main() -> Result<()> {
         let dur = std::time::Duration::from_secs(args.discover_wait_secs);
         let r = broadcast_netbios::sweep(dur).await?;
         broadcast_netbios::print_findings(&r);
+        return Ok(());
+    }
+    if let Some(spec) = &args.os_fp_v6_multi {
+        let spec = spec.clone();
+        let ports: Vec<u16> = args
+            .os_fp_v6_ports
+            .split(',')
+            .filter_map(|s| s.trim().parse::<u16>().ok())
+            .collect();
+        let dur = args.timeout();
+        let targets = target::expand_targets(&[spec], !args.no_dns).await?;
+        for t in &targets {
+            let zone = t.zone.as_deref();
+            match os_fp_v6::fingerprint_target_multi(t.ip, zone, &ports, dur).await {
+                Ok(fp) => {
+                    println!(
+                        "[os-fp-v6-multi] {} → family={} ({}%)",
+                        t.display(),
+                        fp.family,
+                        fp.confidence
+                    );
+                }
+                Err(e) => eprintln!("[!] os-fp-v6-multi {}: {}", t.display(), e),
+            }
+        }
+        return Ok(());
+    }
+    if let Some(spec) = &args.osdb_submit {
+        // Format: HOST:LABEL — split on the LAST colon to allow IPv6 hosts.
+        let (host_part, label) = match spec.rsplit_once(':') {
+            Some((h, l)) if !h.is_empty() && !l.is_empty() => (h, l),
+            _ => return Err(anyhow!("--osdb-submit format: HOST:LABEL")),
+        };
+        let targets = target::expand_targets(&[host_part.to_string()], !args.no_dns).await?;
+        let dur = args.timeout();
+        for t in &targets {
+            // Build a minimal HostResult with up=true; the user is
+            // expected to run their full scan separately and edit the
+            // pack to include the signals the scan captured. We pre-
+            // populate ttl via the existing ping helper inside os_fp.
+            let mut h = scanner::HostResult {
+                target: t.clone(),
+                up: true,
+                ports: Vec::new(),
+                elapsed: std::time::Duration::from_millis(0),
+                os: None,
+                device: None,
+                mac: None,
+            };
+            let fp = tokio::task::spawn_blocking({
+                let host_clone = h.clone();
+                let to = dur;
+                move || os_fp::fingerprint(&host_clone, to)
+            })
+            .await
+            .unwrap_or_else(|_| os_fp::OsGuess {
+                family: "Unknown".into(),
+                confidence: 0,
+                ttl: None,
+                hints: vec![],
+            });
+            h.os = Some(fp);
+            let pack = osdb_submit::build_pack(&h, label);
+            if let Some(out) = &args.osdb_submit_out {
+                std::fs::write(out, &pack)?;
+                println!("[osdb-submit] pack for {} written to {}", h.target.ip, out);
+            } else {
+                osdb_submit::print_pack(&pack);
+            }
+        }
         return Ok(());
     }
     if let Some(spec) = &args.cve_for {
@@ -1774,6 +1847,20 @@ async fn main() -> Result<()> {
             h_view.ports.retain(|p| p.state == PortState::Open);
         }
         output::print_host_with_reason(&h_view, args.verbose, &scan_type_str, args.reason);
+        // Optional: top-N OS candidates with confidence percentages.
+        if args.osscan_guess_top > 0 {
+            if let Some(primary) = &h.os {
+                let list = os_fp_multi::rank(h, primary.clone(), args.osscan_guess_top);
+                os_fp_multi::print_candidates(&h.target.display(), &list);
+            }
+        }
+        // Optional: CPE 2.3 string for the OS guess.
+        if args.cpe_out {
+            if let Some(g) = &h.os {
+                let c = cpe::from_family(&g.family, None);
+                println!("  CPE: {}", c.raw);
+            }
+        }
     }
 
     let elapsed = t_start.elapsed().as_secs_f64();

@@ -154,6 +154,59 @@ pub async fn fingerprint_target(
     fingerprint(v6, scope, probe_port, dur).await
 }
 
+/// Multi-port refinement — probe a list of ports and combine the
+/// per-port signals into a single, more confident guess. When two
+/// or more ports agree on a family, we bump the confidence ceiling
+/// to 85 (up from the single-port 70).
+pub async fn fingerprint_target_multi(
+    addr: IpAddr,
+    zone: Option<&str>,
+    probe_ports: &[u16],
+    dur: Duration,
+) -> Result<OsFpV6> {
+    use std::collections::HashMap;
+    let v6 = match addr {
+        IpAddr::V6(v) => v,
+        IpAddr::V4(_) => return Ok(OsFpV6::unknown()),
+    };
+    let scope = zone.map(crate::target::iface_to_scope_id).unwrap_or(0);
+
+    let mut family_scores: HashMap<String, (u32, u8, u16)> = HashMap::new();
+    for &port in probe_ports {
+        let fp = fingerprint(v6, scope, port, dur).await?;
+        if fp.confidence == 0 {
+            continue;
+        }
+        let entry = family_scores
+            .entry(fp.family.clone())
+            .or_insert((0, fp.confidence, port));
+        entry.0 += fp.confidence as u32;
+        if fp.confidence > entry.1 {
+            entry.1 = fp.confidence;
+            entry.2 = port;
+        }
+    }
+    let best = family_scores.into_iter().max_by_key(|(_, (sum, _, _))| *sum);
+    let (family, (sum, max_one, port)) = match best {
+        Some(x) => x,
+        None => return Ok(OsFpV6::unknown()),
+    };
+    let agree_count = (sum as f32 / max_one as f32).round() as u32;
+    // Boost confidence when ≥ 2 ports agreed.
+    let confidence = if agree_count >= 2 {
+        max_one.saturating_add(15).min(85)
+    } else {
+        max_one
+    };
+    Ok(OsFpV6 {
+        family,
+        confidence,
+        hop_limit_observed: None,
+        hop_limit_initial_estimate: None,
+        probed_port: port,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,6 +4,42 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.60.0] - 2026-05-09
+- **Fase 19 — OS fingerprint depth.** Four additions on top of the
+  existing `os_fp::fingerprint` single-best-match path.
+- `src/os_fp_multi.rs` — `--osscan-guess N` (nmap-style) returns
+  top-N OS candidates with normalised 0-100 confidence percentages
+  plus the per-signal evidence list. Combines TTL/hop-limit votes,
+  port-mix heuristics (3389 → Windows, 9100 → printer, SSH+SNMP
+  no SMB → router, …) and service-banner votes. Tie-breaks on
+  signal count.
+- `src/cpe.rs` — `--cpe-out` emits CPE 2.3 strings alongside the
+  OS guess:
+  `cpe:2.3:o:linux:linux_kernel:5.10:*:*:*:*:*:*:*`
+  Maps free-text family → CPE vendor/product (Microsoft × Windows
+  10/11/Server 201X/2022; Linux × linux_kernel; Apple × macos;
+  FreeBSD/OpenBSD/NetBSD × *bsd; Cisco × ios / ios_xe; Oracle ×
+  solaris; Google × android). Pairs naturally with the
+  `src/nvd.rs` `lookup` so OS-CVE matching is one CLI step.
+- `src/osdb_submit.rs` — `--osdb-submit HOST:LABEL` runs a
+  focused scan + `os_fp::fingerprint` and dumps a community-DB
+  submission pack with `Fingerprint <label>`, `Class … | … | … | …`,
+  `CPE …`, plus the raw signals observed. Writes to stdout or
+  `--osdb-submit-out FILE`. Local-only — never auto-uploads.
+- `src/os_fp_v6.rs` extension — `fingerprint_target_multi` probes
+  a port list, sums per-port family scores, raises the confidence
+  ceiling from 70% → 85% when ≥2 ports agree. New
+  `--os-fp-v6-multi HOST --os-fp-v6-ports 22,80,443` CLI.
+- 21 new tests cover family-name normalisation across 8 OS strings,
+  TTL voting at 64/128/255 boundaries, port-mix weighting
+  (RDP / SMB+NetBIOS / SSH-only / JetDirect), banner voting
+  (Ubuntu, Microsoft-IIS, FreeBSD, Darwin, Cisco), CPE generation
+  across Windows generations + Linux + macOS + FreeBSD + Cisco
+  IOS/IOS-XE distinction + unknown placeholder + field
+  normalisation (`X:Y` → `x_y`), osdb pack content includes the
+  label/class/CPE/TTL/ports/CPE-2.3 prefix, version-extractor
+  picks 5.15.0 / 22.04 / None correctly. 363/363 pass.
+
 ## [0.59.0] - 2026-05-09
 - **Fase 18 — Broadcast & multicast discovery.** Five protocols
   that an attacker (or auditor) wants to fire **once per LAN**
