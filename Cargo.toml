@@ -1,6 +1,6 @@
 [package]
 name = "rustymap"
-version = "0.61.0"
+version = "0.62.0"
 edition = "2021"
 description = "A Rust port of nmap for network exploration and security auditing"
 license = "MIT"
@@ -57,6 +57,8 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 plist = "1"
 printpdf = { version = "0.7", default-features = false }
 crc32c = "0.6"
+rmp-serde = "1"
+rmpv = { version = "1", features = ["with-serde"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

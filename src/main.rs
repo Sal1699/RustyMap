@@ -82,6 +82,10 @@ mod http_methods;
 mod http_shellshock;
 mod http_webdav;
 mod ldap_enum;
+mod msf_fire;
+mod msf_import;
+mod msf_rpc;
+mod msf_suggest;
 mod netbios_ns;
 mod recommend;
 mod resume;
@@ -727,6 +731,83 @@ async fn main() -> Result<()> {
         broadcast_netbios::print_findings(&r);
         return Ok(());
     }
+    // ── Metasploit integration ──
+    if args.msf_ping
+        || args.msf_import.is_some()
+        || args.msf_suggest_cve.is_some()
+        || args.msf_fire.is_some()
+    {
+        let url = args
+            .msf_url
+            .clone()
+            .ok_or_else(|| anyhow!("--msf-url is required for --msf-* operations"))?;
+        let conn = msf_rpc::ConnectArgs {
+            url,
+            username: args.msf_user.clone(),
+            password: args.msf_pass.clone(),
+            token: args.msf_token.clone(),
+            timeout_secs: 30,
+            accept_invalid_certs: args.msf_insecure,
+        };
+        let client = msf_rpc::Client::connect(conn).await?;
+        if args.msf_ping {
+            let v = client.version().await?;
+            println!("[msf] connected — version {}", v);
+        }
+        if let Some(ws) = &args.msf_import {
+            // No findings in this standalone call — caller supplies
+            // empty list. (Future: chain with a recent scan output.)
+            let hosts: Vec<scanner::HostResult> = Vec::new();
+            let findings: Vec<compliance::Finding> = Vec::new();
+            let stats = msf_import::push(&client, ws, &hosts, &findings).await?;
+            msf_import::print_stats(ws, &stats);
+            use colored::Colorize;
+            eprintln!(
+                "{}",
+                "[msf-import] note: this standalone path imports nothing because no scan ran in \
+                this invocation. Run a scan + this flag together by including target args."
+                    .yellow()
+            );
+        }
+        if let Some(cve) = &args.msf_suggest_cve {
+            let hits = msf_suggest::suggest_by_cve(&client, cve).await?;
+            println!("\n[msf-suggest] {} module(s) matching {}", hits.len(), cve);
+            for h in &hits {
+                let rank = h.rank.as_deref().unwrap_or("?");
+                println!("  {:<10} {:<10} {}", h.kind, rank, h.fullname);
+                if let Some(d) = &h.description {
+                    let s: String = d.chars().take(110).collect();
+                    println!("    {}", s);
+                }
+            }
+        }
+        if let Some(module) = &args.msf_fire {
+            if !args.msf_fire_confirm {
+                return Err(anyhow!(
+                    "--msf-fire requires --msf-fire-confirm (and a stdin prompt match)"
+                ));
+            }
+            let kind = if args.msf_fire_exploits {
+                "exploit".to_string()
+            } else {
+                "auxiliary".to_string()
+            };
+            let options = msf_fire::parse_options(&args.msf_fire_opt)?;
+            let req = msf_fire::FireRequest {
+                module: module.clone(),
+                kind,
+                options,
+                allow_low_rank: args.msf_fire_allow_low,
+            };
+            if !msf_fire::prompt_confirmation(&req) {
+                return Err(anyhow!("module name mismatch — aborted"));
+            }
+            let result = msf_fire::fire(&client, &req).await?;
+            msf_fire::print_result(&req, &result);
+        }
+        return Ok(());
+    }
+
     if let Some(spec) = &args.os_fp_v6_multi {
         let spec = spec.clone();
         let ports: Vec<u16> = args

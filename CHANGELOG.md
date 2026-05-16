@@ -4,6 +4,43 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.62.0] - 2026-05-09
+- **Fase 21 — Metasploit integration.** Four new modules wire
+  RustyMap into the exploitation phase. All four are **read-only
+  by default**; firing modules requires explicit per-call gating.
+- `src/msf_rpc.rs` — MessagePack-RPC client for msfrpcd. Auth via
+  `auth.login` → token, or pre-supplied permanent token. Generic
+  `call(method, args)` returns the raw msgpack `Value`. TLS
+  optional-trust via `--msf-insecure`. `core.version` exposed as
+  liveness check (`--msf-ping`).
+- `src/msf_import.rs` — `--msf-import WORKSPACE`: push every up
+  host (`db.report_host`), every open port with banner
+  (`db.report_service`), and every compliance finding
+  (`db.report_vuln`) into the named MSF workspace. CVE id refs
+  parsed out of finding details. Service-name guesser maps
+  product banner + port → MSF service-name (ssh/http/https/smb/
+  rdp/mysql/postgresql/redis/mongodb/etc.).
+- `src/msf_suggest.rs` — `--msf-suggest-cve CVE-XXXX-NNNN`
+  invokes `module.search "cve:..."` and ranks by MSF's own
+  rank (excellent → manual). Also `suggest_for_findings()`
+  fans out across every finding whose detail mentions a CVE
+  and deduplicates by module fullname.
+- `src/msf_fire.rs` — `--msf-fire MODULE` with double gating:
+  (1) `--msf-fire-confirm` flag mandatory, (2) stdin prompt
+  requires typing the module name back. Auxiliary-only by
+  default; `--msf-fire-exploits` opts in to exploit-class.
+  `module.info` is queried first to read the rank — `manual` /
+  `low` rejected unless `--msf-fire-allow-low` is passed.
+  Datastore options via `--msf-fire-opt KEY=VALUE` (repeatable).
+- New deps: `rmp-serde = "1"`, `rmpv = "1"` (~80 KB total).
+- 22 new tests cover msf_rpc value extraction (String / Binary /
+  other), map key lookup, error-flag detection; msf_import map
+  shapes for host / service / vuln + CVE ref extraction; service-
+  name guesser known ports + product-overrides-port; msf_suggest
+  module entry parse + empty-modules / missing-modules-key cases;
+  msf_fire option parser (basic / no-equals / empty-key /
+  whitespace-trim) + auxiliary-default invariant. 400/400 pass.
+
 ## [0.61.0] - 2026-05-09
 - **Fase 20 — Performance & scale.** Honest delivery: full work-
   stealing scheduler / sendmmsg packet-batching is multi-release

@@ -323,6 +323,62 @@ pub struct Cli {
     #[arg(long = "os-fp-v6-ports", default_value = "22,80,443")]
     pub os_fp_v6_ports: String,
 
+    /// Metasploit msfrpcd endpoint (e.g. https://127.0.0.1:55553/api/1.0).
+    #[arg(long = "msf-url", value_name = "URL")]
+    pub msf_url: Option<String>,
+
+    /// MSF username (for auth.login). Use --msf-token to skip.
+    #[arg(long = "msf-user", value_name = "USER")]
+    pub msf_user: Option<String>,
+
+    /// MSF password (for auth.login). Use --msf-token to skip.
+    #[arg(long = "msf-pass", value_name = "PASS")]
+    pub msf_pass: Option<String>,
+
+    /// Pre-issued permanent token (skip auth.login).
+    #[arg(long = "msf-token", value_name = "TOKEN")]
+    pub msf_token: Option<String>,
+
+    /// Accept invalid msfrpcd TLS certificates.
+    #[arg(long = "msf-insecure")]
+    pub msf_insecure: bool,
+
+    /// Test the MSF connection (calls core.version) and exit.
+    #[arg(long = "msf-ping")]
+    pub msf_ping: bool,
+
+    /// Import the most recent scan into MSF workspace NAME via
+    /// db.report_host / db.report_service / db.report_vuln.
+    #[arg(long = "msf-import", value_name = "WORKSPACE")]
+    pub msf_import: Option<String>,
+
+    /// Look up MSF modules matching a CVE id (read-only module.search).
+    #[arg(long = "msf-suggest-cve", value_name = "CVE")]
+    pub msf_suggest_cve: Option<String>,
+
+    /// Fire an MSF module. Requires --msf-fire-confirm + stdin prompt.
+    /// Auxiliary-only by default; --msf-fire-exploits opts in to
+    /// exploit-class modules.
+    #[arg(long = "msf-fire", value_name = "MODULE")]
+    pub msf_fire: Option<String>,
+
+    /// Required safety flag — without it --msf-fire is rejected.
+    #[arg(long = "msf-fire-confirm")]
+    pub msf_fire_confirm: bool,
+
+    /// Promote --msf-fire to allow `exploit` modules (default
+    /// `auxiliary` only).
+    #[arg(long = "msf-fire-exploits")]
+    pub msf_fire_exploits: bool,
+
+    /// Allow `manual` / `low` rank modules with --msf-fire.
+    #[arg(long = "msf-fire-allow-low")]
+    pub msf_fire_allow_low: bool,
+
+    /// Datastore option KEY=VALUE for --msf-fire (repeatable).
+    #[arg(long = "msf-fire-opt", value_name = "KEY=VALUE")]
+    pub msf_fire_opt: Vec<String>,
+
     /// Idle (zombie) scan — spoofs probes via a zombie with incremental IP ID (root/admin)
     #[arg(long = "sI", value_name = "ZOMBIE[:PORT]", group = "scan_type")]
     pub scan_idle: Option<String>,

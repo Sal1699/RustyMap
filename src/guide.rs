@@ -122,6 +122,16 @@ pub fn print_guide() {
     line("--os-fp-v6-ports CSV  Porte per --os-fp-v6-multi (default 22,80,443)");
     line("--max-hostgroup N     Cap batch size sotto --max-parallel (nmap-style)");
     line("--scan-stats N        Stats live ogni N secondi (probes/sec, RTT, peak, RSS)");
+    line("--msf-url URL         msfrpcd endpoint (https://host:55553/api/1.0)");
+    line("--msf-user/pass/token Credenziali msfrpcd (token o user+pass)");
+    line("--msf-insecure        Accetta certificati TLS invalidi");
+    line("--msf-ping            Test connessione (chiama core.version)");
+    line("--msf-import WS       Importa l'ultimo scan in workspace WS");
+    line("--msf-suggest-cve C   Cerca moduli MSF che matchano CVE-XXXX-NNNN");
+    line("--msf-fire MODULE     Esegui modulo MSF (richiede --msf-fire-confirm + prompt)");
+    line("--msf-fire-exploits   Promuove --msf-fire ad esecuzione exploit-class");
+    line("--msf-fire-allow-low  Consente moduli rank=manual/low");
+    line("--msf-fire-opt K=V    Datastore option per --msf-fire (ripetibile)");
     line("--sI ZOMBIE[:PORT]    Idle/zombie scan (spoof via host con IPID incrementale)");
     line("--sO                  IP protocol scan (TCP/UDP/ICMP/GRE/OSPF/SCTP…)");
     example("rustymap --sT 10.0.0.5");
@@ -167,6 +177,10 @@ pub fn print_guide() {
     example("rustymap --max-hostgroup 64 --max-parallel 500 10.0.0.0/16");
     example("rustymap --scan-stats 5 10.0.0.0/24      # stats line ogni 5s");
     example("cargo bench                              # criterion micro-bench harness");
+    example("rustymap --msf-url https://127.0.0.1:55553/api/1.0 --msf-token TOK --msf-ping");
+    example("rustymap --msf-suggest-cve CVE-2021-44228 --msf-url ... --msf-token ...");
+    example("rustymap --msf-import lab --msf-url ... --msf-token ... 10.0.0.5  # scan + push");
+    example("rustymap --msf-fire auxiliary/scanner/smb/smb_version --msf-fire-confirm --msf-fire-opt RHOSTS=10.0.0.5 --msf-url ... --msf-token ...");
     example("rustymap --sI 192.168.1.100:80 10.0.0.5");
 
     section("HOST DISCOVERY");
