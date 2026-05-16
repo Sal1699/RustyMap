@@ -1,6 +1,6 @@
 [package]
 name = "rustymap"
-version = "0.60.0"
+version = "0.61.0"
 edition = "2021"
 description = "A Rust port of nmap for network exploration and security auditing"
 license = "MIT"
@@ -60,6 +60,13 @@ crc32c = "0.6"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "parsers"
+harness = false
 
 [profile.release]
 opt-level = 3

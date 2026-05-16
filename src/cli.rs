@@ -347,6 +347,13 @@ pub struct Cli {
     #[arg(long = "max-parallel", default_value_t = 500)]
     pub max_parallel: usize,
 
+    /// Max simultaneous in-flight host groups (nmap-style
+    /// `--max-hostgroup`). Caps the batch size below `--max-parallel`
+    /// when you want a slower ramp on big target lists. 0 = use
+    /// `--max-parallel` as the cap.
+    #[arg(long = "max-hostgroup", default_value_t = 0)]
+    pub max_hostgroup: usize,
+
     /// Connection timeout in milliseconds
     #[arg(long = "timeout", default_value_t = 1500)]
     pub timeout_ms: u64,
@@ -677,6 +684,11 @@ pub struct Cli {
     /// Print scan progress every N seconds (0 = off)
     #[arg(long = "stats-every", default_value_t = 0u64)]
     pub stats_every_secs: u64,
+
+    /// Print detailed scan stats every N seconds: probes/sec, RTT,
+    /// peak parallel, open/filtered counts, RSS. 0 = off.
+    #[arg(long = "scan-stats", default_value_t = 0u64)]
+    pub scan_stats_every_secs: u64,
 
     /// Append this ASCII string as payload on probe packets (raw scans)
     #[arg(long = "data-string", value_name = "STR")]
@@ -1166,7 +1178,7 @@ impl Cli {
     }
 
     pub fn parallel(&self) -> usize {
-        match self.timing {
+        let timing_based = match self.timing {
             0 => 10,
             1 => 50,
             2 => 150,
@@ -1174,6 +1186,13 @@ impl Cli {
             4 => self.max_parallel * 2,
             5 => self.max_parallel * 4,
             _ => self.max_parallel,
+        };
+        // --max-hostgroup caps the effective batch size below the
+        // timing-derived value (matches nmap's semantics).
+        if self.max_hostgroup > 0 {
+            timing_based.min(self.max_hostgroup)
+        } else {
+            timing_based
         }
     }
 }

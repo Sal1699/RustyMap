@@ -4,6 +4,38 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.61.0] - 2026-05-09
+- **Fase 20 — Performance & scale.** Honest delivery: full work-
+  stealing scheduler / sendmmsg packet-batching is multi-release
+  effort, deferred. Four tractable wins ship now.
+- `src/adaptive_timing.rs` — RTT EWMA + sliding-window loss-rate
+  observer. State machine the scanner can poll between batches:
+  loss ≥25% halves parallel + adds 100ms delay; ≥10% trims 20% +
+  25ms; RTT > 500ms triggers a softer 10% backoff; clean batches
+  ramp parallel back up after 3 consecutive good streaks. Pure —
+  no IO, no globals; the scanner threads `record(outcome, rtt)`
+  and read `suggested_parallel() / suggested_extra_delay()`.
+- `src/scan_stats.rs` — `--scan-stats N` spawns a reporter that
+  emits a compact stats line every N seconds:
+  `[stats] t=15s sent=12450 replied=11308 (rate 829/s) open=42 \
+   filt=1100 rtt=24.6ms peak=192 mem=43MB`. Lock-free atomics for
+  the hot updates; per-probe `record_probe_sent / record_probe_done`
+  + `record_open / record_filtered` paths. Linux RSS via
+  `/proc/self/statm`; 0 elsewhere (no extra crate).
+- `--max-hostgroup N` nmap-compatible cap on batch size below
+  `--max-parallel`. 0 = use parallel as the cap. Folded into
+  `Cli::parallel()` so every scan type respects it transparently.
+- `benches/parsers.rs` — Criterion micro-bench harness. Targets
+  CRC32c (64B / MTU / jumbo), DNP3 CRC-16, BER integer encoder,
+  banner parser (slash / space / trailing-tokens). Run with
+  `cargo bench`; reports under `target/criterion/`. Dev-dep only,
+  doesn't affect the binary size.
+- 19 new tests cover AdaptiveState across the loss/RTT policy
+  branches (severe / moderate / RTT-only / good-streak ramp /
+  min_parallel floor / window evict / EWMA seed-and-smooth),
+  ScanStats counters + peak tracking + RTT-avg edge cases + open/
+  filtered + reporter-stops-on-flag. 382/382 pass.
+
 ## [0.60.0] - 2026-05-09
 - **Fase 19 — OS fingerprint depth.** Four additions on top of the
   existing `os_fp::fingerprint` single-best-match path.

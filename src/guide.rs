@@ -120,6 +120,8 @@ pub fn print_guide() {
     line("--osdb-submit-out F   Scrive il pack su file invece di stdout");
     line("--os-fp-v6-multi H    IPv6 OS-fp multi-port (confidence boost se ≥2 agree)");
     line("--os-fp-v6-ports CSV  Porte per --os-fp-v6-multi (default 22,80,443)");
+    line("--max-hostgroup N     Cap batch size sotto --max-parallel (nmap-style)");
+    line("--scan-stats N        Stats live ogni N secondi (probes/sec, RTT, peak, RSS)");
     line("--sI ZOMBIE[:PORT]    Idle/zombie scan (spoof via host con IPID incrementale)");
     line("--sO                  IP protocol scan (TCP/UDP/ICMP/GRE/OSPF/SCTP…)");
     example("rustymap --sT 10.0.0.5");
@@ -162,6 +164,9 @@ pub fn print_guide() {
     example("rustymap -O --cpe-out 10.0.0.5             # CPE 2.3 emission");
     example("rustymap --osdb-submit '10.0.0.5:Ubuntu 22.04 server'");
     example("rustymap --os-fp-v6-multi 2001:db8::42 --os-fp-v6-ports 22,80,443,3389");
+    example("rustymap --max-hostgroup 64 --max-parallel 500 10.0.0.0/16");
+    example("rustymap --scan-stats 5 10.0.0.0/24      # stats line ogni 5s");
+    example("cargo bench                              # criterion micro-bench harness");
     example("rustymap --sI 192.168.1.100:80 10.0.0.5");
 
     section("HOST DISCOVERY");

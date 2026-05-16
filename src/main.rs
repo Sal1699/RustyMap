@@ -65,6 +65,7 @@ mod owasp_probes;
 mod pdf_out;
 mod plugin_meta;
 mod rdp_audit;
+mod adaptive_timing;
 mod cpe;
 mod os_fp_multi;
 mod os_fp_v6;
@@ -86,6 +87,7 @@ mod recommend;
 mod resume;
 mod rpc_scan;
 mod runtime_keys;
+mod scan_stats;
 mod sctp_scan;
 mod siem;
 mod smb_deep;
@@ -1545,6 +1547,20 @@ async fn main() -> Result<()> {
         None
     };
 
+    // --scan-stats: spawn the detailed-counters reporter. The counter
+    // struct itself is exposed; future scanner hot-paths can update it
+    // via Arc<ScanStats>.
+    let scan_stats_handle: Option<(tokio::task::JoinHandle<()>, Arc<std::sync::atomic::AtomicBool>)> =
+        if args.scan_stats_every_secs > 0 {
+            let interval = std::time::Duration::from_secs(args.scan_stats_every_secs);
+            let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let stats = scan_stats::ScanStats::new();
+            let h = scan_stats::spawn_reporter(stats, std::time::Instant::now(), interval, stop.clone());
+            Some((h, stop))
+        } else {
+            None
+        };
+
     // --stats-every: spawn a tick that prints elapsed time periodically.
     let stats_handle: Option<(tokio::task::JoinHandle<()>, Arc<std::sync::atomic::AtomicBool>)> =
         if args.stats_every_secs > 0 {
@@ -1865,6 +1881,11 @@ async fn main() -> Result<()> {
 
     let elapsed = t_start.elapsed().as_secs_f64();
     if let Some((handle, stop)) = stats_handle {
+        stop.store(true, Ordering::Relaxed);
+        handle.abort();
+        let _ = handle.await;
+    }
+    if let Some((handle, stop)) = scan_stats_handle {
         stop.store(true, Ordering::Relaxed);
         handle.abort();
         let _ = handle.await;
