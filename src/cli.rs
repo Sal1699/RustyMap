@@ -429,6 +429,11 @@ pub struct Cli {
     #[arg(long = "brute-confirm-authorized")]
     pub brute_confirm_authorized: bool,
 
+    /// Acknowledge running Alpha-tier features (see `--guide` maturity matrix
+    /// for the list). Without this flag, Alpha features refuse to run.
+    #[arg(long = "experimental-confirm")]
+    pub experimental_confirm: bool,
+
     /// HTTP-form spec for --brute-protocol http-form:
     /// `url=URL,user=FIELD,pass=FIELD,fail=MARKER`
     #[arg(long = "brute-form-spec", value_name = "SPEC")]

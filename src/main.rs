@@ -94,6 +94,7 @@ mod http_methods;
 mod http_shellshock;
 mod http_webdav;
 mod ldap_enum;
+mod maturity;
 mod msf_fire;
 mod msf_import;
 mod msf_rpc;
@@ -486,6 +487,7 @@ async fn main() -> Result<()> {
         }).await?;
     }
     if let Some(misp_url) = &args.threat_intel_misp {
+        maturity::announce_and_gate("--threat-intel-sync", args.experimental_confirm)?;
         let url = misp_url.clone();
         let key = args.misp_api_key.clone()
             .ok_or_else(|| anyhow!("--misp-api-key is required when using --threat-intel-misp"))?;
@@ -862,8 +864,14 @@ async fn main() -> Result<()> {
             }
             "ldap" => brute::run(brute_ldap::LdapAdapter, cfg, pairs).await?,
             "vnc" => brute::run(brute_vnc::VncAdapter, cfg, pairs).await?,
-            "mssql" => brute::run(brute_mssql::MssqlAdapter::default(), cfg, pairs).await?,
-            "rdp" => brute::run(brute_rdp::RdpAdapter::default(), cfg, pairs).await?,
+            "mssql" => {
+                maturity::announce_and_gate("--brute-protocol mssql", args.experimental_confirm)?;
+                brute::run(brute_mssql::MssqlAdapter::default(), cfg, pairs).await?
+            }
+            "rdp" => {
+                maturity::announce_and_gate("--brute-protocol rdp", args.experimental_confirm)?;
+                brute::run(brute_rdp::RdpAdapter::default(), cfg, pairs).await?
+            }
             "http-basic" => {
                 let url = args
                     .brute_http_url
@@ -963,6 +971,7 @@ async fn main() -> Result<()> {
     }
 
     if let Some(spec) = &args.os_fp_v6_multi {
+        maturity::announce_and_gate("--os-fp-v6", args.experimental_confirm)?;
         let spec = spec.clone();
         let ports: Vec<u16> = args
             .os_fp_v6_ports
@@ -988,6 +997,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     if let Some(spec) = &args.osdb_submit {
+        maturity::announce_and_gate("--osdb-submit", args.experimental_confirm)?;
         // Format: HOST:LABEL — split on the LAST colon to allow IPv6 hosts.
         let (host_part, label) = match spec.rsplit_once(':') {
             Some((h, l)) if !h.is_empty() && !l.is_empty() => (h, l),
@@ -1050,6 +1060,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     if let Some(spec) = &args.os_fp_v6 {
+        maturity::announce_and_gate("--os-fp-v6", args.experimental_confirm)?;
         let spec = spec.clone();
         let port = args.os_fp_v6_port;
         let dur = args.timeout();
@@ -1078,6 +1089,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     if let Some(host) = &args.ics_scan {
+        maturity::announce_and_gate("--ics-scan", args.experimental_confirm)?;
         let h = host.clone();
         let dur = std::time::Duration::from_secs(3);
         let findings = ics_scan::scan(&h, dur).await?;
@@ -1099,6 +1111,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     if let Some(file) = &args.apk_scan {
+        maturity::announce_and_gate("--apk-scan", args.experimental_confirm)?;
         let file = file.clone();
         return tokio::task::spawn_blocking(move || -> Result<()> {
             let report = apk_scan::scan(std::path::Path::new(&file))?;
@@ -1107,6 +1120,7 @@ async fn main() -> Result<()> {
         }).await?;
     }
     if let Some(file) = &args.ipa_scan {
+        maturity::announce_and_gate("--ipa-scan", args.experimental_confirm)?;
         let file = file.clone();
         return tokio::task::spawn_blocking(move || -> Result<()> {
             let report = ipa_scan::scan(std::path::Path::new(&file))?;
@@ -1118,6 +1132,12 @@ async fn main() -> Result<()> {
     // OWASP variant feeds the crawl inventory through the active
     // probes; --web-crawl alone just prints the surface map.
     if args.web_crawl.is_some() || args.owasp_scan.is_some() {
+        if args.web_crawl.is_some() {
+            maturity::announce_and_gate("--web-crawl", args.experimental_confirm)?;
+        }
+        if args.owasp_scan.is_some() {
+            maturity::announce_and_gate("--owasp-probes", args.experimental_confirm)?;
+        }
         let seed = args
             .owasp_scan
             .clone()
@@ -1908,6 +1928,7 @@ async fn main() -> Result<()> {
             run_udp(targets, port_list.clone(), scanner, timeout_dur, parallel).await
         }
         ScanType::Idle => {
+            maturity::announce_and_gate("-sI", args.experimental_confirm)?;
             let spec = args.scan_idle.as_ref().unwrap();
             let (zombie_str, zombie_port) = match spec.rsplit_once(':') {
                 Some((ip, port)) => (

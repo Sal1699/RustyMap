@@ -4,6 +4,42 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.66.0] - 2026-05-19
+- **Fase 24 — Lab validation infrastructure.** Pivot from breadth to
+  hardening. No new features; the release adds the tier system, the
+  gating flag, the maturity matrix in the guide, and the lab-validation
+  tracking file. Actual lab runs happen off-session and update tiers
+  via subsequent patch releases.
+- `src/maturity.rs` — curated registry of CLI features → `Tier::
+  {Production, Beta, Alpha}` + per-feature `note` describing the
+  limitation or what validation is needed. Implicit default for
+  unlisted flags is Production. Initial classification:
+  - **Production** (silent): `-sT`, `-sS`, `-sU`, `-sn`, `-Pn`
+  - **Beta** (silent, listed in matrix): `-O`, `-sV`, `--ssh-audit`,
+    `--smb-audit`, `--tls-grade`, `--cve-for`, all brute adapters
+    from waves 1+2 except those listed as Alpha
+  - **Alpha** (requires `--experimental-confirm`): `--brute-protocol
+    rdp` + `mssql`, `--apk-scan`, `--ipa-scan`, `--threat-intel-sync`,
+    `--osdb-submit`, `-sI`, `--os-fp-v6`, `--owasp-probes`,
+    `--ics-scan`, `--web-crawl`
+- `--experimental-confirm` flag — acknowledges running Alpha-tier
+  features. Without it, Alpha dispatches abort with an error citing
+  the limitation. Beta and Production unaffected.
+- `maturity::announce_and_gate(key, confirmed)` wired into main.rs at
+  each Alpha dispatch (brute mssql/rdp, apk/ipa, threat-intel-misp,
+  osdb-submit, os-fp-v6 single + multi, ics-scan, web-crawl,
+  owasp-probes, idle scan).
+- `src/guide.rs` MATURITY MATRIX section — auto-rendered from
+  `maturity::registry()` so the guide stays in sync with the code.
+- `LAB_VALIDATION.md` template — tracks which features have been
+  lab-validated against a reference tool (nmap / hydra / sslscan /
+  testssl.sh / crackmapexec). Promotion procedure documented; ladder
+  starts empty and gets filled as the user runs the lab work.
+- 6 new tests in `maturity::tests`: registry lookup, Alpha gate
+  rejects without confirm, Alpha gate passes with confirm, Beta
+  passes silently, unlisted keys treated as Production, no duplicate
+  keys in registry. 473/473 pass.
+
 ## [0.65.0] - 2026-05-16
 - **Fase 23 — Rhai SDK expansion + NSE port batch.** Two more
   bruteforce adapters (MSSQL TDS, RDP CredSSP), a wider Rhai

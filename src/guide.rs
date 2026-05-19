@@ -472,6 +472,20 @@ pub fn print_guide() {
     example("rustymap --sT --sV --cve-db cves.json 10.0.0.5");
     example("rustymap --sT --script rules/ 10.0.0.5");
 
+    category("MATURITY MATRIX");
+    section("FEATURE TIERS");
+    line("Ogni feature ha un tier basato su quanto è stata validata.");
+    line("");
+    line("  production  validata nel lab contro un tool di riferimento");
+    line("  beta        passa i test sintetici, non ancora lab-validata");
+    line("  alpha       limitazioni note / nuova (<2 settimane);");
+    line("              richiede --experimental-confirm per essere eseguita");
+    line("");
+    line("Lo stato corrente è in LAB_VALIDATION.md.");
+    print_maturity_matrix();
+    example("rustymap --brute-protocol rdp --experimental-confirm --brute-target 10.0.0.5 \\");
+    example("         --brute-pair 'Administrator:secret' --brute-confirm-authorized");
+
     category("MAINTENANCE");
     section("AUDIT & INSTALL");
     line("--audit-log FILE      JSONL con tutte le azioni (timestamped)");
@@ -627,4 +641,34 @@ fn combo(comment: &str, cmd: &str) {
         "λ".truecolor(HL_ORANGE.0, HL_ORANGE.1, HL_ORANGE.2).bold(),
         cmd.truecolor(HL_YELLOW.0, HL_YELLOW.1, HL_YELLOW.2),
     );
+}
+
+fn print_maturity_matrix() {
+    use crate::maturity::{registry, Tier};
+    let mut by_tier: [Vec<&crate::maturity::Feature>; 3] = [vec![], vec![], vec![]];
+    for f in registry() {
+        let idx = match f.tier {
+            Tier::Production => 0,
+            Tier::Beta => 1,
+            Tier::Alpha => 2,
+        };
+        by_tier[idx].push(f);
+    }
+    let labels = ["production", "beta", "alpha"];
+    let colors = [HL_TEXT, HL_AMBER, HL_ORANGE];
+    for (i, group) in by_tier.iter().enumerate() {
+        if group.is_empty() { continue; }
+        println!(
+            "\n   {} {}",
+            "›".truecolor(colors[i].0, colors[i].1, colors[i].2).bold(),
+            labels[i].truecolor(colors[i].0, colors[i].1, colors[i].2).bold(),
+        );
+        for f in group {
+            println!(
+                "     {:<28} {}",
+                f.key.truecolor(HL_YELLOW.0, HL_YELLOW.1, HL_YELLOW.2),
+                f.note.truecolor(HL_TEXT.0, HL_TEXT.1, HL_TEXT.2),
+            );
+        }
+    }
 }
