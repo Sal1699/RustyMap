@@ -32,10 +32,17 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
+/// Default probe set when the caller didn't specify `-p`. Covers the
+/// services the recommender knows how to react to plus the common
+/// modern app/admin ports (Grafana, Jenkins, Kibana, etcd, K8s API,
+/// Elasticsearch HTTPS, Vault, MinIO, etc.). Pass `-p` to widen.
 const PROBE_PORTS: &[u16] = &[
-    21, 22, 23, 25, 53, 80, 110, 139, 143, 389, 443, 445, 465, 587, 993, 995,
-    1433, 1521, 2375, 3306, 3389, 5432, 5900, 5985, 5986, 6379, 8080, 8443,
-    9200, 11211, 27017,
+    21, 22, 23, 25, 53, 80, 110, 139, 143, 389, 443, 445, 465, 587, 631,
+    636, 993, 995, 1433, 1521, 1883, 2049, 2375, 2376, 2379, 2380, 3000,
+    3306, 3389, 4444, 5000, 5432, 5601, 5672, 5900, 5984, 5985, 5986, 6379,
+    6443, 6984, 7000, 7474, 7777, 8000, 8060, 8080, 8081, 8088, 8123, 8200,
+    8443, 8500, 8800, 8888, 9000, 9001, 9090, 9091, 9100, 9200, 9300, 9418,
+    11211, 27017, 50000,
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,16 +55,34 @@ pub struct Recommendation {
 }
 
 pub async fn analyze(host: &str, dur: Duration) -> Result<Recommendation> {
+    analyze_with_ports(host, dur, None).await
+}
+
+/// Same as `analyze` but lets the caller widen (or restrict) the probe
+/// set. When `ports` is None we fall back to `PROBE_PORTS`. When the
+/// caller passes a list (e.g. from `-p 1-65535`), we probe those — so
+/// the recommender stops missing services on non-default ports.
+pub async fn analyze_with_ports(
+    host: &str,
+    dur: Duration,
+    ports: Option<&[u16]>,
+) -> Result<Recommendation> {
     let ip: IpAddr = resolve(host)
         .await
         .with_context(|| format!("resolve {}", host))?;
+    let probe_set: Vec<u16> = match ports {
+        Some(p) if !p.is_empty() => p.to_vec(),
+        _ => PROBE_PORTS.to_vec(),
+    };
     let mut open = Vec::new();
-    for &port in PROBE_PORTS {
+    for &port in &probe_set {
         if probe_port(ip, port, dur).await {
             open.push(port);
         }
     }
     let (flags, notes) = derive_flags(&open, host);
+    let probe_set_len = probe_set.len();
+    let user_supplied = ports.map(|p| !p.is_empty()).unwrap_or(false);
 
     let mut cmd_args: Vec<String> = vec![host.to_string()];
     if !open.is_empty() {
@@ -66,6 +91,15 @@ pub async fn analyze(host: &str, dur: Duration) -> Result<Recommendation> {
         cmd_args.push(p_spec.join(","));
     }
     cmd_args.extend(flags.iter().cloned());
+
+    let mut notes = notes;
+    if !user_supplied {
+        notes.push(format!(
+            "Probed {} known service ports — add `-p RANGE` (e.g. `-p 1-65535`) \
+             alongside --recommend to cover non-default services on this host.",
+            probe_set_len
+        ));
+    }
 
     Ok(Recommendation {
         host: host.to_string(),

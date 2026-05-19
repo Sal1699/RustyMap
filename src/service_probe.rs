@@ -67,11 +67,19 @@ const HELP_PROBE: Probe = Probe {
     payload: b"HELP\r\n",
     ports: &[25, 587, 110, 143],
 };
+const RTSP_PROBE: Probe = Probe {
+    name: "rtsp",
+    payload: b"OPTIONS * RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: RustyMap\r\n\r\n",
+    ports: &[554, 8554],
+};
+// NOTE: RTMP (port 1935) requires a binary 1536-byte C0/C1 handshake
+// before any text exchange — we don't implement it, so RTMP banners
+// remain empty. Service identification on 1935 comes from CPE only.
 
 fn probes_for_port(port: u16) -> Vec<&'static Probe> {
     let mut out: Vec<&'static Probe> = vec![&NULL_PROBE];
     let mut matched = false;
-    for p in [&HTTP_PROBE, &TLS_PROBE, &HELP_PROBE] {
+    for p in [&HTTP_PROBE, &TLS_PROBE, &HELP_PROBE, &RTSP_PROBE] {
         if p.ports.contains(&port) {
             out.push(p);
             matched = true;
@@ -153,6 +161,11 @@ static SIGS: Lazy<Vec<Signature>> = Lazy::new(|| {
         Signature {
             regex: Regex::new(r"(?i)SMB|samba").unwrap(),
             product: Some("SMB"), product_group: None, version_group: None, extra_group: None,
+        },
+        // RTSP — OPTIONS reply carries Server: <name>/<version>
+        Signature {
+            regex: Regex::new(r"(?i)^RTSP/[0-9.]+\s+\d+[^\r\n]*\r\n[\s\S]*?Server:\s*([^\r\n/]+)/?([\d.]+)?").unwrap(),
+            product: None, product_group: Some(1), version_group: Some(2), extra_group: None,
         },
         // ── Web servers (additional patterns) ──
         Signature {

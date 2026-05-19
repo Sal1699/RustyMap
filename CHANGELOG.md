@@ -4,6 +4,103 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.66.2] - 2026-05-19
+- **Fase 24 — lab-report patch bundle.** Fifteen bugs found across
+  the user's first two lab validation runs, all fixed in a single
+  drop.
+- **Bug #3 — `--oA` silently fails when combined with a probe-only
+  mode** (vuln-ssl-*, brute-*, msf-*, broadcast probes, etc.). Root
+  cause: those dispatches return Ok before reaching the file-output
+  stage, so `-oA` expansion happened but nothing wrote files. Fix:
+  added `is_probe_only_invocation()` predicate + explicit eprintln
+  warning at startup explaining that `-oA / -oN / -oG / -oJ / -oX /
+  -oH / -oM` are only honored by scan modes. The user now gets a
+  clear message instead of silent failure.
+- **Bug #6 — `--recommend` only probed 31 hardcoded ports** so
+  hosts with services on non-default ports came back empty. Fix:
+  widened `PROBE_PORTS` from 31 to 62 ports (Grafana 3000, etcd
+  2379, K8s API 6443, Vault 8200, Spark 8080, ClickHouse 8123,
+  modern admin/monitoring ports), AND added support for `-p` as
+  override: `rustymap --recommend HOST -p 1-65535` now probes the
+  user-specified set. Added a note in the output explaining the
+  default scope.
+- **Bug #4 — `-sA` (ACK scan) false negative in host discovery.**
+  ACK scan exists exactly to bypass stateful firewalls that also
+  drop discovery probes, so running discovery first defeats the
+  point. Fix: `-sA` / `-sW` / `-sM` now imply `-Pn` automatically
+  with an `[i]` info line. New `--discover-on-ack` opts back into
+  the old behavior if you really need it.
+- **Bug #5 — `--vuln-ssl-dh` silently skipped when combined with
+  `--vuln-ssl-ccs`.** Root cause: vuln-ssl-ccs dispatch returned
+  Ok before vuln-ssl-dh's branch could run. Fix: merged both into
+  a single dispatch block that runs both probes sequentially when
+  both flags are set.
+- **Bug #7 — OS candidates with confidence summing >100%.** Root
+  cause: `confidence` was normalized to *max* score instead of
+  *sum* of scores, so the top candidate hit ~99% and the others
+  were a fraction of the top, not a fraction of the total. Result:
+  Linux 99% + BSD 19% + macOS 15% = 133%. Fix: divide by sum,
+  not max — column now reflects an actual probability distribution
+  (sums ≤100, rounding can shave 1-2 points).
+- **Bug #2 — `--brute-protocol http-basic` error message unhelpful.**
+  Was: "--brute-http-url is required for http-basic". Now: full
+  explanation of why HTTP basic uses URL-scope not host:port, plus
+  a copy-pasteable example. Same treatment for `http-form` +
+  `--brute-form-spec`.
+- **Bug #1 — `--sF` / `--sN` mutex documentation.** The mutex is
+  correct (only one scan strategy runs per invocation by design),
+  but the clap error message didn't say so. Doc strings now
+  explicitly note the constraint + suggest running rustymap twice
+  for multiple scan types.
+- **Bug #8 — `--sM` / `--sW` / `--sN` / `--sF` ignored `--Pn`.**
+  Root cause: raw_scan computed `host.up = !interesting.is_empty()`
+  post-scan, so stealth scans against quiet/firewalled targets
+  marked hosts as down even when the user explicitly said `-Pn`.
+  Fix: post-scan loop forces `host.up = true` when
+  `effective_skip_discovery` is set.
+- **Bug #14 — LEEF format broken for QRadar.** Two bugs in one:
+  (1) the delim was `^` instead of the QRadar-default tab; (2) the
+  body fields had a spurious `^` after each `=` producing
+  `dst=^10.0.0.1^dstport=^443` (malformed). Fix: use TAB as delim,
+  drop the trailing `^` so output is `dst=10.0.0.1\tdstport=443`.
+  Test updated.
+- **Bug #9 — `--explain "flags…"` didn't accept multi-arg input.**
+  Was: `Option<String>` (single quoted blob only). Now: takes
+  `Vec<String>` via `num_args = 1.., allow_hyphen_values = true`
+  so both `--explain "--sT 10.0.0.5"` and `--explain --sT 10.0.0.5`
+  work. The literal `last` keyword still pulls from --history.
+- **Bug #10 — `--version-all` (intensity 9) empty VERSION for
+  HTTP/RTSP/RTMP.** Root cause: no RTSP probe in `probes_for_port`,
+  so port 554 falls through to the HTTP fallback which RTSP servers
+  reject without a Server header. Fix: added `RTSP_PROBE` for
+  554/8554 (`OPTIONS * RTSP/1.0`) + regex matching `Server:` in
+  the RTSP response. RTMP (1935) still needs a binary handshake we
+  don't implement — documented in code comment + remains empty.
+- **Bug #11 — `--auth-audit` silent on non-standard ports.** When
+  the only open ports were 554/1935/8000/9000 (none matching SSH/
+  SMB/RDP/SMTP standard ports), the auth-audit pass ran but emitted
+  zero lines. Fix: tracks `audited_anything`, emits an `[i]` info
+  message at end if no port matched any audited protocol.
+- **Bug #12 — `--cve-for` unclear when cache empty.** Was: dimmed
+  one-liner saying "cache may be empty". Now: bold yellow header
+  + numbered list of likely causes (cache stale, CPE name mismatch
+  examples, version really has no CVE) + improved error message
+  for missing cache file with explicit path + ~80 MB size note.
+- **Bug #13 — Alpha-tier features not surfaced in `--help` (-h).**
+  The maturity matrix lived in `--guide` but not in clap's auto-
+  generated help. Fix: prepended `[ALPHA — requires
+  --experimental-confirm]` to the doc comments of
+  `--osdb-submit`, `--web-crawl`, `--owasp-scan`, `--apk-scan`,
+  `--ipa-scan`, `--ics-scan`, `--os-fp-v6`, `--threat-intel-misp`,
+  `-sI`. Now visible in `rustymap -h`.
+- **Bug #15 — `--oA` silently fails (lab re-confirmation).** Same
+  root cause as #3 (probe-only mode + `-oA` produces no files).
+  The v0.66.2 warning now makes this loud. If you see the warning,
+  re-run with a scan-type flag (`--sT/--sS/--sU`). If you see
+  silence with a scan-type flag set, that's a different bug —
+  report the exact invocation.
+- 473/473 tests still pass. Release build clean.
+
 ## [0.66.1] - 2026-05-19
 - **Bugfix:** `rustymap --update` on Linux distros where `/tmp` is
   `tmpfs` (Kali, recent Debian, Fedora, most systemd setups) was

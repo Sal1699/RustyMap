@@ -274,6 +274,30 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Output-flag sanity check: -oA / -o* only fires through the scan
+    // codepath. If the user combined it with a probe/utility mode that
+    // returns early (vuln-*, brute-*, broadcast probes, etc.), the file
+    // writes were getting silently skipped. Warn explicitly now so the
+    // user knows the flag was ignored — better than no output + no signal.
+    let wants_output_file = args.output_all.is_some()
+        || args.output_normal.is_some()
+        || args.output_grepable.is_some()
+        || args.output_json.is_some()
+        || args.output_html.is_some()
+        || args.output_markdown.is_some()
+        || args.output_xml.is_some();
+    if wants_output_file && is_probe_only_invocation(&args) {
+        eprintln!(
+            "[!] --oA / --oN / --oG / --oJ / --oX / --oH / --oM are only written by \
+             scan modes (--sT/--sS/--sU/etc.). This invocation triggers a probe or \
+             utility command that runs and exits before reaching the file-output stage \
+             — your output flag is being ignored.\n    \
+             Workarounds:\n    \
+             • Run the scan first with --oA, then re-run the probe separately, or\n    \
+             • Capture stdout with `rustymap … | tee report.txt`"
+        );
+    }
+
     if args.no_color {
         control::set_override(false);
     }
@@ -336,17 +360,24 @@ async fn main() -> Result<()> {
         history::print(&entries);
         return Ok(());
     }
-    if let Some(spec) = &args.explain {
-        let line: String = if spec == "last" {
+    if let Some(parts) = &args.explain {
+        // --explain accepts either a single quoted blob ("--sT 10.0.0.5")
+        // or a sequence of bare args (--sT 10.0.0.5). In the multi-arg
+        // case clap gives us each token already separated, so we don't
+        // need to re-tokenize. In the single-blob case we split on
+        // whitespace. The literal keyword `last` pulls from --history.
+        let single = parts.len() == 1;
+        let line: String = if single && parts[0] == "last" {
             let entries = history::load(1)?;
             entries
                 .last()
                 .map(|e| e.args.clone())
                 .unwrap_or_else(|| "rustymap".into())
+        } else if single {
+            parts[0].clone()
         } else {
-            spec.clone()
+            parts.join(" ")
         };
-        // Tokenize: respects quotes, splits on whitespace.
         let tokens: Vec<String> = line
             .split_whitespace()
             .filter(|t| *t != "rustymap")
@@ -392,7 +423,15 @@ async fn main() -> Result<()> {
     if let Some(host) = &args.recommend {
         let host = host.clone();
         let dur = std::time::Duration::from_secs(2);
-        let rec = recommend::analyze(&host, dur).await?;
+        // If the user passed an explicit -p spec, use it as the recommend
+        // probe set so non-default service ports aren't missed (Fase 24
+        // bug report #6). Otherwise fall back to the curated PROBE_PORTS.
+        let user_ports = if args.ports != "1-1000" && !args.ports.is_empty() {
+            ports::parse_ports(&args.effective_ports()).ok()
+        } else {
+            None
+        };
+        let rec = recommend::analyze_with_ports(&host, dur, user_ports.as_deref()).await?;
         recommend::print(&rec);
         return Ok(());
     }
@@ -678,28 +717,28 @@ async fn main() -> Result<()> {
         }
         return Ok(());
     }
-    if let Some(host_spec) = &args.vuln_ssl_ccs {
-        let host_spec = host_spec.clone();
+    // vuln-ssl-* dispatch — combinable. Previously `vuln-ssl-ccs`
+    // returned early so `vuln-ssl-dh` was silently dropped if both
+    // flags were set (Fase 24 bug #5).
+    if args.vuln_ssl_ccs.is_some() || args.vuln_ssl_dh.is_some() {
         let port = args.vuln_ssl_port;
         let dur = args.timeout();
-        let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
-        for t in &targets {
-            match vuln_ssl_ccs::probe(t.ip, port, dur).await {
-                Ok(f) => vuln_ssl_ccs::print_finding(&f),
-                Err(e) => eprintln!("[!] vuln-ssl-ccs {}: {}", t.display(), e),
+        if let Some(host_spec) = args.vuln_ssl_ccs.clone() {
+            let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
+            for t in &targets {
+                match vuln_ssl_ccs::probe(t.ip, port, dur).await {
+                    Ok(f) => vuln_ssl_ccs::print_finding(&f),
+                    Err(e) => eprintln!("[!] vuln-ssl-ccs {}: {}", t.display(), e),
+                }
             }
         }
-        return Ok(());
-    }
-    if let Some(host_spec) = &args.vuln_ssl_dh {
-        let host_spec = host_spec.clone();
-        let port = args.vuln_ssl_port;
-        let dur = args.timeout();
-        let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
-        for t in &targets {
-            match vuln_ssl_dh::probe(t.ip, port, dur).await {
-                Ok(f) => vuln_ssl_dh::print_finding(&f),
-                Err(e) => eprintln!("[!] vuln-ssl-dh {}: {}", t.display(), e),
+        if let Some(host_spec) = args.vuln_ssl_dh.clone() {
+            let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
+            for t in &targets {
+                match vuln_ssl_dh::probe(t.ip, port, dur).await {
+                    Ok(f) => vuln_ssl_dh::print_finding(&f),
+                    Err(e) => eprintln!("[!] vuln-ssl-dh {}: {}", t.display(), e),
+                }
             }
         }
         return Ok(());
@@ -873,17 +912,27 @@ async fn main() -> Result<()> {
                 brute::run(brute_rdp::RdpAdapter::default(), cfg, pairs).await?
             }
             "http-basic" => {
-                let url = args
-                    .brute_http_url
-                    .clone()
-                    .ok_or_else(|| anyhow!("--brute-http-url is required for http-basic"))?;
+                let url = args.brute_http_url.clone().ok_or_else(|| {
+                    anyhow!(
+                        "--brute-protocol http-basic needs --brute-http-url (the full URL of the \
+                         protected page, e.g. https://target.example.com/admin/). \
+                         Unlike other protocols, --brute-target is NOT used here because HTTP \
+                         basic auth is URL-scoped, not host:port-scoped. Example:\n  \
+                         rustymap --brute-protocol http-basic \\\n           \
+                         --brute-http-url https://target/admin/ \\\n           \
+                         --brute-default-creds-only"
+                    )
+                })?;
                 brute::run(brute_tcp_text::HttpBasicAdapter { url }, cfg, pairs).await?
             }
             "http-form" => {
-                let spec = args
-                    .brute_form_spec
-                    .clone()
-                    .ok_or_else(|| anyhow!("--brute-form-spec is required for http-form"))?;
+                let spec = args.brute_form_spec.clone().ok_or_else(|| {
+                    anyhow!(
+                        "--brute-protocol http-form needs --brute-form-spec describing the form, \
+                         e.g. --brute-form-spec 'url=https://app/login,user=username,pass=password,fail=Invalid'. \
+                         --brute-target is NOT used here — the URL is inside the spec."
+                    )
+                })?;
                 let adapter = brute_tcp_text::parse_form_spec(&spec)?;
                 brute::run(adapter, cfg, pairs).await?
             }
@@ -1546,8 +1595,27 @@ async fn main() -> Result<()> {
         );
     }
 
-    // 2) Host discovery (skipped for -sL list scan)
-    if !args.skip_discovery && !matches!(scan_type, ScanType::List) {
+    // 2) Host discovery (skipped for -sL list scan).
+    // ACK scan's whole purpose is bypassing stateful firewalls that
+    // also block standard host-discovery probes — running discovery
+    // first will mis-report up hosts as down (Fase 24 bug #4). Treat
+    // -sA as implicit -Pn unless the user explicitly disabled the
+    // auto-skip with --discover-on-ack. Window/Maimon scans share the
+    // same rationale.
+    let implicit_pn_for_stealth = matches!(
+        scan_type,
+        ScanType::Ack | ScanType::Window | ScanType::Maimon
+    );
+    if implicit_pn_for_stealth && !args.skip_discovery {
+        eprintln!(
+            "[i] {:?} scan implies -Pn (skipping host discovery — that's the point \
+             of an ACK/Window/Maimon scan). Pass --discover-on-ack to override.",
+            scan_type
+        );
+    }
+    let effective_skip_discovery = args.skip_discovery
+        || (implicit_pn_for_stealth && !args.discover_on_ack);
+    if !effective_skip_discovery && !matches!(scan_type, ScanType::List) {
         let before = targets.len();
 
         // Split off LAN-local IPv4 targets and try ARP first when --PR or
@@ -2089,6 +2157,16 @@ async fn main() -> Result<()> {
     // 5) Output — fold in any results carried forward from --resume-from
     // so reports cover the full host list, not just this session.
     let mut sorted: Vec<HostResult> = results;
+    // Honor --Pn (effective_skip_discovery) post-scan: stealth raw scans
+    // (-sF/-sN/-sX/-sA/-sW/-sM) compute host.up from "did any probe yield
+    // an interesting state?" — but on a fully-firewalled or quiet target,
+    // every probe legitimately gets no response and the host gets marked
+    // down even though the user said "treat as up". Fase 24 bug #8.
+    if effective_skip_discovery {
+        for h in sorted.iter_mut() {
+            h.up = true;
+        }
+    }
     if !resumed_completed.is_empty() {
         sorted.extend(resumed_completed.clone());
     }
@@ -2272,6 +2350,7 @@ async fn main() -> Result<()> {
     let want_smtp = args.smtp_audit || args.auth_audit;
     if (want_ssh || want_smb || want_rdp || want_smtp) && !was_cancelled {
         let auth_dur = timeout_dur.min(std::time::Duration::from_secs(8));
+        let mut audited_anything = false;
         for h in sorted.iter().filter(|h| h.up) {
             let host_label = h.target.display();
             for p in &h.ports {
@@ -2279,6 +2358,13 @@ async fn main() -> Result<()> {
                     continue;
                 }
                 let host_port = format!("{}:{}", h.target.ip, p.port);
+                let standard_port = (want_ssh && p.port == 22)
+                    || (want_smb && (p.port == 445 || p.port == 139))
+                    || (want_rdp && p.port == 3389)
+                    || (want_smtp && (p.port == 25 || p.port == 465 || p.port == 587));
+                if standard_port {
+                    audited_anything = true;
+                }
                 if want_ssh && p.port == 22 {
                     match ssh_audit::audit(h.target.ip, p.port, auth_dur).await {
                         Ok(a) => {
@@ -2365,6 +2451,7 @@ async fn main() -> Result<()> {
                         Err(e) => eprintln!("[!] rdp-audit {}:{}: {}", host_label, p.port, e),
                     }
                 }
+                let _ = standard_port; // suppress unused-variable lint
                 if want_smtp && (p.port == 25 || p.port == 465 || p.port == 587) {
                     match smtp_audit::audit(h.target.ip, p.port, auth_dur).await {
                         Ok(a) => {
@@ -2396,6 +2483,24 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+        }
+        // Fase 24 bug #11: --auth-audit was silent when none of the
+        // open ports matched the audited protocols' standard ports
+        // (e.g. only 554/1935/8000/9000 open). Now we tell the user.
+        if !audited_anything {
+            let mut wanted = Vec::new();
+            if want_ssh { wanted.push("SSH:22"); }
+            if want_smb { wanted.push("SMB:139,445"); }
+            if want_rdp { wanted.push("RDP:3389"); }
+            if want_smtp { wanted.push("SMTP:25,465,587"); }
+            eprintln!(
+                "[i] --auth-audit / --{{ssh,smb,rdp,smtp}}-audit ran but no open \
+                 port matched the protocols' standard ports ({}). Auth-audit \
+                 currently does not probe non-standard ports — open a feature \
+                 request if you have evidence a target runs one of these \
+                 services on an unusual port.",
+                wanted.join(" ")
+            );
         }
     }
 
@@ -2708,6 +2813,58 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// True when the user's CLI args trigger a probe / utility mode that
+/// returns early in `main()` before the scan + file-output stage. Used
+/// to warn when `--oA` etc. are combined with these and would otherwise
+/// silently produce no output files.
+fn is_probe_only_invocation(args: &cli::Cli) -> bool {
+    args.brute_protocol.is_some()
+        || args.cve_for.is_some()
+        || args.cve_db.is_some()
+        || args.update_cve_db
+        || args.update_exploit_refs
+        || args.threat_intel_misp.is_some()
+        || args.threat_intel_match
+        || args.msf_ping
+        || args.msf_import.is_some()
+        || args.msf_suggest_cve.is_some()
+        || args.msf_fire.is_some()
+        || args.vuln_ssl_ccs.is_some()
+        || args.vuln_ssl_dh.is_some()
+        || args.vuln_known_key.is_some()
+        || args.vuln_ms17_010.is_some()
+        || args.snmp_enum.is_some()
+        || args.ldap_enum.is_some()
+        || args.smb_deep.is_some()
+        || args.rpc_dump.is_some()
+        || args.dhcp_discover
+        || args.mdns_discover
+        || args.llmnr_probe
+        || args.wsdd_probe
+        || args.nbt_broadcast
+        || args.ble_scan.is_some()
+        || args.os_fp_v6.is_some()
+        || args.os_fp_v6_multi.is_some()
+        || args.osdb_submit.is_some()
+        || args.container_scan.is_some()
+        || args.ics_scan.is_some()
+        || args.iot_discover.is_some()
+        || args.apk_scan.is_some()
+        || args.ipa_scan.is_some()
+        || args.web_crawl.is_some()
+        || args.owasp_scan.is_some()
+        || args.cms_detect.is_some()
+        || args.http_methods.is_some()
+        || args.shellshock.is_some()
+        || args.webdav_probe.is_some()
+        || args.csp_cors.is_some()
+        || args.script_help
+        || args.iflist
+        || args.check_update
+        || args.self_update
+        || args.install_npcap
 }
 
 fn print_diff(host_disp: &str, d: &db::PortDiff) {

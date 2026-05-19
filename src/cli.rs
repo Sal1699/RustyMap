@@ -63,15 +63,17 @@ pub struct Cli {
     #[arg(long = "sS", group = "scan_type")]
     pub scan_syn: bool,
 
-    /// TCP FIN scan
+    /// TCP FIN scan. Mutually exclusive with other scan types (only one
+    /// scan strategy runs per invocation — for multiple, run rustymap
+    /// twice with different flags).
     #[arg(long = "sF", group = "scan_type")]
     pub scan_fin: bool,
 
-    /// TCP NULL scan
+    /// TCP NULL scan. Mutually exclusive with other scan types.
     #[arg(long = "sN", group = "scan_type")]
     pub scan_null: bool,
 
-    /// TCP Xmas scan
+    /// TCP Xmas scan. Mutually exclusive with other scan types.
     #[arg(long = "sX", group = "scan_type")]
     pub scan_xmas: bool,
 
@@ -121,10 +123,10 @@ pub struct Cli {
     #[arg(long = "PO", value_name = "PROTO")]
     pub ping_proto: Option<u8>,
 
-    /// IPv6 OS fingerprint (best-effort). Probes a single port and
-    /// classifies into Windows / Unix-like / network-gear / unknown.
-    /// Confidence is capped low (≤70%) — IPv6 fingerprinting has
-    /// fewer signals than v4 stack-fp.
+    /// [ALPHA — requires --experimental-confirm] IPv6 OS fingerprint
+    /// (best-effort). Probes a single port and classifies into Windows /
+    /// Unix-like / network-gear / unknown. Confidence capped at 70% —
+    /// IPv6 fingerprinting has fewer signals than v4 stack-fp.
     #[arg(long = "os-fp-v6", value_name = "HOST")]
     pub os_fp_v6: Option<String>,
 
@@ -304,9 +306,9 @@ pub struct Cli {
     #[arg(long = "cpe-out")]
     pub cpe_out: bool,
 
-    /// Generate a community OS-DB submission pack for HOST, using
-    /// LABEL as the human-readable fingerprint name. Output goes
-    /// to stdout, or to --osdb-submit-out FILE.
+    /// [ALPHA — requires --experimental-confirm] Generate a community
+    /// OS-DB submission pack for HOST, using LABEL as the human-readable
+    /// fingerprint name. Output goes to stdout, or to --osdb-submit-out FILE.
     #[arg(long = "osdb-submit", value_name = "HOST:LABEL")]
     pub osdb_submit: Option<String>,
 
@@ -443,13 +445,22 @@ pub struct Cli {
     #[arg(long = "brute-http-url", value_name = "URL")]
     pub brute_http_url: Option<String>,
 
-    /// Idle (zombie) scan — spoofs probes via a zombie with incremental IP ID (root/admin)
+    /// [ALPHA — requires --experimental-confirm] Idle (zombie) scan —
+    /// spoofs probes via a zombie with incremental IP ID. Requires
+    /// root/admin AND a zombie host with predictable IPID; modern OSes
+    /// use randomized IPID so most zombies don't actually work.
     #[arg(long = "sI", value_name = "ZOMBIE[:PORT]", group = "scan_type")]
     pub scan_idle: Option<String>,
 
     /// Skip host discovery, scan all hosts as if up
     #[arg(long = "Pn")]
     pub skip_discovery: bool,
+
+    /// Force host discovery before an ACK/Window/Maimon scan. By default
+    /// those scans imply -Pn since the whole point is bypassing
+    /// stateful firewalls that also drop discovery probes.
+    #[arg(long = "discover-on-ack")]
+    pub discover_on_ack: bool,
 
     /// Ping scan only (no port scan)
     #[arg(long = "sn")]
@@ -984,8 +995,9 @@ pub struct Cli {
     #[arg(long = "auth-audit")]
     pub auth_audit: bool,
 
-    /// Web crawl from a seed URL — BFS with robots.txt respect,
-    /// records every URL + form + parameter discovered.
+    /// [ALPHA — requires --experimental-confirm] Web crawl from a seed
+    /// URL — BFS with robots.txt respect, records every URL + form +
+    /// parameter discovered. Slower than ZAP, no JS rendering.
     #[arg(long = "web-crawl", value_name = "URL")]
     pub web_crawl: Option<String>,
 
@@ -1005,9 +1017,11 @@ pub struct Cli {
     #[arg(long = "no-robots")]
     pub no_robots: bool,
 
-    /// Run OWASP active probes (XSS, SQLi, open-redirect, SSRF) on
-    /// every parameter discovered by --web-crawl. Implies --web-crawl
-    /// when given a URL.
+    /// [ALPHA — requires --experimental-confirm] Run OWASP active probes
+    /// (XSS, SQLi, open-redirect, SSRF) on every parameter discovered by
+    /// --web-crawl. Implies --web-crawl when given a URL. High false-
+    /// positive rate; dedicated tools (ZAP, sqlmap) outperform on real
+    /// engagements.
     #[arg(long = "owasp-scan", value_name = "URL")]
     pub owasp_scan: Option<String>,
 
@@ -1043,15 +1057,17 @@ pub struct Cli {
     #[arg(long = "cloud-fingerprint", value_name = "DOMAIN")]
     pub cloud_fingerprint: Option<String>,
 
-    /// Static analysis of an Android APK: AndroidManifest.xml string-pool
-    /// parse (permissions, components, flag refs), classes.dex sweep
-    /// for SSL-pinning libraries and hardcoded secrets.
+    /// [ALPHA — requires --experimental-confirm] Static analysis of an
+    /// Android APK: AndroidManifest.xml string-pool parse, classes.dex
+    /// sweep for SSL-pinning libraries and hardcoded secrets. High FP
+    /// rate vs mobsf.
     #[arg(long = "apk-scan", value_name = "FILE")]
     pub apk_scan: Option<String>,
 
-    /// Static analysis of an iOS IPA: Info.plist parse (bundle id,
-    /// URL schemes, ATS exceptions), Mach-O sweep for TrustKit /
-    /// NSPinnedDomains and hardcoded secrets.
+    /// [ALPHA — requires --experimental-confirm] Static analysis of an
+    /// iOS IPA: Info.plist parse, Mach-O sweep for TrustKit / pinning
+    /// libs and hardcoded secrets. Only Info.plist + Mach-O strings —
+    /// no entitlements or embedded provisioning profile parsing.
     #[arg(long = "ipa-scan", value_name = "FILE")]
     pub ipa_scan: Option<String>,
 
@@ -1121,8 +1137,10 @@ pub struct Cli {
     #[arg(long = "siem-out", value_name = "FILE")]
     pub siem_out: Option<String>,
 
-    /// Sync MISP IoCs from URL into the local cache and exit.
-    /// Pair with --misp-api-key.
+    /// [ALPHA — requires --experimental-confirm] Sync MISP IoCs from
+    /// URL into the local cache and exit. Pair with --misp-api-key.
+    /// Pull-only; no de-duplication across syncs; minimal rate-limit
+    /// handling.
     #[arg(long = "threat-intel-misp", value_name = "URL")]
     pub threat_intel_misp: Option<String>,
 
@@ -1134,15 +1152,16 @@ pub struct Cli {
     #[arg(long = "misp-days", default_value_t = 30)]
     pub misp_days: u32,
 
-    /// Match scan targets against the cached MISP IoCs (loaded from
-    /// ~/.cache/rustymap/misp.json). Surfaces hits as critical
-    /// findings.
+    /// Match scan targets against the cached MISP IoCs (~/.cache/
+    /// rustymap/misp.json). Surfaces hits as critical findings.
     #[arg(long = "threat-intel-match")]
     pub threat_intel_match: bool,
 
-    /// ICS/SCADA protocol probe: Modbus/TCP (502), Siemens S7 (102),
-    /// DNP3 (20000), EtherNet/IP (44818), BACnet/IP (47808 UDP).
-    /// Read-only — single well-formed request per protocol.
+    /// [ALPHA — requires --experimental-confirm] ICS/SCADA protocol
+    /// probe: Modbus/TCP (502), Siemens S7 (102), DNP3 (20000),
+    /// EtherNet/IP (44818), BACnet/IP (47808 UDP). Read-only — single
+    /// well-formed request per protocol. Validated against Conpot
+    /// honeypots only; real PLCs may behave differently.
     #[arg(long = "ics-scan", value_name = "HOST")]
     pub ics_scan: Option<String>,
 
@@ -1172,10 +1191,12 @@ pub struct Cli {
     pub delay_jitter: u8,
 
     /// Plain-language gloss of every flag in the supplied invocation.
-    /// Pass the args as a single quoted string, or use the literal
-    /// keyword `last` to explain the most recent run from --history.
-    #[arg(long = "explain", value_name = "ARGS")]
-    pub explain: Option<String>,
+    /// Accepts either a single quoted string (`--explain "--sT 10.0.0.5"`)
+    /// OR a sequence of args on the command line (`--explain --sT 10.0.0.5`).
+    /// Use the literal keyword `last` to explain the most recent run
+    /// from --history.
+    #[arg(long = "explain", value_name = "ARGS", num_args = 1.., allow_hyphen_values = true)]
+    pub explain: Option<Vec<String>>,
 
     /// List the Rhai-script catalog (built-in + user) with structured
     /// metadata — name, source, category, severity, tags. Honors the

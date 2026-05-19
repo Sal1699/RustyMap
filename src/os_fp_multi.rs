@@ -94,14 +94,26 @@ pub fn rank(host: &HostResult, primary: OsGuess, top_n: usize) -> OsCandidateLis
         }
     }
 
-    // Normalise to 0..=100 confidence
-    let max_score = scores.values().map(|(s, _)| *s).max().unwrap_or(1).max(1);
+    // Normalise to a real probability distribution: divide by the
+    // SUM of positive scores, not the max. Previously we divided by
+    // max_score, which made the top candidate ~99% and every other
+    // candidate a fraction of *that* — so the column labelled "%"
+    // could sum to anything (>100% on multi-family ambiguity). With
+    // sum-normalisation the displayed shares sum to ≤100 (rounding
+    // can shave 1-2 points but never overshoot).
+    let total_score: i32 = scores
+        .values()
+        .map(|(s, _)| (*s).max(0))
+        .sum::<i32>()
+        .max(1);
     let mut candidates: Vec<OsCandidate> = scores
         .into_iter()
         .filter(|(_, (s, _))| *s > 0)
         .map(|(family, (score, signals))| OsCandidate {
             family: family.to_string(),
-            confidence: ((score as f64 / max_score as f64) * 100.0).round().min(99.0) as u8,
+            confidence: ((score as f64 / total_score as f64) * 100.0)
+                .round()
+                .clamp(0.0, 99.0) as u8,
             signals,
         })
         .collect();

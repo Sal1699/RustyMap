@@ -99,9 +99,13 @@ fn emit_port(out: &mut String, fmt: SiemFormat, ts: &DateTime<Local>, h: &HostRe
             ));
         }
         SiemFormat::Leef => {
-            // LEEF:2.0|Vendor|Product|Version|EventID|delim|key=value...
+            // LEEF:2.0|Vendor|Product|Version|EventID|delim|key=value<delim>key=value...
+            // Use TAB as delim — QRadar's default ingestion expects it,
+            // and the previous "^" + "=^" combo was malformed (extra
+            // caret after =) and broke out-of-the-box ingestion. Fase 24
+            // bug #14.
             out.push_str(&format!(
-                "{} LEEF:2.0|{}|{}|{}|port_open|^|dst=^{}^dstport=^{}^hostname=^{}\n",
+                "{} LEEF:2.0|{}|{}|{}|port_open|\t|dst={}\tdstport={}\thostname={}\n",
                 ts.to_rfc3339_opts(SecondsFormat::Secs, true),
                 VENDOR, PRODUCT, PRODUCT_VERSION,
                 host, port, hostname
@@ -154,7 +158,7 @@ fn emit_finding(out: &mut String, fmt: SiemFormat, ts: &DateTime<Local>, f: &Fin
         }
         SiemFormat::Leef => {
             out.push_str(&format!(
-                "{} LEEF:2.0|{}|{}|{}|{}|^|src=^{}^msg=^{}^sev=^{}\n",
+                "{} LEEF:2.0|{}|{}|{}|{}|\t|src={}\tmsg={}\tsev={}\n",
                 ts.to_rfc3339_opts(SecondsFormat::Secs, true),
                 VENDOR, PRODUCT, PRODUCT_VERSION,
                 f.kind, f.host, f.detail, severity
@@ -252,10 +256,13 @@ mod tests {
     }
 
     #[test]
-    fn leef_line_uses_caret_delimiter() {
+    fn leef_line_uses_tab_delimiter_per_qradar_default() {
         let out = render(SiemFormat::Leef, &[host([10, 0, 0, 2], 443)], &[]);
         assert!(out.contains("LEEF:2.0|"));
-        assert!(out.contains("dstport=^443"));
+        // Header field 6 = delim char (tab); body fields = key=value\tkey=value
+        assert!(out.contains("|\t|"));
+        assert!(out.contains("dstport=443"));
+        assert!(!out.contains("dstport=^"));
     }
 
     #[test]

@@ -24,7 +24,10 @@ pub struct CveMatch {
 }
 
 pub fn lookup(product: &str, version: &str, limit: usize) -> Result<CveMatch> {
-    let conn = nvd::open_cache().context("opening NVD cache (run --update-cve-db first?)")?;
+    let conn = nvd::open_cache().context(
+        "NVD cache not found at ~/.cache/rustymap/nvd.sqlite. \
+         Run `rustymap --update-cve-db` first (downloads ~80 MB of NVD JSON)."
+    )?;
     let entries = nvd::lookup(&conn, product, version, limit)?;
     Ok(CveMatch {
         product: product.to_string(),
@@ -81,7 +84,15 @@ pub fn print_match(m: &CveMatch) {
         .bold()
     );
     if m.matches.is_empty() {
-        println!("  {}", "no NVD entries found (cache may be empty — run --update-cve-db)".dimmed());
+        println!(
+            "  {}",
+            "no NVD entries matched. Causes (in order of likelihood):"
+                .yellow().bold()
+        );
+        println!("    1. Cache is empty or stale — run `rustymap --update-cve-db`");
+        println!("    2. Product name differs from CPE convention — try lowercase, swap dashes/spaces");
+        println!("       e.g. 'OpenSSH 7.4p1' → 'openssh:7.4p1', 'Apache httpd' → 'apache_http_server'");
+        println!("    3. Version really has no published CVEs at the named match level");
         return;
     }
     for e in &m.matches {
