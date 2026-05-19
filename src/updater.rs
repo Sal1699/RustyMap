@@ -309,10 +309,46 @@ fn swap_in(new_bin: &Path) -> Result<()> {
 
     #[cfg(unix)]
     {
-        std::fs::rename(new_bin, &exe)
-            .with_context(|| format!("rename {:?} → {:?}", new_bin, exe))?;
-        Ok(())
+        // rename(2) fails with EXDEV (errno 18) when source and target
+        // live on different filesystems — happens on Kali/Debian where
+        // /tmp is tmpfs and /usr/local/bin is the root ext4. Fall back
+        // to copy-then-atomic-rename via a sibling staging file in the
+        // target's own directory so the second rename is intra-fs.
+        match std::fs::rename(new_bin, &exe) {
+            Ok(()) => Ok(()),
+            Err(e) if e.raw_os_error() == Some(18) => {
+                cross_fs_install(new_bin, &exe)
+            }
+            Err(e) => Err(anyhow!("rename {:?} → {:?}: {}", new_bin, exe, e)),
+        }
     }
+}
+
+#[cfg(unix)]
+fn cross_fs_install(new_bin: &Path, exe: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let parent = exe
+        .parent()
+        .ok_or_else(|| anyhow!("target path has no parent: {:?}", exe))?;
+    let staging = parent.join(format!(".rustymap-new-{}", std::process::id()));
+    std::fs::copy(new_bin, &staging).with_context(|| {
+        format!(
+            "cross-fs copy {:?} → {:?} (fallback after EXDEV)",
+            new_bin, &staging
+        )
+    })?;
+    let mut perm = std::fs::metadata(&staging)?.permissions();
+    perm.set_mode(0o755);
+    std::fs::set_permissions(&staging, perm)?;
+    // Now src and dst are on the same filesystem — rename is atomic.
+    std::fs::rename(&staging, exe).with_context(|| {
+        format!(
+            "final rename {:?} → {:?} (cross-fs fallback)",
+            &staging, exe
+        )
+    })?;
+    let _ = std::fs::remove_file(new_bin);
+    Ok(())
 }
 
 fn check_writable(exe: &Path) -> Result<()> {
@@ -473,5 +509,25 @@ mod tests {
         assert_eq!(asset_name("linux-x86_64"), "rustymap-linux-x86_64.tar.gz");
         assert_eq!(asset_name("macos-aarch64"), "rustymap-macos-aarch64.tar.gz");
         assert_eq!(asset_name("windows-x86_64"), "rustymap-windows-x86_64.zip");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cross_fs_install_intra_fs_smoke() {
+        // We can't easily set up two filesystems in a unit test, but we
+        // can verify the helper works when src/dst are on the same fs
+        // (no actual EXDEV): copy + chmod + atomic rename still
+        // produces a binary at the target path.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("rustymap-xfs-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("new-bin");
+        let dst = dir.join("installed");
+        std::fs::write(&src, b"#!/bin/sh\necho ok\n").unwrap();
+        cross_fs_install(&src, &dst).unwrap();
+        let meta = std::fs::metadata(&dst).unwrap();
+        assert_eq!(meta.permissions().mode() & 0o777, 0o755);
+        assert_eq!(std::fs::read(&dst).unwrap(), b"#!/bin/sh\necho ok\n");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -4,6 +4,20 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.66.1] - 2026-05-19
+- **Bugfix:** `rustymap --update` on Linux distros where `/tmp` is
+  `tmpfs` (Kali, recent Debian, Fedora, most systemd setups) was
+  failing with `Invalid cross-device link (os error 18)`. Root cause:
+  `swap_in` called `std::fs::rename(/tmp/rustymap, /usr/local/bin/
+  rustymap)` and rename(2) returns EXDEV when source and target live
+  on different filesystems. Fix: detect `errno == 18` and fall back
+  to a copy-then-atomic-rename via a sibling staging file inside the
+  target directory, so the final rename is intra-filesystem and
+  still atomic. Permissions are explicitly set to 0o755 on the
+  staged binary before the rename. Added `cross_fs_install_intra_fs_smoke`
+  unit test (Unix only — Windows uses the rename-self trick and is
+  unaffected). 473/473 tests pass on Windows, 474/474 on Unix.
+
 ## [0.66.0] - 2026-05-19
 - **Fase 24 — Lab validation infrastructure.** Pivot from breadth to
   hardening. No new features; the release adds the tier system, the
