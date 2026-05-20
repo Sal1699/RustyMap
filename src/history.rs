@@ -86,8 +86,12 @@ pub fn load(last_n: usize) -> Result<Vec<HistoryEntry>> {
             all.push(e);
         }
     }
-    let take = all.len().saturating_sub(last_n.saturating_sub(1).min(all.len()));
-    Ok(all.split_off(take.saturating_sub(0)))
+    // Bug-14 (v0.66.4): the previous formula
+    // `len - min(last_n-1, len)` always returned an empty slice for
+    // last_n=1 (the very case `--explain last` cares about).
+    // Correct math: split off at index `len - min(last_n, len)`.
+    let take = all.len().saturating_sub(last_n.min(all.len()));
+    Ok(all.split_off(take))
 }
 
 pub fn clear() -> Result<()> {

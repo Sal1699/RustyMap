@@ -24,7 +24,12 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+// Bug-20 (v0.66.4): serialize variants in lowercase so JSON output
+// matches the `label()` used by the table display (was PascalCase
+// "Critical" in JSON but "crit" in --script-list — inconsistent for
+// downstream parsers).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     Info,
     Low,
@@ -200,21 +205,24 @@ pub fn print_catalog(catalog: &[PluginMeta], filter: &CatalogFilter) {
         return;
     }
     println!(
-        "  {:<28} {:<10} {:<10} {:<6} TAGS",
-        "NAME".bold(), "SOURCE".bold(), "CATEGORY".bold(), "SEV".bold()
+        "  {:<28} {:<10} {:<10} {:<10} TAGS",
+        "NAME".bold(), "SOURCE".bold(), "CATEGORY".bold(), "SEVERITY".bold()
     );
     for m in filtered {
+        // Bug-20 (v0.66.4): use full lowercase labels matching JSON
+        // output (`Severity::label()`). Previous "crit"/"med" 4-char
+        // shorthand split parsers between the display and the export.
         let sev_color = match m.severity {
-            Some(Severity::Critical) => "crit".red().bold().to_string(),
+            Some(Severity::Critical) => "critical".red().bold().to_string(),
             Some(Severity::High) => "high".red().to_string(),
-            Some(Severity::Medium) => "med".yellow().to_string(),
+            Some(Severity::Medium) => "medium".yellow().to_string(),
             Some(Severity::Low) => "low".dimmed().to_string(),
             Some(Severity::Info) => "info".dimmed().to_string(),
             None => "-".dimmed().to_string(),
         };
         let source_short = if m.source == "builtin" { "builtin".green().to_string() } else { "user".cyan().to_string() };
         println!(
-            "  {:<28} {:<10} {:<10} {:<6} {}",
+            "  {:<28} {:<10} {:<10} {:<10} {}",
             m.name,
             source_short,
             m.category.as_deref().unwrap_or("-"),

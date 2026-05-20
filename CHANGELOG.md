@@ -4,6 +4,64 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.66.4] - 2026-05-20
+- **Fase 24 — fourth lab-report bundle (12 bugs).** Single drop.
+  475/475 tests pass (+2 BUG-10 regression tests), release clean.
+- **BUG-10 (critical) — `--oJ` / `--oG` regression test.** The JSON
+  output path was visibly correct on Windows (couldn't reproduce
+  the Linux empty-array). Added explicit regression tests in
+  `json_out::tests` that assert every Open port from `HostResult`
+  appears in the serialized JSON. If the Linux failure recurs on
+  v0.66.4, please report with the exact `--script-list` /
+  `--script-catalog` JSON to localize.
+- **BUG-11 — `--diff-against` silent exit 0 on parse failure.**
+  Now propagates the error so the process exits non-zero. Output
+  pipelines see the failure.
+- **BUG-12 — `--version-intensity 10` / `--delay-jitter 150`
+  silently broken.** Added clap `value_parser!(u8).range(0..=9)`
+  and `range(0..=100)` respectively. Out-of-range values now fail
+  at parse time with a clear "X is not in 0..=9" message.
+- **BUG-13 — `999.999.999.999` silently resolved to `127.0.0.1`.**
+  Pre-check in `target::expand_one`: any 4-dotted-numeric spec
+  that fails IpAddr parse is rejected explicitly with "octets
+  must be 0-255". DNS fallback is bypassed for these.
+- **BUG-14 — `--explain last` returned an empty command.**
+  `history::load(1)` had an off-by-one in the slice math
+  (`split_off(len)` always returned empty for last_n=1). Fixed
+  formula: `split_off(len - min(last_n, len))`.
+- **BUG-15 — `--evasion invalid_preset` silently accepted on
+  -sT.** The validation lived inside `build_evasion_config`
+  which is only called by raw scans, so connect-scan never
+  validated. Now a pre-flight check rejects unknown preset names
+  at top of main with the valid set listed.
+- **BUG-16 — OS fingerprint over-classified TTL≥128 as Cisco.**
+  TTL=255 is the default for Solaris, FreeBSD, AIX, many embedded
+  Linux boxes, and IoT firmware — not just Cisco. Re-labeled the
+  TTL≥128 branch as "Network device or Unix-like (TTL≥128)" and
+  dropped its confidence from 50% to 30% so port-mix / banner
+  signals dominate the final classification.
+- **BUG-17 — Output path validated post-scan.** New pre-flight
+  loop at startup verifies every `-oN / -oG / -oJ / -oX / -oH /
+  -oM / -oP` path's parent directory exists. Saves a few minutes
+  of scan when the path is wrong.
+- **BUG-18 — `--smb-deep` raw error messages.** Wraps each
+  per-target IO error with host:port context + human-readable
+  hint ("timed out → filtered", "eof → server closed", "reset →
+  RST", "refused → TCP/445 refused").
+- **BUG-19 — `-p abc` Rust internal error.** `ports::parse_ports`
+  now wraps every `parse::<u32>()` failure with "invalid port
+  '<token>' in -p/--ports '<spec>': expected …" plus the format
+  reminder.
+- **BUG-20 — Severity casing JSON vs display.** `Severity` enum
+  now derives `#[serde(rename_all = "lowercase")]` so JSON exports
+  match display labels. `--script-list` SEV column widened to
+  show full "critical" / "medium" instead of truncated "crit" /
+  "med". Output is consistent for downstream parsers.
+- **BUG-21 — `--top-ports 70000` silently clamped.** `top_ports`
+  field type changed to `Option<u32>` with `range(1..=65535)`
+  validator. Out-of-range now fails at parse with a clear
+  message.
+
 ## [0.66.3] - 2026-05-20
 - **Fase 24 — third lab-report bundle (9 bugs).** All single-drop.
 - **BUG-01 — `default-cred-likely` false positive Tomcat on lighttpd

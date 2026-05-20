@@ -98,3 +98,63 @@ pub fn write_json(path: &str, json: &str) -> Result<()> {
     f.write_all(json.as_bytes())?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scanner::PortState;
+    use crate::scanner::PortResult;
+    use crate::target::Target;
+
+    fn host_with_ports(ip: [u8; 4], ports: Vec<u16>) -> HostResult {
+        HostResult {
+            target: Target { ip: std::net::IpAddr::V4(ip.into()), hostname: None, zone: None },
+            up: true,
+            ports: ports
+                .into_iter()
+                .map(|p| PortResult {
+                    port: p,
+                    state: PortState::Open,
+                    rtt: std::time::Duration::from_millis(1),
+                    service: None,
+                })
+                .collect(),
+            elapsed: std::time::Duration::from_millis(1),
+            os: None,
+            device: None,
+            mac: None,
+        }
+    }
+
+    #[test]
+    fn json_output_serializes_open_ports() {
+        // Bug-10 regression: --oJ used to drop the port list. This test
+        // ensures every Open port in HostResult is emitted in the JSON.
+        let h = host_with_ports([192, 168, 1, 1], vec![22, 80, 443, 3306]);
+        let json = to_json_string(
+            std::slice::from_ref(&h),
+            "Connect",
+            chrono::Local::now(),
+            0.1,
+        )
+        .unwrap();
+        assert!(json.contains("\"ports\": ["), "missing ports array");
+        for p in [22, 80, 443, 3306] {
+            assert!(
+                json.contains(&format!("\"port\": {}", p)),
+                "port {} missing from JSON: {}",
+                p, json
+            );
+        }
+    }
+
+    #[test]
+    fn json_output_serializes_multi_host_ports() {
+        let h1 = host_with_ports([10, 0, 0, 1], vec![80]);
+        let h2 = host_with_ports([10, 0, 0, 2], vec![443, 22]);
+        let json = to_json_string(&[h1, h2], "Connect", chrono::Local::now(), 0.1).unwrap();
+        assert!(json.contains("\"port\": 80"));
+        assert!(json.contains("\"port\": 443"));
+        assert!(json.contains("\"port\": 22"));
+    }
+}

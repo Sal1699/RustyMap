@@ -62,10 +62,17 @@ fn ping_ttl(ip: IpAddr, timeout: Duration) -> Option<u8> {
 
 fn family_from_ttl(ttl: u8) -> (&'static str, u8) {
     // Hop count ambiguity: most hosts are within ~30 hops.
+    // Bug-16 (v0.66.4): TTL=255 was unconditionally labelled
+    // "Network device (Cisco/router)" with 50% confidence — but 255 is
+    // ALSO the default for Solaris, FreeBSD, IBM AIX, many Linux
+    // embedded boxes, and various IoT firmware. Calling all of them
+    // "Cisco" is a flat false positive. Now: honest "network device
+    // or Unix-like" label and a confidence drop to 30% to let the
+    // port-mix / banner signals dominate the final classification.
     match ttl {
         1..=64 => ("Linux/BSD/macOS", 55),
         65..=128 => ("Windows", 55),
-        129..=255 => ("Network device (Cisco/router)", 50),
+        129..=255 => ("Network device or Unix-like (TTL≥128)", 30),
         0 => ("unknown", 0),
     }
 }

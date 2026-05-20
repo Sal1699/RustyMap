@@ -2,6 +2,19 @@ use anyhow::{anyhow, Result};
 use std::collections::BTreeSet;
 
 pub fn parse_ports(spec: &str) -> Result<Vec<u16>> {
+    // Bug-19 (v0.66.4): the previous `lhs.parse()?` propagated the
+    // raw `ParseIntError` ("invalid digit found in string") which gave
+    // the user no idea which flag was at fault. Wrap each numeric
+    // parse with explicit context naming -p / --ports and showing the
+    // offending token + spec.
+    fn parse_port_num(token: &str, full_spec: &str) -> Result<u32> {
+        token.parse::<u32>().map_err(|_| {
+            anyhow!(
+                "invalid port '{}' in -p/--ports '{}': expected a number (1-65535), a range like '22-1024', or comma-separated combinations",
+                token, full_spec
+            )
+        })
+    }
     let mut set: BTreeSet<u16> = BTreeSet::new();
 
     for part in spec.split(',') {
@@ -10,25 +23,31 @@ pub fn parse_ports(spec: &str) -> Result<Vec<u16>> {
             continue;
         }
         if let Some((lhs, rhs)) = part.split_once('-') {
-            let start: u32 = if lhs.is_empty() { 1 } else { lhs.parse()? };
-            let end: u32 = if rhs.is_empty() { 65535 } else { rhs.parse()? };
+            let start: u32 = if lhs.is_empty() { 1 } else { parse_port_num(lhs, spec)? };
+            let end: u32 = if rhs.is_empty() { 65535 } else { parse_port_num(rhs, spec)? };
             if start == 0 || end > 65535 || start > end {
-                return Err(anyhow!("Invalid port range: {}", part));
+                return Err(anyhow!(
+                    "invalid port range '{}' in -p/--ports '{}': must be 1-65535 and start ≤ end",
+                    part, spec
+                ));
             }
             for p in start..=end {
                 set.insert(p as u16);
             }
         } else {
-            let p: u32 = part.parse()?;
+            let p: u32 = parse_port_num(part, spec)?;
             if p == 0 || p > 65535 {
-                return Err(anyhow!("Port out of range: {}", p));
+                return Err(anyhow!(
+                    "port '{}' out of range (1-65535) in -p/--ports '{}'",
+                    p, spec
+                ));
             }
             set.insert(p as u16);
         }
     }
 
     if set.is_empty() {
-        return Err(anyhow!("No ports specified"));
+        return Err(anyhow!("-p/--ports '{}' produced an empty list", spec));
     }
     Ok(set.into_iter().collect())
 }

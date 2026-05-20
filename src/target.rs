@@ -159,6 +159,21 @@ async fn expand_one(
         return Ok(());
     }
 
+    // Bug-13 (v0.66.4): refuse syntactically-malformed IPv4 (e.g.
+    // "999.999.999.999") instead of letting it fall through to DNS
+    // lookup where it may resolve to localhost or some captive-portal
+    // default. If the spec looks like four dotted numeric segments,
+    // it was meant to be an IP, so we treat it as a hard error.
+    if clean.chars().filter(|c| *c == '.').count() == 3
+        && clean.split('.').all(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
+    {
+        return Err(anyhow!(
+            "'{}' looks like an IPv4 address but has out-of-range octets \
+             (each must be 0-255). Did you mean a different IP?",
+            spec
+        ));
+    }
+
     // Hostname
     if let Some(r) = resolver {
         let lookup = r.lookup_ip(spec).await.map_err(|e| {

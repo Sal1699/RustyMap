@@ -239,6 +239,20 @@ async fn main() -> Result<()> {
         args.version_intensity = 9;
     }
 
+    // Bug-15 (v0.66.4): pre-flight evasion-preset validation so a typo
+    // doesn't get silently ignored by scan dispatches that don't take
+    // the build_evasion_config path (e.g. plain --sT). The preset is
+    // re-validated at use-time too; this just promotes the early
+    // failure to non-zero exit.
+    if let Some(name) = &args.evasion_preset {
+        if evasion::EvasionPreset::from_name(name).is_none() {
+            return Err(anyhow!(
+                "unknown --evasion preset '{}' (valid: stealth | aggressive | paranoid | ghost)",
+                name
+            ));
+        }
+    }
+
     // --script-args-file: load extra `key=val` pairs and prepend to script_args.
     if let Some(path) = &args.script_args_file {
         let body = std::fs::read_to_string(path)
@@ -271,6 +285,40 @@ async fn main() -> Result<()> {
         }
         if args.output_xml.is_none() {
             args.output_xml = Some(format!("{}.xml", prefix));
+        }
+    }
+
+    // Bug-17 (v0.66.4): verify every requested output file's parent
+    // directory exists + is writable BEFORE we burn time on the scan.
+    // Previously a typo like `--oN /nonexistant/dir/out.nmap` would let
+    // the full scan run and then error at write time with the scan
+    // results lost.
+    for (flag, path_opt) in [
+        ("--oN", &args.output_normal),
+        ("--oG", &args.output_grepable),
+        ("--oJ", &args.output_json),
+        ("--oX", &args.output_xml),
+        ("--oH", &args.output_html),
+        ("--oM", &args.output_markdown),
+        ("--oP", &args.output_pdf),
+    ] {
+        if let Some(p) = path_opt {
+            let p = std::path::Path::new(p);
+            let parent = p.parent().filter(|p| !p.as_os_str().is_empty());
+            if let Some(dir) = parent {
+                if !dir.exists() {
+                    return Err(anyhow!(
+                        "{} target directory {:?} does not exist — create it before the scan or pick another path",
+                        flag, dir
+                    ));
+                }
+                if !dir.is_dir() {
+                    return Err(anyhow!(
+                        "{} target {:?} is not a directory",
+                        flag, dir
+                    ));
+                }
+            }
         }
     }
 
@@ -660,10 +708,30 @@ async fn main() -> Result<()> {
         let host_spec = host_spec.clone();
         let dur = args.timeout();
         let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
+        // Bug-18 (v0.66.4): the inner `?` propagated raw IO errors
+        // ("early eof", "deadline has elapsed", "Connection reset by
+        // peer (os error 104)") without host context. Wrap each
+        // per-target error so the user can tell which host failed and
+        // map it to a friendly cause.
         for t in &targets {
-            match smb_deep::deep_enum(t.ip, 445, dur).await? {
-                Some(f) => smb_deep::print_finding(&f),
-                None => println!("[smb-deep] {} — no NTLMSSP CHALLENGE", t.display()),
+            match smb_deep::deep_enum(t.ip, 445, dur).await {
+                Ok(Some(f)) => smb_deep::print_finding(&f),
+                Ok(None) => println!("[smb-deep] {} — no NTLMSSP CHALLENGE (port 445 reachable but server didn't negotiate)", t.display()),
+                Err(e) => {
+                    let msg = e.to_string();
+                    let hint = if msg.contains("deadline") || msg.contains("timed out") {
+                        "host filtered or SMB port closed"
+                    } else if msg.contains("eof") {
+                        "server closed the connection (SMB not listening, or session unexpectedly torn down)"
+                    } else if msg.contains("reset") || msg.contains("104") || msg.contains("10054") {
+                        "RST received (SMB service down or firewall reject)"
+                    } else if msg.contains("refused") || msg.contains("10061") {
+                        "TCP/445 connection refused"
+                    } else {
+                        "see error message"
+                    };
+                    eprintln!("[!] smb-deep {}:445 failed — {}: {}", t.display(), hint, e);
+                }
             }
         }
         return Ok(());
@@ -1795,10 +1863,7 @@ async fn main() -> Result<()> {
     let mut port_vec = if args.fast {
         top_ports::top(100)
     } else if let Some(n) = args.top_ports {
-        if n == 0 {
-            return Err(anyhow!("--top-ports must be > 0"));
-        }
-        top_ports::top(n)
+        top_ports::top(n as usize)
     } else {
         ports::parse_ports(&args.effective_ports())?
     };
@@ -2746,10 +2811,13 @@ async fn main() -> Result<()> {
         topology_svg::write(std::path::Path::new(p), &sorted)?;
     }
     if let Some(baseline) = &args.diff_against {
-        match baseline_diff::diff_against(std::path::Path::new(baseline), &sorted) {
-            Ok(d) => baseline_diff::print(&d),
-            Err(e) => eprintln!("[!] --diff-against {}: {}", baseline, e),
-        }
+        // Bug-11 (v0.66.4): a failed baseline parse used to print a
+        // warning and exit 0, so automation pipelines (CI, cron, SIEM
+        // feeders) couldn't detect that the diff didn't actually run.
+        // Propagate the error so the process exits non-zero.
+        let d = baseline_diff::diff_against(std::path::Path::new(baseline), &sorted)
+            .map_err(|e| anyhow!("--diff-against {}: {}", baseline, e))?;
+        baseline_diff::print(&d);
     }
     if args.executive_summary {
         let summary = exec_summary::build(&sorted, elapsed);

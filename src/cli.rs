@@ -36,7 +36,8 @@ pub struct Cli {
 
     /// Service detection aggressiveness (0=light, 9=all probes; default 5).
     /// Below 7 the TLS deep-probe is skipped, halving scan time on TLS ports.
-    #[arg(long = "version-intensity", value_name = "0-9", default_value_t = 5)]
+    #[arg(long = "version-intensity", value_name = "0-9", default_value_t = 5,
+          value_parser = clap::value_parser!(u8).range(0..=9))]
     pub version_intensity: u8,
 
     /// ARP discovery on LAN (auto-used when target is in same subnet)
@@ -788,9 +789,10 @@ pub struct Cli {
     #[arg(short = 'A', long = "aggressive")]
     pub aggressive: bool,
 
-    /// Scan the N most common ports (overrides -p when set)
-    #[arg(long = "top-ports", value_name = "N")]
-    pub top_ports: Option<usize>,
+    /// Scan the N most common ports (1..=65535, overrides -p when set)
+    #[arg(long = "top-ports", value_name = "N",
+          value_parser = clap::value_parser!(u32).range(1..=65535))]
+    pub top_ports: Option<u32>,
 
     /// Annotate each port with the reason for its state (syn-ack, conn-refused, no-response…)
     #[arg(long = "reason")]
@@ -1187,7 +1189,8 @@ pub struct Cli {
     /// Randomize the per-probe scan-delay by ±N% (0–100). Breaks the
     /// "constant interval" pattern simple correlators look for.
     /// Has no effect when --scan-delay is 0.
-    #[arg(long = "delay-jitter", value_name = "PCT", default_value_t = 0)]
+    #[arg(long = "delay-jitter", value_name = "PCT", default_value_t = 0,
+          value_parser = clap::value_parser!(u8).range(0..=100))]
     pub delay_jitter: u8,
 
     /// Plain-language gloss of every flag in the supplied invocation.
