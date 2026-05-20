@@ -1,3 +1,8 @@
+// @name: http-cors-wildcard
+// @description: Flag Access-Control-Allow-Origin: * on credentialed endpoints
+// @category: web
+// @severity: medium
+// @tags: http, cors
 // Flag HTTP services likely vulnerable to CORS misconfig: ACAO=*
 // combined with ACAC=true would let any site read responses.
 for p in host.ports {

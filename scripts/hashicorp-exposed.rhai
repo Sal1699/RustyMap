@@ -1,3 +1,8 @@
+// @name: hashicorp-exposed
+// @description: Detect HashiCorp Consul/Nomad UI exposed on public port
+// @category: cloud
+// @severity: high
+// @tags: hashicorp, consul, nomad
 // Flag HashiCorp services exposed on the network. Vault initial-token
 // race, Consul ACL bypass, Nomad raw-exec are all classic incidents.
 for p in host.ports {

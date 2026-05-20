@@ -4,6 +4,70 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.66.3] - 2026-05-20
+- **Fase 24 — third lab-report bundle (9 bugs).** All single-drop.
+- **BUG-01 — `default-cred-likely` false positive Tomcat on lighttpd
+  port 8080.** Script triggered on port alone, ignoring `--sV`
+  banner. Now: when service is identified, the 8080 hint only fires
+  if banner mentions tomcat/coyote/jboss/wildfly. nginx/lighttpd/
+  apache/iis/caddy/openresty banners short-circuit it.
+- **BUG-02 — CVE correlator marked HIGH when version unknown.**
+  Now: hits where version is empty AND the CVE entry has no
+  version_regex (matched on product alone) get `unconfirmed: true`,
+  the severity is downgraded (critical→medium, high→low,
+  medium→info, low→info), and the line gets a "(unconfirmed —
+  version unknown)" suffix.
+- **BUG-03 — `--sS` no auto-ARP for LAN-local Windows hosts.** Was:
+  ARP only ran when `--PR` was explicit, so Windows boxes that drop
+  ICMP came back "Host seems down" even when right next to us. Fix:
+  if any target is on the same broadcast domain AND no other
+  discovery flag was set, ARP runs automatically. ARP-alive hosts
+  + TCP discovery results for non-LAN hosts are merged.
+- **BUG-04 — FIN/NULL/Xmas scan: "closed or filtered (0 filtered)".**
+  raw_scan was throwing away Closed ports for stealth scans, leaving
+  host.ports empty and the summary line mathematically nonsensical.
+  Fix: keep all states for stealth scans, since the *distinction*
+  between Closed (RST received) and Filtered (no reply) is the
+  whole reason to run those scans. SYN scan still drops Closed to
+  avoid spam.
+- **BUG-05 — `--sA` ACK scan didn't separate filtered vs unfiltered.**
+  The output's "all closed or filtered (N filtered)" was the only
+  signal — defeating the main use case of ACK scan (firewall rule
+  mapping). Fix: when zero ports are open, print an explicit state
+  breakdown: "No open ports. State breakdown: 2 unfiltered, 3
+  filtered." Unfiltered count is now visible.
+- **BUG-06 — ARP latencies all ≈ discovery timeout.** host.elapsed
+  was scan wall-clock time, not RTT. Added `arp_discover_timed`
+  that records each reply's actual RTT. Post-scan, host.elapsed
+  is overwritten with the ARP RTT for any host that came in via
+  ARP. Output's "Host is up (Xs latency)" now reflects real ARP
+  RTT (sub-ms on a healthy LAN) instead of the 1.5s timeout.
+- **BUG-07 — 32 built-in scripts had no metadata.** `--script-list`
+  showed category="-", severity="-", tags="" for them, so
+  `--script-category` / `--script-severity` filters were useless.
+  Fix: backfilled `// @name: / @description: / @category: /
+  @severity: / @tags:` block on all 32 scripts. ALSO fixed 13 of
+  my own v0.65 NSE-port scripts that used `@key value` (no colon)
+  syntax which the parser silently ignored — converted to the
+  canonical `@key: value` form. All built-in scripts now have
+  proper metadata.
+- **BUG-08 — `active-http-title` always empty title reported.**
+  Original script had a guard against empty titles but a quirk in
+  the parser still emitted the empty line in some cases. Hardened:
+  primary `<title …>…</title>` extraction now handles attributes
+  on the tag, plus a fallback to `<meta property="og:title">` for
+  JS-rendered SPAs. Strict guard — empty titles are NEVER pushed.
+  Truncated to 200 chars to avoid log spam.
+- **BUG-09 — `--all-ports` lento (198s su LAN).** Default parallel
+  pool was 500 for T3 — at 1.5s connect timeout and ~80% filtered
+  ports on a firewalled host, the math is 65535/500 × 1.5 ≈ 198s.
+  Fix: when `--all-ports` (or `-p -`) is set at T3+, the parallel
+  pool auto-bumps to 3× `max_parallel` (default 1500). Cuts batch
+  count from 131 to ~44 → expected ~70s instead of 198s. User can
+  still override with `--max-parallel`. Lower timing levels (T0-T2)
+  stay conservative. Fase 27 will do the real perf bench.
+- 473/473 tests still pass. Release build clean.
+
 ## [0.66.2] - 2026-05-19
 - **Fase 24 — lab-report patch bundle.** Fifteen bugs found across
   the user's first two lab validation runs, all fixed in a single

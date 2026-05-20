@@ -1,3 +1,8 @@
+// @name: cookie-flags-audit
+// @description: Audit HTTP cookie flags (Secure / HttpOnly / SameSite)
+// @category: web
+// @severity: low
+// @tags: http, cookies
 // Flag Set-Cookie headers missing Secure / HttpOnly / SameSite.
 // Reasons over the HTTP banner already collected by vendor_probe.
 fn audit(banner, port) {

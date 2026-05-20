@@ -86,8 +86,12 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
     }
 
     let open_count = host.ports.iter().filter(|p| p.state == PortState::Open).count();
+    let closed_count = host.ports.iter().filter(|p| p.state == PortState::Closed).count();
+    let filtered_count = host.ports.iter().filter(|p| p.state == PortState::Filtered).count();
+    let open_filtered_count = host.ports.iter().filter(|p| p.state == PortState::OpenFiltered).count();
+    let unfiltered_count = host.ports.iter().filter(|p| p.state == PortState::Unfiltered).count();
     let total = host.ports.len();
-    let filtered = total - open_count - host.ports.iter().filter(|p| p.state == PortState::Closed).count();
+    let filtered = total - open_count - closed_count;
 
     println!(
         "Host is up ({:.3}s latency).",
@@ -124,7 +128,21 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
     }
 
     if open_count == 0 && verbose == 0 {
-        println!("All scanned ports are closed or filtered ({} filtered)", filtered);
+        // Bug-04 / Bug-05 (v0.66.3): break out the actual state counts
+        // so the user can tell apart "all RST'd" (Closed) from "all
+        // dropped" (Filtered) from "ambiguous no-reply" (OpenFiltered)
+        // from "passes the firewall" (Unfiltered, ACK-scan-specific).
+        let mut parts: Vec<String> = Vec::new();
+        if closed_count > 0 { parts.push(format!("{} closed", closed_count)); }
+        if filtered_count > 0 { parts.push(format!("{} filtered", filtered_count)); }
+        if open_filtered_count > 0 { parts.push(format!("{} open|filtered", open_filtered_count)); }
+        if unfiltered_count > 0 { parts.push(format!("{} unfiltered", unfiltered_count)); }
+        if parts.is_empty() {
+            println!("No probed ports yielded a state — likely all probes were dropped silently.");
+        } else {
+            println!("No open ports. State breakdown: {}.", parts.join(", "));
+        }
+        let _ = filtered;
         return;
     }
 

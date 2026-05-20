@@ -1328,6 +1328,19 @@ impl Cli {
             5 => self.max_parallel * 4,
             _ => self.max_parallel,
         };
+        // Bug-09 (v0.66.3): --all-ports / -p- on a 65k port range was
+        // batch-bound by the default 500-wide pool: at default 1500ms
+        // timeout, each batch waited for the slowest filtered port, so
+        // 65535/500 ≈ 131 batches × 1.5s ≈ 198s on a firewalled LAN
+        // host. Auto-triple the pool when scanning the full range so
+        // we cut batch count to ~44. User can still override with
+        // --max-parallel. Timing levels < T3 stay conservative since
+        // those modes deliberately throttle.
+        let timing_based = if (self.all_ports || self.ports == "-") && self.timing >= 3 {
+            timing_based.max(self.max_parallel * 3)
+        } else {
+            timing_based
+        };
         // --max-hostgroup caps the effective batch size below the
         // timing-derived value (matches nmap's semantics).
         if self.max_hostgroup > 0 {

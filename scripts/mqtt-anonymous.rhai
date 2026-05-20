@@ -1,3 +1,8 @@
+// @name: mqtt-anonymous
+// @description: Detect MQTT broker (1883) accepting anonymous CONNECT
+// @category: vuln
+// @severity: high
+// @tags: mqtt, broker
 // Flag MQTT broker — many IoT deployments leave allow_anonymous=true.
 for p in host.ports {
     if p.state != "open" { continue; }

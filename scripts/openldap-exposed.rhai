@@ -1,3 +1,8 @@
+// @name: openldap-exposed
+// @description: Detect OpenLDAP with anonymous bind enabled
+// @category: vuln
+// @severity: high
+// @tags: ldap, anonymous-bind
 // Flag LDAP/LDAPS reachable — verify auth & null-bind disabled.
 for p in host.ports {
     if p.state != "open" { continue; }

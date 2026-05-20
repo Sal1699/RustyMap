@@ -1,3 +1,8 @@
+// @name: tls-cert-issues
+// @description: Surface TLS cert issues (self-signed, expired, weak key)
+// @category: tls
+// @severity: medium
+// @tags: tls, certificate
 // Flag TLS certs that are expired, self-signed, or use a weak key.
 for p in host.ports {
     if p.state != "open" { continue; }

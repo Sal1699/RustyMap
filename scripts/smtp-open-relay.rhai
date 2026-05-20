@@ -1,3 +1,8 @@
+// @name: smtp-open-relay
+// @description: Probe SMTP for open-relay behavior (HELO + MAIL FROM external)
+// @category: vuln
+// @severity: medium
+// @tags: smtp, relay
 // Flag SMTP / submission ports — historical open-relay risk.
 for p in host.ports {
     if p.state != "open" { continue; }

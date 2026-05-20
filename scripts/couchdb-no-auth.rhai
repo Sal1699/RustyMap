@@ -1,12 +1,12 @@
 // Active probe: Apache CouchDB. Pre-3.0 "admin party" instances allow
 // any operation. Even on 3.x, an exposed _all_dbs to anonymous users
 // is a known misconfiguration.
-// @name couchdb-no-auth
-// @description Detect CouchDB instances readable without authentication
-// @category vuln
-// @severity high
-// @tags couchdb database
-// @author rustymap
+// @name: couchdb-no-auth
+// @description: Detect CouchDB instances readable without authentication
+// @category: vuln
+// @severity: high
+// @tags: couchdb database
+// @author: rustymap
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 5984 && p.port != 6984 { continue; }

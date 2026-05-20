@@ -1,3 +1,8 @@
+// @name: jenkins-anonymous
+// @description: Detect Jenkins instances allowing anonymous read/build
+// @category: vuln
+// @severity: critical
+// @tags: jenkins, ci
 // Flag Jenkins instance — frequent target of anonymous job execution
 // when "anyone can do anything" is left as the default auth strategy.
 for p in host.ports {

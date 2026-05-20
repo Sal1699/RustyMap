@@ -1,3 +1,8 @@
+// @name: exposed-management
+// @description: Flag management surfaces (RDP, WinRM, SSH, VNC) publicly reachable
+// @category: vuln
+// @severity: high
+// @tags: management, exposure
 // Flag mgmt-plane interfaces that historically should NOT be on the WAN.
 fn label_for(p) {
     if p == 4444 { return "Metasploit handler"; }

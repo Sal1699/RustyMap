@@ -1,12 +1,12 @@
 // Active probe: InfluxDB v1 HTTP API. SHOW DATABASES without auth on a
 // freshly installed InfluxDB returns the cluster's database list — a
 // classic admin-credentialless misconfiguration.
-// @name influxdb-no-auth
-// @description Detect InfluxDB v1 instances with anonymous query access
-// @category vuln
-// @severity high
-// @tags influxdb timeseries database
-// @author rustymap
+// @name: influxdb-no-auth
+// @description: Detect InfluxDB v1 instances with anonymous query access
+// @category: vuln
+// @severity: high
+// @tags: influxdb timeseries database
+// @author: rustymap
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 8086 { continue; }

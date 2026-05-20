@@ -353,18 +353,28 @@ pub fn run_raw_tcp_scan(
     }
     all.sort_by_key(|p| p.port);
 
+    // SYN scan is dense — drop Closed to avoid output spam.
+    // Stealth scans (FIN/NULL/Xmas/ACK/Window/Maimon) keep ALL states
+    // because the *distinction* between Closed (got RST) and Filtered
+    // (no reply) is the whole point of those scans. Bug-04 / Bug-05.
+    let drop_closed = matches!(kind, RawTcpKind::Syn);
     let interesting: Vec<PortResult> = all
         .into_iter()
-        .filter(|p| {
-            matches!(
-                p.state,
-                PortState::Open | PortState::OpenFiltered | PortState::Unfiltered
-            )
+        .filter(|p| match p.state {
+            PortState::Open | PortState::OpenFiltered | PortState::Unfiltered => true,
+            PortState::Filtered => !matches!(kind, RawTcpKind::Syn),
+            PortState::Closed => !drop_closed,
         })
         .collect();
+    let any_response = interesting
+        .iter()
+        .any(|p| !matches!(p.state, PortState::Filtered));
 
     HostResult {
-        up: !interesting.is_empty(),
+        // For stealth scans, "host is up" includes "responded with RST"
+        // (we got something back). Otherwise fall back to the old
+        // "any interesting state" heuristic.
+        up: !interesting.is_empty() && (matches!(kind, RawTcpKind::Syn) || any_response),
         target,
         ports: interesting,
         elapsed: start.elapsed(),

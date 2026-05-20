@@ -1,3 +1,8 @@
+// @name: cleartext-protocols
+// @description: Flag cleartext-credential protocols (telnet, ftp, http-basic)
+// @category: vuln
+// @severity: medium
+// @tags: cleartext, credentials
 // Flag classic cleartext-credential services exposed on the wire.
 fn label_for(p) {
     if p == 21 { return "FTP"; }

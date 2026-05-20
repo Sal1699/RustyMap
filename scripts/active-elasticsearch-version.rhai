@@ -1,3 +1,8 @@
+// @name: active-elasticsearch-version
+// @description: Active probe: fetch Elasticsearch version via GET /
+// @category: recon
+// @severity: medium
+// @tags: elasticsearch, version
 // Active probe: GET / on Elasticsearch. Without xpack security the
 // root endpoint returns cluster name + version. With security it
 // returns 401.

@@ -1,3 +1,8 @@
+// @name: snmp-public
+// @description: Detect SNMP 161 with 'public' community read access
+// @category: vuln
+// @severity: medium
+// @tags: snmp, defaults
 // Flag SNMP exposed to the network. Without --sU we can't see the
 // community string; we surface presence so the operator follows up.
 for p in host.ports {

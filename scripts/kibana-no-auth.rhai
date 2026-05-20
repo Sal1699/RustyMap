@@ -1,3 +1,8 @@
+// @name: kibana-no-auth
+// @description: Detect Kibana 5601 exposed without auth
+// @category: vuln
+// @severity: high
+// @tags: kibana, dashboard
 // Flag Kibana running without xpack.security — full ES read access.
 for p in host.ports {
     if p.state != "open" { continue; }

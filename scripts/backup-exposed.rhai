@@ -1,3 +1,8 @@
+// @name: backup-exposed
+// @description: Detect exposed backup endpoints (*.bak, *.sql, .git/HEAD)
+// @category: vuln
+// @severity: high
+// @tags: backup, exposure
 // Flag backup services reachable from the network. Restic-server with
 // --no-auth, public S3 buckets, rsnapshot exports — all common leaks.
 for p in host.ports {

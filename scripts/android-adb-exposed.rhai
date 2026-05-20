@@ -1,12 +1,12 @@
 // Active probe: Android Debug Bridge over TCP. Devices that ran
 // `adb tcpip 5555` (common on dev kits / TV boxes) accept shell
 // commands from anyone on the network with no auth.
-// @name android-adb-exposed
-// @description Detect Android Debug Bridge (adb) exposed on TCP without authentication
-// @category vuln
-// @severity critical
-// @tags android adb mobile
-// @author rustymap
+// @name: android-adb-exposed
+// @description: Detect Android Debug Bridge (adb) exposed on TCP without authentication
+// @category: vuln
+// @severity: critical
+// @tags: android adb mobile
+// @author: rustymap
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 5555 { continue; }

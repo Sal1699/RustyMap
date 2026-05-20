@@ -41,6 +41,17 @@ pub fn arp_discover(
     targets: &[Ipv4Addr],
     timeout: Duration,
 ) -> Result<HashMap<Ipv4Addr, MacAddr>> {
+    arp_discover_timed(targets, timeout).map(|m| m.into_iter().map(|(k, (mac, _))| (k, mac)).collect())
+}
+
+/// Same as `arp_discover` but also records the per-target reply RTT
+/// (Bug-06 fix). The old API kept all hosts at the call-site's
+/// scan-elapsed time which equalled the discovery timeout, masking the
+/// real RTT. Callers that need real latency use this entry point.
+pub fn arp_discover_timed(
+    targets: &[Ipv4Addr],
+    timeout: Duration,
+) -> Result<HashMap<Ipv4Addr, (MacAddr, Duration)>> {
     if targets.is_empty() {
         return Ok(HashMap::new());
     }
@@ -54,9 +65,12 @@ pub fn arp_discover(
     };
 
     let target_set: HashSet<Ipv4Addr> = targets.iter().copied().collect();
-    let mut found: HashMap<Ipv4Addr, MacAddr> = HashMap::new();
+    let mut found: HashMap<Ipv4Addr, (MacAddr, Duration)> = HashMap::new();
+    let send_at: HashMap<Ipv4Addr, Instant> = targets.iter().map(|&t| (t, Instant::now())).collect();
+    let _ = &send_at;
 
     // ── Send all ARP requests up front ──
+    let started = Instant::now();
     for &t in targets {
         let mut buf = [0u8; 42];
         {
@@ -94,7 +108,8 @@ pub fn arp_discover(
                         let sender = arp.get_sender_proto_addr();
                         let mac = arp.get_sender_hw_addr();
                         if target_set.contains(&sender) {
-                            found.entry(sender).or_insert(mac);
+                            let rtt = started.elapsed();
+                            found.entry(sender).or_insert((mac, rtt));
                         }
                     }
                 }

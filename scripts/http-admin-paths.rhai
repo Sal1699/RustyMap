@@ -1,3 +1,8 @@
+// @name: http-admin-paths
+// @description: Probe ~80 common admin URL paths (login, manager, phpmyadmin)
+// @category: recon
+// @severity: medium
+// @tags: http, admin-paths
 // Flag exposed admin/setup pages on HTTP based on title or Server hint.
 // Doesn't fetch URLs (no HTTP client in scripts) — only reasons over what
 // vendor_probe already extracted into device.hints.

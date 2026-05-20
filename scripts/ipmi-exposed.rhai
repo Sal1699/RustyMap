@@ -1,3 +1,8 @@
+// @name: ipmi-exposed
+// @description: Detect IPMI 623/UDP — historic auth bypass + cleartext
+// @category: vuln
+// @severity: critical
+// @tags: ipmi, bmc
 // Flag IPMI / BMC exposed to the network — full OOB hardware control if
 // reachable, and historically full of cipher-zero / weak-default issues.
 for p in host.ports {

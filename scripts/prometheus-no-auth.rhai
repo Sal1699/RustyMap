@@ -1,3 +1,8 @@
+// @name: prometheus-no-auth
+// @description: Detect Prometheus 9090 with /api/v1/* open
+// @category: vuln
+// @severity: high
+// @tags: prometheus, monitoring
 // Flag Prometheus / node_exporter / pushgateway exposed without auth.
 // node_exporter on 9100 leaks process list, mounted FS, kernel ver.
 fn label(p) {

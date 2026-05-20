@@ -1,3 +1,8 @@
+// @name: nfs-exposed
+// @description: Detect NFS portmap (111) + mountd export listing
+// @category: vuln
+// @severity: high
+// @tags: nfs, exposure
 // Flag NFS reachable from the network. Default exports often have no_root_squash.
 for p in host.ports {
     if p.state != "open" { continue; }

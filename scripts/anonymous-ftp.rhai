@@ -1,3 +1,8 @@
+// @name: anonymous-ftp
+// @description: Passive: flag port 21 + anonymous-friendly banner
+// @category: vuln
+// @severity: high
+// @tags: ftp, anonymous
 // Flag FTP service banners that suggest anonymous login is allowed.
 for p in host.ports {
     if p.state != "open" { continue; }

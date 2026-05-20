@@ -1,3 +1,8 @@
+// @name: kafka-no-auth
+// @description: Detect Kafka broker (9092) accepting connections without auth
+// @category: vuln
+// @severity: critical
+// @tags: kafka, broker
 // Flag Kafka brokers — default deployments have no auth on 9092 plain.
 for p in host.ports {
     if p.state != "open" { continue; }

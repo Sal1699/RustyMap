@@ -34,6 +34,12 @@ pub struct CveHit {
     pub reference: Option<String>,
     pub matched_product: String,
     pub matched_version: Option<String>,
+    /// True when we matched on product alone and the target's version
+    /// was empty/unknown. The finding is then "(unconfirmed)" because
+    /// we can't tell if the host actually runs an affected version.
+    /// Bug-02 fix (v0.66.3).
+    #[serde(default)]
+    pub unconfirmed: bool,
 }
 
 pub struct Compiled {
@@ -88,15 +94,30 @@ pub fn correlate(db: &[Compiled], hosts: &[HostResult]) -> Vec<CveHit> {
                 if let Some(vr) = &c.version_re {
                     if !vr.is_match(&version) { continue; }
                 }
+                let unconfirmed = version.is_empty();
+                // Downgrade severity when the version is unknown so the
+                // user doesn't act on an "HIGH" that's really speculative.
+                // critical → medium, high → low, medium → info, low → info.
+                let effective_severity = if unconfirmed {
+                    match c.entry.severity.to_lowercase().as_str() {
+                        "critical" => "medium".to_string(),
+                        "high" => "low".to_string(),
+                        "medium" => "info".to_string(),
+                        _ => "info".to_string(),
+                    }
+                } else {
+                    c.entry.severity.clone()
+                };
                 out.push(CveHit {
                     host: h.target.ip.to_string(),
                     port: port.port,
                     cve: c.entry.id.clone(),
-                    severity: c.entry.severity.clone(),
+                    severity: effective_severity,
                     description: c.entry.description.clone(),
                     reference: c.entry.reference.clone(),
                     matched_product: product.clone(),
                     matched_version: if version.is_empty() { None } else { Some(version.clone()) },
+                    unconfirmed,
                 });
             }
         }
@@ -112,9 +133,10 @@ pub fn print_hits(hits: &[CveHit]) {
     println!("\n-- CVE correlation --");
     for h in hits {
         let ver = h.matched_version.clone().unwrap_or_else(|| "?".into());
+        let qualifier = if h.unconfirmed { " (unconfirmed — version unknown)" } else { "" };
         println!(
-            "  [{}] {}:{} {} {} — {}",
-            h.severity.to_uppercase(), h.host, h.port, h.matched_product, ver, h.cve
+            "  [{}] {}:{} {} {} — {}{}",
+            h.severity.to_uppercase(), h.host, h.port, h.matched_product, ver, h.cve, qualifier
         );
         println!("       {}", h.description);
         if let Some(r) = &h.reference { println!("       ref: {}", r); }

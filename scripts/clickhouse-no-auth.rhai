@@ -1,12 +1,12 @@
 // Active probe: ClickHouse HTTP interface (default port 8123) without
 // auth. The /play endpoint and `SELECT 1` query both work anonymously
 // when the default user is left unauthenticated.
-// @name clickhouse-no-auth
-// @description Detect ClickHouse HTTP interface accepting queries without auth
-// @category vuln
-// @severity high
-// @tags clickhouse database http
-// @author rustymap
+// @name: clickhouse-no-auth
+// @description: Detect ClickHouse HTTP interface accepting queries without auth
+// @category: vuln
+// @severity: high
+// @tags: clickhouse database http
+// @author: rustymap
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 8123 && p.port != 8443 { continue; }

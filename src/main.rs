@@ -1615,12 +1615,29 @@ async fn main() -> Result<()> {
     }
     let effective_skip_discovery = args.skip_discovery
         || (implicit_pn_for_stealth && !args.discover_on_ack);
+    // Bug-06 RTT map lives outside the discovery block so the
+    // post-scan host.elapsed fixup at the report stage can read it.
+    let mut arp_rtt: std::collections::HashMap<std::net::Ipv4Addr, std::time::Duration> =
+        std::collections::HashMap::new();
     if !effective_skip_discovery && !matches!(scan_type, ScanType::List) {
         let before = targets.len();
 
-        // Split off LAN-local IPv4 targets and try ARP first when --PR or
-        // when we know they're on our broadcast domain (auto-fallback).
-        let prefer_arp = args.ping_arp;
+        // Split off LAN-local IPv4 targets and try ARP first when --PR
+        // OR when we have LAN-local IPv4 targets and no other discovery
+        // method was explicitly requested. Bug-03 fix (v0.66.3): Windows
+        // hosts block ICMP echo by default, so without ARP they get
+        // mis-classified as down even when they're sitting next to us
+        // on the same broadcast domain. nmap auto-ARPs LAN, so do we.
+        let any_lan_v4 = targets.iter().any(|t| matches!(
+            t.ip,
+            std::net::IpAddr::V4(v) if arp_ping::target_is_on_lan(v)
+        ));
+        let explicit_other_discovery = args.ping_icmp
+            || args.ping_timestamp
+            || args.ping_netmask
+            || args.ping_proto.is_some()
+            || !args.ping_sctp.is_empty();
+        let prefer_arp = args.ping_arp || (any_lan_v4 && !explicit_other_discovery);
         let arp_only_explicit = args.ping_arp;
         let mut arp_alive: std::collections::HashMap<std::net::Ipv4Addr, pnet::util::MacAddr> =
             std::collections::HashMap::new();
@@ -1638,8 +1655,13 @@ async fn main() -> Result<()> {
                 if args.verbose > 0 {
                     println!("ARP-pinging {} LAN host(s)", lan_v4.len());
                 }
-                match arp_ping::arp_discover(&lan_v4, args.timeout().max(std::time::Duration::from_millis(800))) {
-                    Ok(found) => arp_alive = found,
+                match arp_ping::arp_discover_timed(&lan_v4, args.timeout().max(std::time::Duration::from_millis(800))) {
+                    Ok(found) => {
+                        for (ip, (mac, rtt)) in found {
+                            arp_alive.insert(ip, mac);
+                            arp_rtt.insert(ip, rtt);
+                        }
+                    }
                     Err(e) => eprintln!("[!] ARP ping failed ({}); falling back to TCP ping", e),
                 }
             }
@@ -1664,6 +1686,21 @@ async fn main() -> Result<()> {
                     std::net::IpAddr::V6(_) => Some(t),
                 })
                 .collect()
+        } else if !arp_alive.is_empty() {
+            // Auto-ARP path (bug-03). Keep every ARP-alive LAN host as up,
+            // and run regular TCP discovery only against the non-LAN /
+            // non-ARP-responding ones.
+            let arp_ips: std::collections::HashSet<std::net::Ipv4Addr> =
+                arp_alive.keys().copied().collect();
+            let (alive_lan, rest): (Vec<_>, Vec<_>) =
+                targets.into_iter().partition(|t| match t.ip {
+                    std::net::IpAddr::V4(v) => arp_ips.contains(&v),
+                    _ => false,
+                });
+            let mut merged = alive_lan;
+            let mut rest_alive = discovery::discover_hosts(rest, args.timeout(), args.parallel()).await;
+            merged.append(&mut rest_alive);
+            merged
         } else if args.ping_icmp || args.ping_timestamp || args.ping_netmask || args.ping_proto.is_some() || !args.ping_sctp.is_empty() {
             #[cfg(windows)]
             npcap::ensure_available()?;
@@ -2165,6 +2202,19 @@ async fn main() -> Result<()> {
     if effective_skip_discovery {
         for h in sorted.iter_mut() {
             h.up = true;
+        }
+    }
+    // Bug-06 (v0.66.3): for ARP-discovered LAN hosts, replace
+    // host.elapsed (scan wall-clock, dominated by filtered-port
+    // timeouts) with the real ARP reply RTT so the displayed
+    // "latency" reflects actual proximity, not the timeout.
+    if !arp_rtt.is_empty() {
+        for h in sorted.iter_mut() {
+            if let std::net::IpAddr::V4(v) = h.target.ip {
+                if let Some(rtt) = arp_rtt.get(&v) {
+                    h.elapsed = *rtt;
+                }
+            }
         }
     }
     if !resumed_completed.is_empty() {

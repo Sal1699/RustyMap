@@ -1,3 +1,8 @@
+// @name: elasticsearch-open
+// @description: Detect Elasticsearch 9200 with public _cluster/health
+// @category: vuln
+// @severity: critical
+// @tags: elasticsearch, no-auth
 // Flag exposed Elasticsearch / Kibana clusters reachable without auth.
 for p in host.ports {
     if p.state != "open" { continue; }

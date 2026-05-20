@@ -1,12 +1,12 @@
 // Active probe: Gitea / Forgejo with open registration. A self-hosted
 // git server allowing public signups becomes a free CI compute target
 // and code-publish channel.
-// @name gitea-public-signup
-// @description Detect Gitea/Forgejo instances allowing anyone to register
-// @category info
-// @severity medium
-// @tags gitea forgejo git registration
-// @author rustymap
+// @name: gitea-public-signup
+// @description: Detect Gitea/Forgejo instances allowing anyone to register
+// @category: info
+// @severity: medium
+// @tags: gitea forgejo git registration
+// @author: rustymap
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 3000 && p.port != 80 && p.port != 443 { continue; }

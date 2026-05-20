@@ -1,3 +1,8 @@
+// @name: modern-auth-exposed
+// @description: Hint when modern-auth proxies (Authentik, Keycloak) exposed
+// @category: recon
+// @severity: medium
+// @tags: auth, exposure
 // Flag modern identity providers exposed to the public internet —
 // each carries known operator pitfalls (default admin, registration on,
 // SSO trust to all clients, etc.).

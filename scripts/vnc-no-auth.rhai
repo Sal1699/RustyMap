@@ -1,3 +1,8 @@
+// @name: vnc-no-auth
+// @description: Detect VNC server accepting no-auth or 'None' security type
+// @category: vuln
+// @severity: critical
+// @tags: vnc, no-auth
 // Flag VNC — RFB protocol allows "type 1" (no auth) by default in many
 // embedded deployments and the password version (type 2) uses an 8-char
 // truncated DES key, brute-forceable.

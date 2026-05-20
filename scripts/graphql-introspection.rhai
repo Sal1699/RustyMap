@@ -1,3 +1,8 @@
+// @name: graphql-introspection
+// @description: Detect GraphQL endpoints with introspection enabled
+// @category: web
+// @severity: medium
+// @tags: graphql, introspection
 // Flag HTTP endpoints likely serving GraphQL — introspection is on by
 // default and leaks the full schema. We only reason on what HTTP banner
 // already shows; the operator should follow up with a `__schema` query.

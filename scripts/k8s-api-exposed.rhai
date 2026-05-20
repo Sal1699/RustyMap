@@ -1,3 +1,8 @@
+// @name: k8s-api-exposed
+// @description: Detect Kubernetes API server reachable without auth
+// @category: cloud
+// @severity: critical
+// @tags: kubernetes, api
 // Flag Kubernetes API server / kubelet / etcd reachable.
 for p in host.ports {
     if p.state != "open" { continue; }

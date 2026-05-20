@@ -1,3 +1,8 @@
+// @name: rabbitmq-management
+// @description: Detect RabbitMQ management 15672 with guest/guest
+// @category: vuln
+// @severity: high
+// @tags: rabbitmq, defaults
 // Flag RabbitMQ management UI (15672/15671) — guest:guest by default.
 for p in host.ports {
     if p.state != "open" { continue; }

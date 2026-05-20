@@ -1,3 +1,8 @@
+// @name: active-redis-info
+// @description: Active probe: Redis INFO leak (version + topology + memory)
+// @category: vuln
+// @severity: critical
+// @tags: redis, no-auth, info-leak
 // Active probe: Redis INFO command. If the server responds without
 // auth, it leaks version + role + replication topology + memory.
 for p in host.ports {

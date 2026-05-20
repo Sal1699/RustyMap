@@ -1,3 +1,8 @@
+// @name: portainer-exposed
+// @description: Detect Portainer 9000 exposed (Docker management UI)
+// @category: vuln
+// @severity: critical
+// @tags: portainer, docker
 // Flag Portainer (9000/9443) — Docker/k8s/swarm UI; setup-by-first-visit
 // allows the first reachable user to claim admin if not initialized.
 for p in host.ports {

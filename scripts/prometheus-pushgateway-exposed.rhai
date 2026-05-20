@@ -2,12 +2,12 @@
 // has no native auth; if reachable it lets anyone publish (or read)
 // arbitrary metrics, including label-injection attacks into the parent
 // Prometheus.
-// @name prometheus-pushgateway-exposed
-// @description Detect Prometheus Pushgateway accepting unauthenticated metric pushes
-// @category vuln
-// @severity high
-// @tags prometheus monitoring pushgateway
-// @author rustymap
+// @name: prometheus-pushgateway-exposed
+// @description: Detect Prometheus Pushgateway accepting unauthenticated metric pushes
+// @category: vuln
+// @severity: high
+// @tags: prometheus monitoring pushgateway
+// @author: rustymap
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 9091 { continue; }

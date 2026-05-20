@@ -1,14 +1,14 @@
 // Active probe: memcached UDP "stats" leak. Memcached on UDP 11211 with
 // no auth happily replies to "stats\r\n" with version + uptime + curr_items
 // and is also a known UDP amplification vector (CVE-2018-1000115).
-// @name memcached-info
-// @description Detect memcached servers responding to unauthenticated UDP stats
-// @category vuln
-// @severity high
-// @tags memcached udp amplification ddos
-// @cve CVE-2018-1000115
-// @references https://nvd.nist.gov/vuln/detail/CVE-2018-1000115
-// @author rustymap
+// @name: memcached-info
+// @description: Detect memcached servers responding to unauthenticated UDP stats
+// @category: vuln
+// @severity: high
+// @tags: memcached udp amplification ddos
+// @cve: CVE-2018-1000115
+// @references: https://nvd.nist.gov/vuln/detail/CVE-2018-1000115
+// @author: rustymap
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 11211 { continue; }

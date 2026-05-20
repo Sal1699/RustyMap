@@ -1,3 +1,8 @@
+// @name: active-anonymous-ftp
+// @description: Active probe: confirm anonymous FTP login allowed
+// @category: recon
+// @severity: high
+// @tags: ftp, anonymous
 // Active probe: try FTP USER anonymous + PASS anonymous@.
 // Reads server greeting first to confirm we hit FTP, then attempts
 // the login. 230 = logged in, 530 = denied.

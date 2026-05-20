@@ -2,12 +2,12 @@
 // no authentication mechanism enforcing a check on the health endpoint
 // can still leak version info; combined with `initialized:false` it
 // signals a fresh, attacker-claimable instance.
-// @name vault-no-auth
-// @description Detect HashiCorp Vault instances that are uninitialized or unsealed without auth
-// @category vuln
-// @severity critical
-// @tags vault secrets hashicorp
-// @author rustymap
+// @name: vault-no-auth
+// @description: Detect HashiCorp Vault instances that are uninitialized or unsealed without auth
+// @category: vuln
+// @severity: critical
+// @tags: vault secrets hashicorp
+// @author: rustymap
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 8200 { continue; }
