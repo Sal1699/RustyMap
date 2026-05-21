@@ -4,6 +4,56 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.66.5] - 2026-05-20
+- **Fase 24 — fifth lab-report bundle.** Critical regression fix
+  + SVG corruption fix + four more validation gates. 475/475 tests
+  pass, release build clean.
+- **BUG-08 (regression) — `active-http-title` Rhai runtime error.**
+  v0.66.3's hardened parser used `lo.len` (property access) which
+  doesn't exist on Rhai 1.18 strings, causing extract_title to
+  return Unit and the next line to crash with "Unknown property
+  'len' on type '()'". Switched every length access to the global
+  `len(s)` function, added `type_of()` defensive guards. Empty
+  titles still strictly suppressed.
+- **BUG-22 (critical) — SVG topology output contained Rust source
+  code.** Found via lab report: `topology_svg::render` opened a
+  raw string literal with `r##"` but closed it with `"#` (one
+  hash). Rust skipped the early terminator and extended the
+  literal to the next `"##` four lines down, swallowing `let _ =
+  writeln!(&mut s,` and friends into the SVG output. Fixed
+  delimiters to balanced `r##"..."##`. SVG output is now valid.
+- **BUG-06 (re-fix) — ARP latencies still synthetic at ~1.5s.**
+  Root cause was deeper than just the RTT field. pnet's
+  `datalink::channel(&iface, Default::default())` uses pcap's
+  default mmap-ring buffer which batches packets up to 1s before
+  delivery — so `rx.next()` returned each ARP reply 1+ second
+  after it actually arrived. Set `read_timeout =
+  Duration::from_millis(50)` on the channel config so packets
+  flush per-arrival instead of batched.
+- **BUG-04 (follow-up) — FIN scan all-closed against Windows.**
+  Even with the v0.66.3 fix keeping Closed ports visible, Windows
+  RSTs FIN/NULL/Xmas probes per RFC 793 violation so every port
+  comes back Closed and the user can't distinguish "no open
+  ports" from "wrong scan strategy for this target". Now: when
+  the breakdown is all-Closed on FIN/NULL/Xmas, emit a hint
+  pointing the user at --sS or --sT.
+- **BUG-23 — `-t 6` silently clamped.** Added clap
+  `range(0..=5)` so out-of-range timing levels fail at parse time
+  with a clear message.
+- **BUG-25 — `--top-ports` + `-p` silent precedence.** When the
+  user combines port-selection flags, the previous silent
+  precedence (–F > –top-ports > –p) meant `-p` was effectively
+  ignored. Now emits an explicit `[!]` warning naming which flag
+  is taking effect and which were dropped.
+- **BUG-24 — `--top-ports` + `--all-ports` mutex.** Same
+  treatment in the same warning block. `--top-ports` wins and the
+  user is told.
+- **BUG-26 — `0.0.0.0/0` blocked silently.** New CIDR pre-check
+  in `target::expand_one` refuses any IPv4 prefix <12 (>1M
+  hosts) outright with a pointer to `--iR` for internet-scale
+  random sampling. Same rationale as the existing IPv6 /112 cap.
+- 475/475 tests still pass. Release build clean.
+
 ## [0.66.4] - 2026-05-20
 - **Fase 24 — fourth lab-report bundle (12 bugs).** Single drop.
   475/475 tests pass (+2 BUG-10 regression tests), release clean.

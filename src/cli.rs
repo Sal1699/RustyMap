@@ -472,7 +472,8 @@ pub struct Cli {
     pub ping_icmp: bool,
 
     /// Timing template 0-5 (0=paranoid, 5=insane)
-    #[arg(short = 't', long = "timing", default_value_t = 3)]
+    #[arg(short = 't', long = "timing", default_value_t = 3,
+          value_parser = clap::value_parser!(u8).range(0..=5))]
     pub timing: u8,
 
     /// Max parallel connections

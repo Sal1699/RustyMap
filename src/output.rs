@@ -142,6 +142,24 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
         } else {
             println!("No open ports. State breakdown: {}.", parts.join(", "));
         }
+        // Bug-04 follow-up (v0.66.5): FIN/NULL/Xmas defeated by a
+        // Windows target. Per RFC 793, Windows RSTs even on open ports
+        // (instead of dropping), so every probed port comes back
+        // Closed — and the user can't distinguish "no open ports" from
+        // "this target type defeats the scan strategy". Surface the
+        // hint when the symptom matches.
+        if matches!(scan_type, "FIN" | "NULL" | "Xmas")
+            && closed_count > 0
+            && filtered_count == 0
+            && open_filtered_count == 0
+        {
+            println!(
+                "  hint: all-closed on {} scan typically means a Windows-family target — \
+                 Windows RSTs FIN/NULL/Xmas probes per RFC 793 violation, so these scan \
+                 types can't enumerate Windows. Try --sS or --sT.",
+                scan_type
+            );
+        }
         let _ = filtered;
         return;
     }

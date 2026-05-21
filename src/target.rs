@@ -127,6 +127,25 @@ async fn expand_one(
                 ));
             }
         }
+        // Bug-26 (v0.66.5): refuse "scan the whole IPv4 internet"
+        // shapes outright. 0.0.0.0/0 (4.3B hosts) and tiny prefixes
+        // like /1, /2 silently spin the expansion loop into a hang.
+        // 4096-host cap is enforced later in main with --confirm-large
+        // but at /16 = 65k hosts this still wedges memory; we cut the
+        // door at /12 (1M hosts) which is the largest "lab subnet"
+        // anyone realistically wants.
+        if let IpNet::V4(v4net) = &net {
+            if v4net.prefix_len() < 12 {
+                return Err(anyhow!(
+                    "IPv4 CIDR {}/{} expands to {} addresses — refusing. \
+                     Use a smaller prefix (/12 = 1M hosts cap) or an explicit \
+                     address list. For internet-scale random sampling use --iR.",
+                    v4net.addr(),
+                    v4net.prefix_len(),
+                    1u64 << (32 - v4net.prefix_len() as u32)
+                ));
+            }
+        }
         for ip in net.hosts() {
             out.push(Target {
                 ip,

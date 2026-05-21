@@ -59,7 +59,18 @@ pub fn arp_discover_timed(
     let (iface, src_ip, src_mac) = pick_interface_for(targets[0])
         .ok_or_else(|| anyhow!("no interface in same subnet as {}", targets[0]))?;
 
-    let (mut tx, mut rx) = match datalink::channel(&iface, Default::default())? {
+    // Bug-06 (v0.66.5): the default pcap channel buffers packets in
+    // a 1s-batched mmap ring, so rx.next() returns each ARP reply
+    // 1+ seconds after it actually arrived — that's why every host
+    // showed `started.elapsed() ≈ 1.5s` regardless of real RTT. Set
+    // a tight read_timeout so the kernel flushes per-packet rather
+    // than batched.
+    let cfg = datalink::Config {
+        read_timeout: Some(Duration::from_millis(50)),
+        write_timeout: Some(Duration::from_millis(500)),
+        ..Default::default()
+    };
+    let (mut tx, mut rx) = match datalink::channel(&iface, cfg)? {
         Channel::Ethernet(tx, rx) => (tx, rx),
         _ => return Err(anyhow!("unsupported datalink channel")),
     };

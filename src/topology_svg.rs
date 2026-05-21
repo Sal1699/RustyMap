@@ -53,9 +53,16 @@ pub fn render(hosts: &[HostResult]) -> String {
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {} {}" font-family="monospace" font-size="11">"##,
         CANVAS_W, CANVAS_H
     );
+    // Bug-22 (v0.66.5): the closer was `"#` (one hash) while the
+    // opener used `r##"` — Rust skipped the early terminator and
+    // happily extended the raw string to the next `"##` literally
+    // several lines below, swallowing source code into the SVG
+    // output and corrupting every emitted topology file. The
+    // content also contains `"#fafafa"` so single-hash delimiters
+    // (`r#"..."#`) would close prematurely; we need `r##"..."##`.
     let _ = writeln!(
         &mut s,
-        r##"  <rect width="100%" height="100%" fill="#fafafa"/>"#
+        r##"  <rect width="100%" height="100%" fill="#fafafa"/>"##
     );
     let _ = writeln!(
         &mut s,

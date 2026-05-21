@@ -1859,7 +1859,22 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // 3) Port scan — resolve port list with -F (top 100) > --top-ports > -p
+    // 3) Port scan — resolve port list with -F (top 100) > --top-ports > -p.
+    // Bug-25 / Bug-24 (v0.66.5): warn loudly when the user combines
+    // conflicting port-selection flags so they know -p was effectively
+    // ignored. Previous behavior was silent precedence.
+    let p_was_set_explicitly = args.ports != "1-1000" && !args.ports.is_empty();
+    if args.fast && (args.top_ports.is_some() || args.all_ports || p_was_set_explicitly) {
+        eprintln!(
+            "[!] -F is taking precedence — --top-ports / --all-ports / -p were ignored. \
+             Drop -F if you want any of those to take effect."
+        );
+    } else if args.top_ports.is_some() && (args.all_ports || p_was_set_explicitly) {
+        eprintln!(
+            "[!] --top-ports is taking precedence — --all-ports / -p were ignored. \
+             Drop --top-ports if you want -p / --all-ports to take effect."
+        );
+    }
     let mut port_vec = if args.fast {
         top_ports::top(100)
     } else if let Some(n) = args.top_ports {
