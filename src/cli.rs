@@ -1332,19 +1332,22 @@ impl Cli {
             5 => self.max_parallel * 4,
             _ => self.max_parallel,
         };
-        // Bug-09 (v0.66.3): --all-ports / -p- on a 65k port range was
-        // batch-bound by the default 500-wide pool: at default 1500ms
-        // timeout, each batch waited for the slowest filtered port, so
-        // 65535/500 ≈ 131 batches × 1.5s ≈ 198s on a firewalled LAN
-        // host. Auto-triple the pool when scanning the full range so
-        // we cut batch count to ~44. User can still override with
-        // --max-parallel. Timing levels < T3 stay conservative since
-        // those modes deliberately throttle.
+        // Bug-09 v0.66.3 → v0.66.7: --all-ports / -p- on a 65k port
+        // range used to be batch-bound by the default 500-wide pool.
+        // v0.66.3 auto-tripled to 1500 — but Linux's default ulimit
+        // is 1024 fds, so 1500 concurrent connect() syscalls hit
+        // EMFILE and the scanner classified every port as Filtered,
+        // returning zero open ports on hosts that actually had ten.
+        // Now: scale to 2× (1000) which still halves wall-clock vs
+        // the old default but stays under most default ulimits.
+        // Effective_parallel() additionally clamps to fd_safe_cap()
+        // so users with tighter ulimits don't hit the ceiling.
         let timing_based = if (self.all_ports || self.ports == "-") && self.timing >= 3 {
-            timing_based.max(self.max_parallel * 3)
+            timing_based.max(self.max_parallel * 2)
         } else {
             timing_based
         };
+        let timing_based = fd_safe_cap(timing_based);
         // --max-hostgroup caps the effective batch size below the
         // timing-derived value (matches nmap's semantics).
         if self.max_hostgroup > 0 {
@@ -1353,4 +1356,38 @@ impl Cli {
             timing_based
         }
     }
+}
+
+/// Cap a parallel value so it can't request more file descriptors
+/// than the OS will let us hold open at once. Bug-09 fix v0.66.7:
+/// Linux default soft RLIMIT_NOFILE is 1024 and each concurrent
+/// TCP connect() consumes a fd; running 1500 of them in flight
+/// at once produced an avalanche of EMFILE → Filtered ports → no
+/// open ports reported. On Unix we leave ~64 fds of headroom for
+/// stdin/stdout/stderr/log files/network metadata; on Windows the
+/// fd model is different so we pass through unchanged.
+#[allow(unused_variables)]
+fn fd_safe_cap(want: usize) -> usize {
+    #[cfg(unix)]
+    {
+        let mut rl = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) } == 0 {
+            // Try to raise soft limit toward hard limit (allowed without
+            // root). Ignore failures — we'll just cap to whatever soft is.
+            if rl.rlim_cur < rl.rlim_max {
+                let bumped = libc::rlimit { rlim_cur: rl.rlim_max, rlim_max: rl.rlim_max };
+                let _ = unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &bumped) };
+                if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) } != 0 {
+                    return want;
+                }
+            }
+            let soft = rl.rlim_cur as usize;
+            let headroom = 64usize;
+            let safe = soft.saturating_sub(headroom);
+            if want > safe {
+                return safe.max(50);
+            }
+        }
+    }
+    want
 }

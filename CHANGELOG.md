@@ -4,6 +4,27 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.66.7] - 2026-05-21
+- **BUG-09 — `--all-ports` returned 0 open ports.** Root cause:
+  v0.66.3's auto-bump to 3× parallel (1500 at default
+  --max-parallel=500) tripped Linux's default soft RLIMIT_NOFILE
+  of 1024. Each in-flight TCP connect() syscall holds a fd, so
+  with 1500 concurrent we got an EMFILE storm and every port
+  got classified as Filtered → zero open ports reported on a
+  host the user knew had ten open. Fixes:
+  - Scaled the auto-bump down to 2× (1000) — still halves
+    wall-clock vs the old pre-v0.66.3 default, but stays under
+    typical ulimits.
+  - New `fd_safe_cap()` helper queries RLIMIT_NOFILE at runtime,
+    tries `setrlimit` to raise soft→hard (allowed without root),
+    then caps the parallel value at `soft - 64` so stdin/stdout/
+    log/network metadata fds aren't crowded out. On Windows it's
+    a no-op (different fd model). Applied unconditionally to
+    every `args.parallel()` call site, not just --all-ports — so
+    users with hand-set `--max-parallel` larger than their
+    ulimit are still safe.
+- 476/476 tests pass, release clean.
+
 ## [0.66.6] - 2026-05-21
 - **Fase 24 — sixth lab-report bundle (5 bugs).** 476/476 tests
   pass (+1 BUG-11 regression test).
