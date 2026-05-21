@@ -28,13 +28,30 @@ struct BaselineDoc {
     hosts: Vec<BaselineHost>,
 }
 
+// Bug-11 (v0.66.6): the parser was looking for `target.ip` nested,
+// but `json_out::JsonHost` flattens it to a top-level `ip` field.
+// As a result --diff-against silently failed on every JSON it had
+// itself produced. We accept BOTH shapes for backward compatibility:
+//   {"ip": "..."}            ← v0.66.x and current --oJ output
+//   {"target": {"ip": "..."}}  ← legacy / hand-written baselines
 #[derive(Debug, Clone, Deserialize)]
 struct BaselineHost {
-    target: BaselineTarget,
+    #[serde(default)]
+    target: Option<BaselineTarget>,
+    #[serde(default)]
+    ip: Option<String>,
     #[serde(default)]
     up: bool,
     #[serde(default)]
     ports: Vec<BaselinePort>,
+}
+
+impl BaselineHost {
+    fn ip_str(&self) -> Option<&str> {
+        self.ip
+            .as_deref()
+            .or_else(|| self.target.as_ref().map(|t| t.ip.as_str()))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -68,14 +85,17 @@ pub fn diff_against(baseline_path: &Path, current: &[HostResult]) -> Result<Base
     let mut baseline_hosts: HashMap<String, HashMap<u16, String>> = HashMap::new();
     let mut baseline_up: BTreeSet<String> = BTreeSet::new();
     for h in &doc.hosts {
+        let Some(ip) = h.ip_str().map(String::from) else {
+            continue;
+        };
         let ports: HashMap<u16, String> = h
             .ports
             .iter()
             .map(|p| (p.port, p.state.to_lowercase()))
             .collect();
-        baseline_hosts.insert(h.target.ip.clone(), ports);
+        baseline_hosts.insert(ip.clone(), ports);
         if h.up {
-            baseline_up.insert(h.target.ip.clone());
+            baseline_up.insert(ip);
         }
     }
 
@@ -287,5 +307,37 @@ mod tests {
         assert!(d.new_open_ports.is_empty());
         assert!(d.closed_ports.is_empty());
         assert!(d.state_changes.is_empty());
+    }
+
+    #[test]
+    fn parses_flat_ip_shape_from_oj_output() {
+        // Bug-11 regression: the actual `--oJ` JSON puts `ip` flat at
+        // the host root, not nested under `target`. Diff-against used
+        // to silently fail on this shape — every diff produced by the
+        // tool itself was unreadable. Now we accept both shapes.
+        let tmp = std::env::temp_dir();
+        let baseline = write_baseline(
+            &tmp,
+            &format!("rm-baseline-flat-{}.json", std::process::id()),
+            r#"{
+                "schema": 1,
+                "hosts": [
+                    {"ip": "10.0.0.1", "hostname": null, "up": true, "latency_secs": 0.001,
+                     "ports": [{"port": 22, "protocol": "tcp", "state": "open", "service": "ssh"},
+                               {"port": 80, "protocol": "tcp", "state": "open", "service": "http"}]}
+                ]
+            }"#,
+        );
+        let current = vec![host(
+            [10, 0, 0, 1],
+            true,
+            &[(22, PortState::Open), (443, PortState::Open)],
+        )];
+        let d = diff_against(&baseline, &current).unwrap();
+        let _ = std::fs::remove_file(&baseline);
+        // 80 was open in baseline, gone now
+        assert_eq!(d.closed_ports.get("10.0.0.1"), Some(&vec![80]));
+        // 443 is new
+        assert_eq!(d.new_open_ports.get("10.0.0.1"), Some(&vec![443]));
     }
 }

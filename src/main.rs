@@ -708,15 +708,20 @@ async fn main() -> Result<()> {
         let host_spec = host_spec.clone();
         let dur = args.timeout();
         let targets = target::expand_targets(&[host_spec], !args.no_dns).await?;
-        // Bug-18 (v0.66.4): the inner `?` propagated raw IO errors
-        // ("early eof", "deadline has elapsed", "Connection reset by
-        // peer (os error 104)") without host context. Wrap each
-        // per-target error so the user can tell which host failed and
-        // map it to a friendly cause.
+        // Bug-18 (v0.66.4 + exit-code fix in v0.66.6): wrap each
+        // per-target error with host:port context + cause hint, and
+        // exit non-zero when EVERY host failed (so CI / automation
+        // can detect the failure). When some succeed and some fail,
+        // still exit 0 — the partial result is meaningful.
+        let mut success_count = 0usize;
+        let mut fail_count = 0usize;
         for t in &targets {
             match smb_deep::deep_enum(t.ip, 445, dur).await {
-                Ok(Some(f)) => smb_deep::print_finding(&f),
-                Ok(None) => println!("[smb-deep] {} — no NTLMSSP CHALLENGE (port 445 reachable but server didn't negotiate)", t.display()),
+                Ok(Some(f)) => { smb_deep::print_finding(&f); success_count += 1; }
+                Ok(None) => {
+                    println!("[smb-deep] {} — no NTLMSSP CHALLENGE (port 445 reachable but server didn't negotiate)", t.display());
+                    success_count += 1;
+                }
                 Err(e) => {
                     let msg = e.to_string();
                     let hint = if msg.contains("deadline") || msg.contains("timed out") {
@@ -731,8 +736,16 @@ async fn main() -> Result<()> {
                         "see error message"
                     };
                     eprintln!("[!] smb-deep {}:445 failed — {}: {}", t.display(), hint, e);
+                    fail_count += 1;
                 }
             }
+        }
+        if success_count == 0 && fail_count > 0 {
+            return Err(anyhow!(
+                "--smb-deep failed for all {} target(s) — no SMB data captured. \
+                 Check connectivity to TCP/445 and that the target speaks SMBv1/2.",
+                fail_count
+            ));
         }
         return Ok(());
     }
@@ -1505,7 +1518,12 @@ async fn main() -> Result<()> {
         resumed_scan_id = Some(sid);
     }
 
-    if args.targets.is_empty() {
+    // NEW BUG (v0.66.6): --iR alone failed with "no targets specified"
+    // because this check fired BEFORE `random_targets::generate()`
+    // populated the target list further down. --iR / --resume-from are
+    // both valid sources of targets that don't require a positional
+    // argument — allow either.
+    if args.targets.is_empty() && args.random_targets == 0 && args.resume_from.is_none() {
         return Err(anyhow!("no targets specified. Use --help for usage."));
     }
 
@@ -1860,9 +1878,10 @@ async fn main() -> Result<()> {
     }
 
     // 3) Port scan — resolve port list with -F (top 100) > --top-ports > -p.
-    // Bug-25 / Bug-24 (v0.66.5): warn loudly when the user combines
-    // conflicting port-selection flags so they know -p was effectively
-    // ignored. Previous behavior was silent precedence.
+    // Bug-25 / Bug-24 (v0.66.5 + b in v0.66.6): warn loudly when the
+    // user combines conflicting port-selection flags so they know
+    // which one was effectively ignored. Previous behavior was silent
+    // precedence.
     let p_was_set_explicitly = args.ports != "1-1000" && !args.ports.is_empty();
     if args.fast && (args.top_ports.is_some() || args.all_ports || p_was_set_explicitly) {
         eprintln!(
@@ -1873,6 +1892,13 @@ async fn main() -> Result<()> {
         eprintln!(
             "[!] --top-ports is taking precedence — --all-ports / -p were ignored. \
              Drop --top-ports if you want -p / --all-ports to take effect."
+        );
+    } else if args.all_ports && p_was_set_explicitly {
+        // Bug-24b: --all-ports + -p — --all-ports wins via effective_ports().
+        eprintln!(
+            "[!] --all-ports is taking precedence — -p '{}' was ignored. \
+             Drop --all-ports if you want -p to take effect.",
+            args.ports
         );
     }
     let mut port_vec = if args.fast {
