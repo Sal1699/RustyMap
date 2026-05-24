@@ -4,6 +4,25 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.67.4] - 2026-05-22
+- **Diagnostic — `--update-exploit-refs` silently produced 0 KEV
+  flags.** Lab on v0.67.3: `--cve-for "OpenSSH 7.4p1"` finally got
+  ExploitDB hits (catalog populated) but still no [KEV] badge on
+  CVE-2024-6387 (regreSSHion) despite CISA listing it in KEV.
+  Root cause: the KEV-fetch chain `client.get(KEV_URL).send().and_
+  then(|r| r.text())` swallows every error class — HTTP non-2xx,
+  body-read failure, JSON parse failure — and produces zero KEV
+  entries silently. The same URL works fine on the build machine
+  (1602 KEV entries), so the failure mode is environment-specific
+  (TLS handshake, user-agent block, transient outage). Fix:
+  - Explicit `match` on each step (`send` → `status` → `text` →
+    `serde_json::from_str`) with named diagnostic prints for each
+    failure path.
+  - Verbose summary line "[exploit-refs]   CISA KEV: N CVEs
+    flagged" so the operator sees the count.
+  - Tells the user exactly what to do (network, parse, status).
+- 495/495 tests pass.
+
 ## [0.67.3] - 2026-05-21
 - **Bugfix — `[KEV]` badge missing on CVEs that ARE in CISA KEV.**
   v0.67.0 set `kev=true` from NVD's `cisaExploitAdd` field, but
