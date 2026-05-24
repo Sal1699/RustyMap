@@ -144,6 +144,10 @@ pub fn print_suggestions(suggestions: &[FindingSuggestion]) {
             println!("    {}", "no MSF modules matched".dimmed());
             continue;
         }
+        // Fase 25 v0.67.0: also offer a copy-pasteable --msf-fire
+        // invocation with RHOSTS already prefilled from the finding's
+        // host. Operator skips the boilerplate when they decide to
+        // run one of the suggested modules.
         for h in &sug.hits {
             let rank = h.rank.as_deref().unwrap_or("?");
             let rank_color = match rank {
@@ -164,8 +168,26 @@ pub fn print_suggestions(suggestions: &[FindingSuggestion]) {
                 let snip: String = d.chars().take(110).collect();
                 println!("      {}", snip.dimmed());
             }
+            let fire_line = build_fire_line(&h.fullname, &h.kind, &sug.finding_host);
+            println!("      {} {}", "→".dimmed(), fire_line.cyan());
         }
     }
+}
+
+/// Build a runnable `--msf-fire ...` invocation for the operator to
+/// copy. Pre-fills RHOSTS from the finding's host. For exploit-class
+/// modules we also propose `--msf-fire-exploits` since `--msf-fire`
+/// alone refuses those without the explicit flag.
+pub fn build_fire_line(module: &str, kind: &str, host: &str) -> String {
+    let exploit_flag = if kind == "exploit" {
+        " --msf-fire-exploits"
+    } else {
+        ""
+    };
+    format!(
+        "rustymap --msf-fire {} --msf-fire-confirm{} --msf-fire-opt RHOSTS={} --msf-url $MSF_URL --msf-token $MSF_TOKEN",
+        module, exploit_flag, host
+    )
 }
 
 #[cfg(test)]
@@ -245,5 +267,22 @@ mod tests {
     fn parse_module_entry_returns_none_without_identity() {
         let entry = Value::Map(vec![(Value::from("type"), Value::from("post"))]);
         assert!(parse_module_entry(&entry).is_none());
+    }
+
+    #[test]
+    fn fire_line_includes_rhosts_and_confirm() {
+        let line = build_fire_line("auxiliary/scanner/smb/smb_ms17_010", "auxiliary", "10.0.0.5");
+        assert!(line.contains("--msf-fire auxiliary/scanner/smb/smb_ms17_010"));
+        assert!(line.contains("--msf-fire-confirm"));
+        assert!(line.contains("RHOSTS=10.0.0.5"));
+        // auxiliary modules don't need --msf-fire-exploits
+        assert!(!line.contains("--msf-fire-exploits"));
+    }
+
+    #[test]
+    fn fire_line_adds_exploits_flag_for_exploit_modules() {
+        let line = build_fire_line("exploit/multi/http/log4shell", "exploit", "10.0.0.7");
+        assert!(line.contains("--msf-fire-exploits"));
+        assert!(line.contains("RHOSTS=10.0.0.7"));
     }
 }

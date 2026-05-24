@@ -4,6 +4,91 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.67.0] - 2026-05-21
+- **Fase 25 — vuln-intel depth.** No new scan capability — this
+  release doubles down on the one area where RustyMap genuinely
+  outclasses nmap (integrated CVE/KEV/exploit correlation +
+  compliance + MSF bridge). 492/492 tests pass (+16 new), release
+  clean.
+
+### `src/cpe_match.rs` — new CPE 2.3 version comparator
+The previous `nvd::lookup` did a literal substring match against
+the cached CPE strings — fine for clean banners, broken on:
+- Distro suffixes (`2.4.59-1ubuntu1` doesn't substring-match a
+  vanilla `2.4.59` CPE entry).
+- Banner-product → CPE-vendor:product mismatch (`Apache httpd` →
+  CPE uses `apache:http_server`, `OpenSSH` → `openbsd:openssh`,
+  `Microsoft-IIS` → `microsoft:internet_information_server`).
+- Wildcards: CPE rows with `*` or `-` for version were silently
+  failing the substring check.
+
+The new module exposes:
+- `normalize_version()` — strips `-1ubuntu1`, `+deb11u3`, trailing
+  `(Ubuntu)`, distro tails after the first non-pattern dash.
+- `product_aliases()` — maps ~25 common banner names to their
+  (vendor, product) CPE coordinates.
+- `version_compare()` — semver-aware ordering that also handles
+  alphanumeric tails (`7.4p1` > `7.4`, `7.4p2` > `7.4p1`).
+- `cpe_string_matches(cpe, vendor, product, version)` — parses
+  cpe2.3, honors `*` and `-` wildcards on vendor/product/version.
+- `cpe_matches_banner()` — best-effort: tries every alias for the
+  banner product, falls back to substring-with-normalized-version
+  when no alias is registered.
+- 14 unit tests including the `version_compare_real_world_vectors`
+  battery with 30+ CVE-derived assertions covering OpenSSH, nginx,
+  Apache, MySQL/MariaDB, PostgreSQL, Redis, PHP, Tomcat, Exim,
+  BIND, ProFTPD, vsftpd, Samba, Postfix, Log4j.
+
+### `nvd::lookup` rewired
+- Resolves banner product to CPE aliases up front, queries SQLite
+  once per alias, dedupes by CVE id.
+- Per-CPE-entry filtering uses `cpe_matches_banner` so wildcard
+  rows and distro-tagged versions both land correctly.
+- Result set is sorted **KEV-first**, then CVSS, then date — so
+  in-the-wild exploitation entries are at the top regardless of
+  base score.
+
+### `--cve-for` output enriched
+- New columnar layout: `CVE | SEVERITY | CVSS | EXPLOIT | DESC`.
+- KEV hits get an inline `[KEV]` badge prefixing the CVE id.
+- EXPLOIT column shows `ExploitDB×N · Metasploit×N · Nuclei×N`
+  pulled from the existing `exploit_refs` cache.
+- Footer line summarises KEV count with patch-priority pointer.
+
+### MSF auto-suggest enrichment (`msf_suggest::print_suggestions`)
+- Every suggested module now emits a copy-pasteable
+  `rustymap --msf-fire ... --msf-fire-confirm --msf-fire-opt
+  RHOSTS=<finding-host>` line. Exploit-class modules also get
+  `--msf-fire-exploits` because plain `--msf-fire` refuses
+  exploits otherwise. `$MSF_URL` / `$MSF_TOKEN` are env-var
+  placeholders to keep secrets out of the suggestion.
+- 2 new tests on `build_fire_line`.
+
+### Compliance remediation (`compliance::remediation_for_kind`)
+- New lookup maps every finding kind (`tls_protocol_legacy`,
+  `ssh_weak_kex`, `rdp_no_nla`, `smb_v1`, …) to a one-line
+  remediation. The fix is a property of the *finding kind*,
+  not the framework — PCI 8.3.1 and NIST IA-5 both fail on
+  `ssh_weak_kex` with the same answer, so we keep the text in
+  one place instead of duplicating it across 50 Control
+  entries.
+- `print_report` emits a `fix:` line per unique finding kind in
+  each failed control's evidence.
+- `write_markdown` does the same in a `- **Fix (kind):** …`
+  bullet so the generated MD report is useful as-is to hand to
+  the team owning remediation.
+- Covered kinds: TLS (legacy/weak-cipher/classic-vuln/no-modern),
+  SMB (v1, no-signing), SSH (KEX/cipher/MAC), RDP (no-NLA), SMTP
+  (STARTTLS-missing, clear-creds), OWASP (XSS/SQLi/redirect/SSRF),
+  CVE-critical, port-exposure, cloud (IMDSv1, IAM-role, bucket-
+  public), mobile (hardcoded secret, ATS disabled, low-TLS,
+  cleartext).
+
+### Notes
+- No CLI surface changes — every existing flag works the same;
+  output is just denser and more useful.
+- No new dependencies. Build time unchanged.
+
 ## [0.66.7] - 2026-05-21
 - **BUG-09 — `--all-ports` returned 0 open ports.** Root cause:
   v0.66.3's auto-bump to 3× parallel (1500 at default

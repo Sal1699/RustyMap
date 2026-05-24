@@ -457,6 +457,52 @@ pub fn evaluate(framework: Framework, findings: &[Finding]) -> ComplianceEval {
     }
 }
 
+/// Plain-language remediation advice keyed by finding kind. Multiple
+/// controls in different frameworks tend to fail on the same finding
+/// kind (e.g. `ssh_weak_kex` triggers PCI 8.3.1, NIST IA-5, ISO A.8.5,
+/// HIPAA 164.312(a)(1) — same fix every time), so we map remediation
+/// to the kind rather than duplicating per-control text. Fase 25
+/// (v0.67.0).
+pub fn remediation_for_kind(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        // ── TLS ──
+        "tls_protocol_legacy" => "Disable SSLv2/SSLv3/TLS 1.0/1.1 on the target service. Restrict to TLS 1.2+ with PFS-capable ciphers.",
+        "tls_weak_cipher" => "Remove RC4, 3DES, NULL and EXPORT ciphers from the server's ordered list. Prefer ECDHE-AES-GCM and ChaCha20-Poly1305.",
+        "tls_classic_vuln" => "Apply vendor patches for Heartbleed/POODLE/DROWN/CCS-Injection. Force-renegotiate after patching to invalidate exfiltrated keys.",
+        "tls_no_modern" => "Add TLS 1.3 to the server's protocol list (ALPN h2 if HTTP).",
+        // ── SMB ──
+        "smb_v1" => "Disable SMBv1 on the host (Windows: `Disable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol`). Replace any legacy client that still requires it.",
+        "smb_no_signing" => "Set `signing = mandatory` (Samba smb.conf) or `RequireSecuritySignature = 1` (Windows GPO) to prevent NTLM relay.",
+        // ── SSH ──
+        "ssh_weak_kex" => "Restrict KEX algorithms in sshd_config to curve25519-sha256 and diffie-hellman-group-exchange-sha256. Remove diffie-hellman-group1-sha1 and group14-sha1.",
+        "ssh_weak_cipher" => "Restrict ciphers in sshd_config to chacha20-poly1305@openssh.com and aes*-gcm@openssh.com. Remove arcfour, 3des-cbc, blowfish-cbc.",
+        "ssh_weak_mac" => "Restrict MACs in sshd_config to hmac-sha2-512-etm@openssh.com and hmac-sha2-256-etm@openssh.com. Remove md5 and 96-bit MACs.",
+        // ── RDP ──
+        "rdp_no_nla" => "Enforce Network Level Authentication (NLA) on RDP via GPO `Require user authentication for remote connections by using Network Level Authentication`. Patch BlueKeep (CVE-2019-0708) if on legacy Windows.",
+        // ── SMTP ──
+        "smtp_starttls_missing" => "Enable STARTTLS on the MTA (Postfix `smtpd_tls_security_level = may` or `encrypt`). Block AUTH on the cleartext channel.",
+        "smtp_clear_creds" => "Disable AUTH PLAIN/LOGIN on the non-TLS port. Require STARTTLS before any AUTH.",
+        // ── Web ──
+        "web_xss" => "Output-encode user-controlled data per context (HTML, attribute, JS, URL). Enable a strict CSP with no `unsafe-inline`.",
+        "web_sqli" => "Use parameterised queries / prepared statements. Audit any string-concat building SQL.",
+        "web_open_redirect" => "Validate redirect targets against an allowlist of safe paths. Refuse off-site Location: headers.",
+        "web_ssrf" => "Allowlist destination hosts for server-side fetches. Block link-local (169.254.0.0/16) and RFC 1918 unless explicitly required.",
+        // ── CVE / port hygiene ──
+        "cve_critical" => "Patch the affected service to the vendor-recommended fixed version. Cross-reference KEV catalog for in-the-wild exploitation evidence.",
+        "port_open_unrestricted" => "Restrict the service to its intended source range at the perimeter firewall. Public exposure of management ports is rarely justified.",
+        // ── Cloud ──
+        "cloud_imds_v1" => "Migrate to IMDSv2 (AWS) / disable v1 fallback. Set hop-limit to 1 to prevent container reachability.",
+        "cloud_iam_role_exposed" => "Rotate the leaked credentials immediately. Audit role permissions and apply least-privilege boundary policy.",
+        "cloud_bucket_public" => "Set bucket ACL to private. Use signed URLs for legitimate public access. Enable bucket-level public-access block.",
+        // ── Mobile ──
+        "mobile_hardcoded_secret" => "Remove secrets from the app bundle. Use a backend-issued token or a secrets manager. Treat the leaked secret as compromised and rotate.",
+        "ipa_ats_disabled" => "Re-enable ATS (App Transport Security) in Info.plist. Use NSExceptionDomains only for legacy endpoints, and only with `NSExceptionMinimumTLSVersion`.",
+        "ipa_low_tls" => "Raise `NSExceptionMinimumTLSVersion` to TLSv1.2 or higher in NSExceptionDomains.",
+        "apk_cleartext" => "Set `android:usesCleartextTraffic=\"false\"` in AndroidManifest.xml. Add a network-security-config XML to override only documented hosts.",
+        _ => return None,
+    })
+}
+
 pub fn print_report(eval: &ComplianceEval) {
     use colored::*;
     println!();
@@ -483,6 +529,17 @@ pub fn print_report(eval: &ComplianceEval) {
             }
             if evidence.len() > 3 {
                 println!("    … {} more piece(s) of evidence", evidence.len() - 3);
+            }
+            // Fase 25 v0.67.0: emit a remediation line per unique
+            // finding kind in the evidence so the user has a concrete
+            // next step instead of just the control title.
+            let mut shown: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for ev in evidence {
+                if shown.insert(ev.kind.as_str()) {
+                    if let Some(fix) = remediation_for_kind(&ev.kind) {
+                        println!("    {} {}", "fix:".cyan().bold(), fix.dimmed());
+                    }
+                }
             }
         }
     }
@@ -516,6 +573,15 @@ pub fn write_markdown(eval: &ComplianceEval, path: &Path) -> Result<()> {
             let _ = writeln!(&mut s, "### {} — {}", c.id, c.title);
             for ev in evidence {
                 let _ = writeln!(&mut s, "- `{}` @ `{}` — {}", ev.kind, ev.host, ev.detail);
+            }
+            // Fase 25 v0.67.0: one remediation block per unique kind.
+            let mut shown: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for ev in evidence {
+                if shown.insert(ev.kind.as_str()) {
+                    if let Some(fix) = remediation_for_kind(&ev.kind) {
+                        let _ = writeln!(&mut s, "  - **Fix ({}):** {}", ev.kind, fix);
+                    }
+                }
             }
             let _ = writeln!(&mut s);
         }

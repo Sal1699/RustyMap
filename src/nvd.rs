@@ -333,16 +333,35 @@ fn collect_cpes(nodes: &[NvdNode]) -> Vec<String> {
 }
 
 /// Match a (product, version) pair against the cached CVE rows.
-/// Uses substring match on cpe2.3 strings — coarse but workable
-/// (precise CPE matching needs the full version-range comparison
-/// which is its own subproject).
+/// Fase 25 (v0.67.0): uses `crate::cpe_match` for product-alias
+/// resolution, version normalisation, and per-CPE matching that
+/// understands `*`/`-` wildcards. KEV entries float to the top of
+/// the result regardless of CVSS so the user sees in-the-wild
+/// exploitation hits first.
 pub fn lookup(
     conn: &Connection,
     product: &str,
     version: &str,
     limit: usize,
 ) -> Result<Vec<NvdEntry>> {
-    let needle_product = product.to_lowercase();
+    // Candidate SQL needle: search every (vendor, product) alias for
+    // the banner product. If no alias, fall back to the raw lowercase
+    // product name.
+    let aliases = crate::cpe_match::product_aliases(product);
+    let needles: Vec<String> = if aliases.is_empty() {
+        vec![product.trim().to_lowercase()]
+    } else {
+        aliases
+            .iter()
+            .map(|(v, p)| format!("{}:{}", v, p))
+            .collect()
+    };
+
+    // Pull a wider set from SQLite (we'll filter precisely in Rust).
+    // Cap the SQL fetch at 4× the requested limit to keep memory
+    // bounded while still leaving headroom for false-positives the
+    // refined matcher will drop.
+    let sql_limit = (limit.saturating_mul(4)).max(100) as i64;
     let mut stmt = conn.prepare(
         "SELECT id, description,
                 cvss31_vector, cvss31_base, cvss31_severity,
@@ -350,45 +369,67 @@ pub fn lookup(
                 cpe_match, published, references_json, kev
          FROM cve
          WHERE lower(cpe_match) LIKE ?
-         ORDER BY cvss31_base DESC NULLS LAST, published DESC
+         ORDER BY kev DESC, cvss31_base DESC NULLS LAST, published DESC
          LIMIT ?",
     )?;
-    let pattern = format!("%{}%", needle_product);
-    let rows = stmt.query_map(params![pattern, limit as i64], |r| {
-        let cpe_json: String = r.get(8)?;
-        let refs_json: String = r.get(10)?;
-        let cpe_match: Vec<String> = serde_json::from_str(&cpe_json).unwrap_or_default();
-        let references: Vec<String> = serde_json::from_str(&refs_json).unwrap_or_default();
-        Ok(NvdEntry {
-            id: r.get(0)?,
-            description: r.get(1)?,
-            cvss31_vector: r.get(2)?,
-            cvss31_base: r.get(3)?,
-            cvss31_severity: r.get(4)?,
-            cvss40_vector: r.get(5)?,
-            cvss40_base: r.get(6)?,
-            cvss40_severity: r.get(7)?,
-            cpe_match,
-            published: r.get(9)?,
-            references,
-            kev: r.get::<_, i64>(11)? != 0,
-        })
-    })?;
-    let version_lo = version.to_lowercase();
-    let mut out = Vec::new();
-    for row in rows.flatten() {
-        // Filter by version: at least one CPE entry must contain the
-        // version string. If version is empty, accept anything.
-        if version_lo.is_empty()
-            || row
-                .cpe_match
-                .iter()
-                .any(|c| c.to_lowercase().contains(&version_lo))
-        {
-            out.push(row);
+
+    let mut collected: Vec<NvdEntry> = Vec::new();
+    let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for needle in &needles {
+        let pattern = format!("%{}%", needle);
+        let rows = stmt.query_map(params![pattern, sql_limit], |r| {
+            let cpe_json: String = r.get(8)?;
+            let refs_json: String = r.get(10)?;
+            let cpe_match: Vec<String> = serde_json::from_str(&cpe_json).unwrap_or_default();
+            let references: Vec<String> = serde_json::from_str(&refs_json).unwrap_or_default();
+            Ok(NvdEntry {
+                id: r.get(0)?,
+                description: r.get(1)?,
+                cvss31_vector: r.get(2)?,
+                cvss31_base: r.get(3)?,
+                cvss31_severity: r.get(4)?,
+                cvss40_vector: r.get(5)?,
+                cvss40_base: r.get(6)?,
+                cvss40_severity: r.get(7)?,
+                cpe_match,
+                published: r.get(9)?,
+                references,
+                kev: r.get::<_, i64>(11)? != 0,
+            })
+        })?;
+        for row in rows.flatten() {
+            if seen_ids.contains(&row.id) {
+                continue;
+            }
+            // Empty-version path: take everything the SQL prefilter
+            // returned (no per-CPE filtering possible).
+            let keep = if version.trim().is_empty() {
+                true
+            } else {
+                row.cpe_match
+                    .iter()
+                    .any(|cpe| crate::cpe_match::cpe_matches_banner(cpe, product, version))
+            };
+            if keep {
+                seen_ids.insert(row.id.clone());
+                collected.push(row);
+            }
         }
     }
-    Ok(out)
+
+    // Final ordering: KEV first, then CVSS, then published date.
+    collected.sort_by(|a, b| {
+        b.kev
+            .cmp(&a.kev)
+            .then_with(|| {
+                b.cvss31_base
+                    .partial_cmp(&a.cvss31_base)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| b.published.cmp(&a.published))
+    });
+    collected.truncate(limit);
+    Ok(collected)
 }
 
 /// Compute a CVSS v3.1 base score from a vector string. Used when

@@ -67,6 +67,7 @@ mod plugin_meta;
 mod rdp_audit;
 mod adaptive_timing;
 mod cpe;
+mod cpe_match;
 mod os_fp_multi;
 mod os_fp_v6;
 mod osdb_submit;

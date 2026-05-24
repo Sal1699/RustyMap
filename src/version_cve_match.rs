@@ -95,6 +95,18 @@ pub fn print_match(m: &CveMatch) {
         println!("    3. Version really has no published CVEs at the named match level");
         return;
     }
+    // Fase 25 v0.67.0: load the local exploit_refs catalog once so we
+    // can show per-CVE "EXPLOIT" availability (ExploitDB / Metasploit
+    // / Nuclei) alongside the CVSS score.
+    let exploit_cat = crate::exploit_refs::load();
+    println!(
+        "  {:<16} {:<10} {:<5} {:<28} {}",
+        "CVE".bold(),
+        "SEVERITY".bold(),
+        "CVSS".bold(),
+        "EXPLOIT".bold(),
+        "DESCRIPTION".bold(),
+    );
     for e in &m.matches {
         let sev = e
             .cvss31_severity
@@ -106,7 +118,6 @@ pub fn print_match(m: &CveMatch) {
             .or(e.cvss40_base)
             .map(|v| format!("{:.1}", v))
             .unwrap_or_else(|| "—".into());
-        let kev = if e.kev { " KEV".red().bold().to_string() } else { String::new() };
         let sev_color = match sev {
             "CRITICAL" => sev.red().bold().to_string(),
             "HIGH" => sev.red().to_string(),
@@ -114,10 +125,33 @@ pub fn print_match(m: &CveMatch) {
             "LOW" => sev.dimmed().to_string(),
             _ => sev.into(),
         };
-        let desc: String = e.description.chars().take(120).collect();
+        // KEV is critical context — show as inline badge prefixing
+        // the CVE id (not only in a trailing column) so it's the
+        // first thing the user sees per-line.
+        let cve_cell = if e.kev {
+            format!("{} {}", "[KEV]".red().bold(), e.id)
+        } else {
+            e.id.clone()
+        };
+        let exploit_cell = match crate::exploit_refs::lookup(&exploit_cat, &e.id) {
+            Some(refs) if refs.is_actionable() => refs.summary(),
+            _ => "—".dimmed().to_string(),
+        };
+        let desc: String = e.description.chars().take(110).collect();
         println!(
-            "  {:<16} {:<8} {:<5} {} {}",
-            e.id, sev_color, score, desc.dimmed(), kev
+            "  {:<16} {:<10} {:<5} {:<28} {}",
+            cve_cell, sev_color, score, exploit_cell, desc.dimmed()
+        );
+    }
+    // KEV count summary at the bottom so the user has a quick
+    // "how worried should I be" metric.
+    let kev_count = m.matches.iter().filter(|e| e.kev).count();
+    if kev_count > 0 {
+        println!(
+            "\n  {} {} of these are on CISA's Known Exploited Vulnerabilities list — \
+             prioritise patching.",
+            "[!]".red().bold(),
+            kev_count
         );
     }
 }

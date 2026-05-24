@@ -106,6 +106,8 @@ pub fn print_guide() {
     line("--vuln-ssl-port N     Override porta TLS per --vuln-ssl-* (default 443)");
     line("--vuln-known-key HOST SPKI SHA-256 vs DB chiavi compromesse (Debian PRNG ecc.)");
     line("--cve-for BANNER      Match product/version contro NVD cache (CVE + CVSS + KEV)");
+    line("                      Output: [KEV] badge + EXPLOIT column (ExploitDB/MSF/Nuclei)");
+    line("                      KEV hits ordinano in cima indipendentemente dal CVSS");
     line("--cve-for-limit N     Tetto risultati --cve-for (default 25)");
     line("--dhcp-discover       Broadcast DHCP DISCOVER → harvest DHCP server offers");
     line("--mdns-discover       Multicast mDNS (224.0.0.251:5353) — Bonjour/Avahi inventory");
@@ -333,6 +335,7 @@ pub fn print_guide() {
     line("--apk-scan FILE       Static APK: manifest perms+components, dex secrets+pinning");
     line("--ipa-scan FILE       Static IPA: Info.plist (ATS, URL schemes), binary secrets");
     line("--compliance FW       Eval findings vs framework: pci-dss|hipaa|nist-800-53|iso-27001|cis");
+    line("                      Failed controls includono remediation per-finding-kind");
     line("--compliance-report F Scrive un report Markdown del risultato compliance");
     line("--executive-summary   Stampa narrativa + top services + esposizioni sensibili");
     line("--oP FILE.pdf         Scrive report PDF (printpdf, no system deps)");
