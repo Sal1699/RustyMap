@@ -29,9 +29,11 @@ const CACHE_VERSION: i64 = 1;
 const REFRESH_AFTER_SECS: u64 = 24 * 3600;
 /// NVD API caps results to 2000 per request when no API key.
 const PAGE_SIZE: usize = 2000;
-/// Don't pull the entire NVD on first run — it's 250k+ entries. We
-/// take a sliding window of the last 5 years which covers the
-/// overwhelming majority of actively exploited CVEs.
+/// Reserved for future incremental-refresh code that uses
+/// `lastModStartDate` 120-day windows. Current sync walks the full
+/// dataset since the API rejects bounded queries without both
+/// pubStart and pubEnd dates.
+#[allow(dead_code)]
 const HISTORY_DAYS: i64 = 5 * 365;
 
 #[derive(Debug, Clone)]
@@ -233,35 +235,69 @@ pub fn needs_refresh(conn: &Connection) -> bool {
     }
 }
 
-/// Sync the local cache from the NVD API. Pull CVEs published in
-/// the last `HISTORY_DAYS` days. NVD rate-limits unauthenticated
-/// callers to 5 req / 30s — we wait between pages.
+/// Sync the local cache from the NVD API.
+///
+/// Fix (v0.67.1): the old URL passed only `pubStartDate` which NVD
+/// API 2.0 rejects with 404 — the spec requires `pubStartDate` AND
+/// `pubEndDate` together, and the range can't exceed 120 days. The
+/// simplest correct shape is to skip the date filter entirely on
+/// first sync and walk the full dataset, paginated. Incremental
+/// refresh can later use `lastModStartDate`+`lastModEndDate` 120-day
+/// windows once we wire it in (TODO).
+///
+/// Rate-limit: NVD allows 5 req / 30s without an API key, 50 req /
+/// 30s with one. We pace 6.5s between pages by default; if the
+/// `NVD_API_KEY` env var is set we send it as the `apiKey` header
+/// and pace at 0.7s. First sync without a key downloads ~250k CVEs
+/// in ~13 minutes; with a key it's ~90 seconds.
 pub fn sync(conn: &mut Connection, verbose: bool) -> Result<usize> {
-    let pub_start_date = chrono::Utc::now()
-        .checked_sub_signed(chrono::Duration::days(HISTORY_DAYS))
-        .ok_or_else(|| anyhow!("date math underflow"))?
-        .format("%Y-%m-%dT%H:%M:%S.000")
-        .to_string();
-    let client = reqwest::blocking::Client::builder()
+    let api_key = std::env::var("NVD_API_KEY").ok().filter(|k| !k.trim().is_empty());
+    let inter_page_delay = if api_key.is_some() {
+        Duration::from_millis(700)
+    } else {
+        Duration::from_millis(6500)
+    };
+    let mut client_builder = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(120))
-        .user_agent("rustymap/nvd-sync")
-        .build()?;
+        .user_agent("rustymap/nvd-sync");
+    if let Some(key) = &api_key {
+        let mut headers = reqwest::header::HeaderMap::new();
+        if let Ok(v) = reqwest::header::HeaderValue::from_str(key) {
+            headers.insert("apiKey", v);
+            client_builder = client_builder.default_headers(headers);
+        }
+    }
+    let client = client_builder.build()?;
+    if verbose {
+        if api_key.is_some() {
+            eprintln!("[nvd-sync] using NVD_API_KEY (50 req/30s rate limit, ~0.7s pacing)");
+        } else {
+            eprintln!("[nvd-sync] no NVD_API_KEY — pacing 6.5s/page. Get a free key at https://nvd.nist.gov/developers/request-an-api-key");
+        }
+    }
 
     let mut start_index = 0usize;
     let mut total_inserted = 0usize;
+    let mut page_number = 0usize;
     loop {
+        page_number += 1;
         let url = format!(
-            "{}?pubStartDate={}&startIndex={}&resultsPerPage={}",
-            NVD_API, pub_start_date, start_index, PAGE_SIZE
+            "{}?startIndex={}&resultsPerPage={}",
+            NVD_API, start_index, PAGE_SIZE
         );
         if verbose {
-            eprintln!("[nvd-sync] page {} (start_index={})", start_index / PAGE_SIZE + 1, start_index);
+            eprintln!("[nvd-sync] page {} (start_index={})", page_number, start_index);
         }
         let resp = client.get(&url).send()?;
         if !resp.status().is_success() {
+            let status = resp.status();
+            let body_snippet = resp.text().unwrap_or_default();
+            let body_snippet: String = body_snippet.chars().take(200).collect();
             return Err(anyhow!(
-                "NVD API returned {} — try again later (unauthenticated rate limit is 5 req / 30s)",
-                resp.status()
+                "NVD API returned {} for {} — body: {}\n\
+                 Common causes: rate-limit (unauth = 5 req/30s; set NVD_API_KEY for 50 req/30s), \
+                 or transient outage. Retry in 60s.",
+                status, url, body_snippet
             ));
         }
         let parsed: NvdResponse = resp.json().context("parse NVD JSON")?;
@@ -311,11 +347,18 @@ pub fn sync(conn: &mut Connection, verbose: bool) -> Result<usize> {
         tx.commit()?;
 
         start_index += parsed.results_per_page;
+        if verbose {
+            eprintln!(
+                "[nvd-sync]   inserted {} so far · {} total to fetch",
+                total_inserted, parsed.total_results
+            );
+        }
         if start_index >= parsed.total_results || parsed.results_per_page == 0 {
             break;
         }
-        // Politeness gap to stay under NVD rate limit
-        std::thread::sleep(Duration::from_secs(7));
+        // Politeness gap to stay under NVD rate limit (tighter when
+        // an API key is present, see the top-of-function setup).
+        std::thread::sleep(inter_page_delay);
     }
     set_last_sync(conn)?;
     Ok(total_inserted)

@@ -4,6 +4,23 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.67.1] - 2026-05-21
+- **Bugfix — `--update-cve-db` returned 404 from NVD API.** The
+  sync URL passed only `pubStartDate`, but NVD JSON 2.0 rejects
+  bounded queries without both `pubStartDate` AND `pubEndDate`
+  together (max 120-day range). 5-year window therefore wasn't
+  even reachable through one request. Fixes:
+  - Drop the bad date filter entirely; walk the full dataset.
+  - Honor `NVD_API_KEY` env var (50 req/30s rate limit, ~0.7s
+    inter-page pacing) when set. Without a key: 5 req/30s,
+    ~6.5s pacing — full first sync ≈ 13 minutes.
+  - Error message on non-2xx now includes the actual URL, the
+    response-body snippet, and a pointer to the free key signup
+    page.
+  - Verbose mode prints "inserted N so far · M total to fetch"
+    per page so the operator sees progress on the long walk.
+- 492/492 tests still pass, release clean.
+
 ## [0.67.0] - 2026-05-21
 - **Fase 25 — vuln-intel depth.** No new scan capability — this
   release doubles down on the one area where RustyMap genuinely
