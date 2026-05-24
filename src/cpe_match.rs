@@ -161,14 +161,24 @@ fn split_version(v: &str) -> Vec<VPart<'_>> {
 ///   `cpe:2.3:<part>:<vendor>:<product>:<version>:<update>:<edition>:...`
 /// Wildcards: `*` (any) and `-` (not applicable / not specified).
 /// Returns false on parse errors so we don't accidentally over-match.
+///
+/// v0.67.2: the matcher now honors the `update` field (parts[6])
+/// because NVD splits OpenSSH-style "7.4p1" into version="7.4",
+/// update="p1" — without checking the update field every OpenSSH
+/// CVE was missed. Logic:
+///   - cpe_update == "*"/"-": accept any target whose numeric
+///     prefix or full version compares Equal to cpe_version.
+///   - cpe_update != wildcard: target must equal cpe_version+cpe_update
+///     under the version comparator.
 pub fn cpe_string_matches(cpe: &str, vendor: &str, product: &str, version: &str) -> bool {
     let parts: Vec<&str> = cpe.split(':').collect();
-    if parts.len() < 6 || parts[0] != "cpe" || parts[1] != "2.3" {
+    if parts.len() < 7 || parts[0] != "cpe" || parts[1] != "2.3" {
         return false;
     }
     let cpe_vendor = parts[3].to_lowercase();
     let cpe_product = parts[4].to_lowercase();
     let cpe_version = parts[5];
+    let cpe_update = parts[6];
     let vendor = vendor.to_lowercase();
     let product = product.to_lowercase();
     if cpe_vendor != "*" && cpe_vendor != "-" && cpe_vendor != vendor {
@@ -177,14 +187,40 @@ pub fn cpe_string_matches(cpe: &str, vendor: &str, product: &str, version: &str)
     if cpe_product != "*" && cpe_product != "-" && cpe_product != product {
         return false;
     }
-    // Version match: '*'/'-' are wildcards, otherwise compare normalized.
     if cpe_version == "*" || cpe_version == "-" {
         return true;
     }
     let norm_target = normalize_version(version);
-    let norm_cpe = normalize_version(cpe_version);
-    norm_cpe.eq_ignore_ascii_case(&norm_target)
-        || version_compare(&norm_cpe, &norm_target) == Ordering::Equal
+    let norm_cpe_v = normalize_version(cpe_version);
+    if cpe_update == "*" || cpe_update == "-" {
+        // Any update accepted — accept exact equality OR the numeric
+        // prefix of the target matching the CPE version.
+        if version_compare(&norm_cpe_v, &norm_target) == Ordering::Equal {
+            return true;
+        }
+        let (num_prefix, _tail) = split_version_head_tail(&norm_target);
+        if !num_prefix.is_empty() && version_compare(&norm_cpe_v, &num_prefix) == Ordering::Equal {
+            return true;
+        }
+        false
+    } else {
+        // Specific update required (e.g. "p1"). Combine and compare
+        // against the full target.
+        let combined = format!("{}{}", norm_cpe_v, cpe_update);
+        version_compare(&combined, &norm_target) == Ordering::Equal
+    }
+}
+
+/// Split a normalized version into ("digits.digits...", "alphanumeric-tail").
+/// `"7.4p1"` → `("7.4", "p1")`, `"2.4.59"` → `("2.4.59", "")`,
+/// `"1.3.5e"` → `("1.3.5", "e")`.
+fn split_version_head_tail(v: &str) -> (String, String) {
+    let bytes = v.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+        i += 1;
+    }
+    (v[..i].trim_end_matches('.').to_string(), v[i..].to_string())
 }
 
 /// Best-effort match: try every (vendor, product) alias for the
@@ -310,11 +346,45 @@ mod tests {
 
     #[test]
     fn cpe_matches_banner_normalizes_openssh_version() {
-        let cpe = "cpe:2.3:a:openbsd:openssh:7.4p1:*:*:*:*:*:*:*";
+        let cpe_full = "cpe:2.3:a:openbsd:openssh:7.4p1:*:*:*:*:*:*:*";
         // Banner: "OpenSSH 7.4p1" — alias hits, version exact.
-        assert!(cpe_matches_banner(cpe, "OpenSSH", "7.4p1"));
-        // Banner: bare "7.4" → does NOT satisfy 7.4p1 CPE.
-        assert!(!cpe_matches_banner(cpe, "OpenSSH", "7.4"));
+        assert!(cpe_matches_banner(cpe_full, "OpenSSH", "7.4p1"));
+        // Banner: bare "7.4" → does NOT satisfy 7.4p1 CPE (different
+        // upstream release — 7.4 GA vs 7.4p1 with bugfix patches).
+        assert!(!cpe_matches_banner(cpe_full, "OpenSSH", "7.4"));
+    }
+
+    #[test]
+    fn cpe_string_matches_split_version_and_update() {
+        // NVD's canonical OpenSSH CPE puts the "p1" tag in the update
+        // slot, not the version slot. v0.67.2 regression coverage.
+        let cpe = "cpe:2.3:a:openbsd:openssh:7.4:p1:*:*:*:*:*:*";
+        // Banner "7.4p1" must satisfy: combined ver+update = "7.4p1".
+        assert!(cpe_string_matches(cpe, "openbsd", "openssh", "7.4p1"));
+        // Banner "7.4" must NOT match — different release.
+        assert!(!cpe_string_matches(cpe, "openbsd", "openssh", "7.4"));
+        // Banner "7.4p2" must NOT match.
+        assert!(!cpe_string_matches(cpe, "openbsd", "openssh", "7.4p2"));
+    }
+
+    #[test]
+    fn cpe_string_matches_wildcard_update_accepts_prefix() {
+        // CPE with version="7.4" + update="*" must accept any 7.4*
+        // banner including "7.4", "7.4p1", "7.4p2".
+        let cpe = "cpe:2.3:a:openbsd:openssh:7.4:*:*:*:*:*:*:*";
+        assert!(cpe_string_matches(cpe, "openbsd", "openssh", "7.4"));
+        assert!(cpe_string_matches(cpe, "openbsd", "openssh", "7.4p1"));
+        assert!(cpe_string_matches(cpe, "openbsd", "openssh", "7.4p9"));
+        // But NOT 7.5.
+        assert!(!cpe_string_matches(cpe, "openbsd", "openssh", "7.5"));
+    }
+
+    #[test]
+    fn split_head_tail_extracts_alpha_tag() {
+        assert_eq!(split_version_head_tail("7.4p1"), ("7.4".to_string(), "p1".to_string()));
+        assert_eq!(split_version_head_tail("2.4.59"), ("2.4.59".to_string(), "".to_string()));
+        assert_eq!(split_version_head_tail("1.3.5e"), ("1.3.5".to_string(), "e".to_string()));
+        assert_eq!(split_version_head_tail("1.0rc1"), ("1.0".to_string(), "rc1".to_string()));
     }
 
     #[test]

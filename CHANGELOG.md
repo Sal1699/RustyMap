@@ -4,6 +4,29 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.67.2] - 2026-05-21
+- **Bugfix — `--cve-for "OpenSSH 7.4p1"` returned 0 entries.** Even
+  with a fully-populated NVD cache (352k entries), the CPE matcher
+  missed every OpenSSH CVE because NVD's canonical OpenSSH CPE is
+  `cpe:2.3:a:openbsd:openssh:7.4:p1:*:*:*:*:*:*` — version="7.4",
+  update="p1" as SEPARATE fields. The v0.67.0 `cpe_string_matches`
+  only checked the version field (parts[5]) and ignored the update
+  field (parts[6]). Fix: when the CPE's update field is non-wildcard,
+  the matcher now compares the target against `cpe_version+cpe_update`
+  (combined). When the update is `*`/`-`, it falls back to numeric-
+  prefix match so a banner of "7.4" still matches the wildcard-
+  update CPE row.
+- New tests:
+  - `cpe_string_matches_split_version_and_update` — covers the
+    canonical OpenSSH NVD CPE shape end-to-end.
+  - `cpe_string_matches_wildcard_update_accepts_prefix` — covers
+    the `version="7.4" update="*"` shape and asserts 7.4 / 7.4p1 /
+    7.4p9 all match but 7.5 doesn't.
+  - `split_head_tail_extracts_alpha_tag` — covers the new helper
+    for numeric-prefix / alpha-tail split with 7.4p1, 1.3.5e,
+    1.0rc1, 2.4.59.
+- 495/495 tests pass, release clean.
+
 ## [0.67.1] - 2026-05-21
 - **Bugfix — `--update-cve-db` returned 404 from NVD API.** The
   sync URL passed only `pubStartDate`, but NVD JSON 2.0 rejects
