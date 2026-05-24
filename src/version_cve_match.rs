@@ -28,7 +28,29 @@ pub fn lookup(product: &str, version: &str, limit: usize) -> Result<CveMatch> {
         "NVD cache not found at ~/.cache/rustymap/nvd.sqlite. \
          Run `rustymap --update-cve-db` first (downloads ~80 MB of NVD JSON)."
     )?;
-    let entries = nvd::lookup(&conn, product, version, limit)?;
+    let mut entries = nvd::lookup(&conn, product, version, limit)?;
+    // v0.67.3: re-sort using the OR'd KEV flag (NVD's cisaExploitAdd
+    // field is sparse on historical CVEs, so we cross-reference the
+    // CISA-direct exploit_refs catalog). nvd::lookup already sorted
+    // by its own kev column; this reshuffle promotes any extra
+    // exploit_refs-KEV entries to the top.
+    let cat = crate::exploit_refs::load();
+    let kev_for = |id: &str| -> bool {
+        crate::exploit_refs::lookup(&cat, id)
+            .map(|r| r.kev)
+            .unwrap_or(false)
+    };
+    entries.sort_by(|a, b| {
+        let ka = a.kev || kev_for(&a.id);
+        let kb = b.kev || kev_for(&b.id);
+        kb.cmp(&ka)
+            .then_with(|| {
+                b.cvss31_base
+                    .partial_cmp(&a.cvss31_base)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| b.published.cmp(&a.published))
+    });
     Ok(CveMatch {
         product: product.to_string(),
         version: version.to_string(),
@@ -107,6 +129,19 @@ pub fn print_match(m: &CveMatch) {
         "EXPLOIT".bold(),
         "DESCRIPTION".bold(),
     );
+    // Helper: a CVE is KEV-flagged if EITHER the NVD entry's
+    // cisaExploitAdd field was populated OR the local CISA KEV
+    // catalog (--update-exploit-refs) lists it. v0.67.3: NVD's
+    // cisaExploitAdd is sparse historically, so without the OR we
+    // lost the badge on CVEs that ARE in CISA KEV.
+    let kev_active = |e: &crate::nvd::NvdEntry| -> bool {
+        if e.kev {
+            return true;
+        }
+        crate::exploit_refs::lookup(&exploit_cat, &e.id)
+            .map(|r| r.kev)
+            .unwrap_or(false)
+    };
     for e in &m.matches {
         let sev = e
             .cvss31_severity
@@ -128,7 +163,7 @@ pub fn print_match(m: &CveMatch) {
         // KEV is critical context — show as inline badge prefixing
         // the CVE id (not only in a trailing column) so it's the
         // first thing the user sees per-line.
-        let cve_cell = if e.kev {
+        let cve_cell = if kev_active(e) {
             format!("{} {}", "[KEV]".red().bold(), e.id)
         } else {
             e.id.clone()
@@ -144,8 +179,8 @@ pub fn print_match(m: &CveMatch) {
         );
     }
     // KEV count summary at the bottom so the user has a quick
-    // "how worried should I be" metric.
-    let kev_count = m.matches.iter().filter(|e| e.kev).count();
+    // "how worried should I be" metric. Same OR logic as above.
+    let kev_count = m.matches.iter().filter(|e| kev_active(e)).count();
     if kev_count > 0 {
         println!(
             "\n  {} {} of these are on CISA's Known Exploited Vulnerabilities list — \

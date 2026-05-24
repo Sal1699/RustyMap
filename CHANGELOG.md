@@ -4,6 +4,22 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.67.3] - 2026-05-21
+- **Bugfix — `[KEV]` badge missing on CVEs that ARE in CISA KEV.**
+  v0.67.0 set `kev=true` from NVD's `cisaExploitAdd` field, but
+  that field is sparsely populated on historical CVEs (e.g. lab
+  found `CVE-2024-6387` regreSSHion + `CVE-2023-38408` ssh-agent
+  PKCS#11 path traversal returning HIGH/CRITICAL but with no [KEV]
+  badge even though both are in the CISA catalog). The CISA KEV
+  JSON we sync separately via `--update-exploit-refs` is the
+  authoritative source. Fix: `version_cve_match::print_match` and
+  `lookup` now OR the NVD-derived `kev` flag with a lookup against
+  the local `exploit_refs` catalog. Reorder also runs on the OR'd
+  value so true-KEV entries float to the top regardless of CVSS.
+  Run `rustymap --update-exploit-refs` after upgrade if you
+  haven't yet.
+- 495/495 tests pass, release clean.
+
 ## [0.67.2] - 2026-05-21
 - **Bugfix — `--cve-for "OpenSSH 7.4p1"` returned 0 entries.** Even
   with a fully-populated NVD cache (352k entries), the CPE matcher
