@@ -1243,6 +1243,13 @@ pub struct Cli {
     #[arg(long = "check-update")]
     pub check_update: bool,
 
+    /// Inspect the local exploit_refs cache for a specific CVE.
+    /// Prints the JSON entry (kev / exploitdb / metasploit / nuclei)
+    /// + the catalog summary so you can verify a sync actually
+    /// populated what it should have.
+    #[arg(long = "inspect-exploit-cache", value_name = "CVE-XXXX-NNNN")]
+    pub inspect_exploit_cache: Option<String>,
+
     /// Network interface name for dns-sniff/dns-spoof
     #[arg(long = "iface")]
     pub iface: Option<String>,

@@ -409,6 +409,34 @@ async fn main() -> Result<()> {
         history::print(&entries);
         return Ok(());
     }
+    if let Some(cve) = &args.inspect_exploit_cache {
+        let cat = exploit_refs::load();
+        let total = cat.by_cve.len();
+        let kev_total = cat.by_cve.values().filter(|r| r.kev).count();
+        let exploit_total = cat.by_cve.values().filter(|r| !r.exploitdb.is_empty()).count();
+        let metasploit_total = cat.by_cve.values().filter(|r| !r.metasploit.is_empty()).count();
+        let nuclei_total = cat.by_cve.values().filter(|r| !r.nuclei.is_empty()).count();
+        println!("[inspect] catalog: ~/.cache/rustymap/exploit_refs.json");
+        println!("[inspect] total CVEs: {}", total);
+        println!("[inspect] KEV-flagged: {}", kev_total);
+        println!("[inspect] with ExploitDB entries: {}", exploit_total);
+        println!("[inspect] with Metasploit entries: {}", metasploit_total);
+        println!("[inspect] with Nuclei entries: {}", nuclei_total);
+        let probe = cve.to_uppercase();
+        println!("\n[inspect] entry for {}:", probe);
+        match cat.by_cve.get(&probe) {
+            Some(r) => println!("{}", serde_json::to_string_pretty(r).unwrap_or_default()),
+            None => println!("  (not in catalog)"),
+        }
+        if probe != "CVE-2024-6387" {
+            println!("\n[inspect] reference probe CVE-2024-6387 (regreSSHion, known KEV):");
+            match cat.by_cve.get("CVE-2024-6387") {
+                Some(r) => println!("{}", serde_json::to_string_pretty(r).unwrap_or_default()),
+                None => println!("  (not in catalog)"),
+            }
+        }
+        return Ok(());
+    }
     if let Some(parts) = &args.explain {
         // --explain accepts either a single quoted blob ("--sT 10.0.0.5")
         // or a sequence of bare args (--sT 10.0.0.5). In the multi-arg

@@ -4,6 +4,24 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.67.5] - 2026-05-22
+- **New diagnostic flag — `--inspect-exploit-cache CVE-XXXX-NNNN`.**
+  v0.67.4 sync said "1602 CISA KEV CVEs flagged" but --cve-for
+  still showed no [KEV] badge on CVE-2024-6387. Without poking
+  the on-disk JSON manually we can't tell whether the entry was
+  saved with kev:true, whether the load() path is reading the
+  right file, or whether the CVE id is stored under a slightly
+  different key (e.g. case / whitespace).
+  - Prints catalog summary: total CVEs / KEV count / ExploitDB /
+    Metasploit / Nuclei counts.
+  - Prints the JSON entry for the requested CVE id (uppercased
+    automatically).
+  - If the user passed a different id, ALSO prints CVE-2024-6387
+    as a sanity reference (we know that's in CISA KEV).
+  - Helps localise where the badge pipeline drops: in the sync,
+    on disk, or in the lookup at print-time.
+- 495/495 tests pass.
+
 ## [0.67.4] - 2026-05-22
 - **Diagnostic — `--update-exploit-refs` silently produced 0 KEV
   flags.** Lab on v0.67.3: `--cve-for "OpenSSH 7.4p1"` finally got
