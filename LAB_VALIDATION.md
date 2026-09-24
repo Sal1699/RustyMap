@@ -34,6 +34,7 @@ To promote a feature from one tier to the next:
 | Date | Feature | Lab target | Reference | Result | Notes | Promoted? |
 |---|---|---|---|---|---|---|
 | _yyyy-mm-dd_ | _e.g. `--brute-protocol ssh`_ | _e.g. ubuntu-22 sshd on 10.0.0.5_ | _hydra ssh://_ | _e.g. ✓ same 3/5 hits_ | _free-form_ | _Beta → Prod_ |
+| 2026-05-22 | `[KEV]` badge | OpenSSH banner (`--cve-for "OpenSSH 7.4p1"`) | live CISA KEV feed | ✓ pipeline correct — badge absent is right | **Not a bug.** CVE-2024-6387 (regreSSHion) is NOT in CISA KEV (verified: 1721 entries, zero OpenSSH). No confirmed in-the-wild exploitation → never entered KEV. v0.67.3–0.67.5 chased a badge that was correctly absent. | n/a |
 
 ## Targets in current lab
 
@@ -69,6 +70,12 @@ most likely to reveal bugs the synthetic tests didn't.
 - [ ] `--cve-for` — manually verify 20 matches across CPE styles
   (`openssh 7.4p1`, `nginx:1.18.0`, `apache 2.4.59-1ubuntu1`, etc.)
   → flag false positives + false negatives
+- [x] `[KEV]` badge — **validate only against a CVE that is actually in
+  CISA KEV.** Anchor: `CVE-2021-44228` (Log4Shell, permanent entry).
+  Do NOT use CVE-2024-6387/regreSSHion or any OpenSSH CVE — none are in
+  KEV. Use `--inspect-exploit-cache <CVE>`: if the Log4Shell anchor
+  shows `kev:true` and your CVE doesn't, the pipeline is healthy and
+  your CVE just isn't KEV-listed.
 
 ### Specialized
 - [ ] `--ics-scan` against a real PLC (vs Conpot synthetic baseline)

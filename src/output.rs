@@ -30,6 +30,39 @@ pub fn reason_for(scan_type: &str, state: PortState) -> &'static str {
     }
 }
 
+/// Format a 6-byte MAC as the canonical colon-separated uppercase hex.
+fn fmt_mac(mac: &[u8; 6]) -> String {
+    mac.iter()
+        .map(|b| format!("{:02X}", b))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+/// Estimate hop count from an observed TTL/hop-limit, the way nmap does:
+/// assume the sender used the nearest standard initial TTL at or above
+/// the observed value (64 for *nix/macOS, 128 for Windows, 255 for many
+/// network appliances) and count how far it decremented in transit.
+fn network_distance(ttl: u8) -> u8 {
+    let initial: u16 = if ttl <= 64 {
+        64
+    } else if ttl <= 128 {
+        128
+    } else {
+        255
+    };
+    (initial - ttl as u16) as u8
+}
+
+/// Per-port round-trip time in milliseconds, or an em dash when the scan
+/// path did not record one (e.g. synthetic/cancelled probes).
+fn fmt_rtt(rtt: std::time::Duration) -> String {
+    if rtt.is_zero() {
+        "—".to_string()
+    } else {
+        format!("{:.2}ms", rtt.as_secs_f64() * 1000.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,10 +126,26 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
     let total = host.ports.len();
     let filtered = total - open_count - closed_count;
 
-    println!(
-        "Host is up ({:.3}s latency).",
-        host.elapsed.as_secs_f64()
-    );
+    // Prefer the fastest real probe RTT as the reported latency (what
+    // nmap shows) over the scan wall-clock, which is inflated by
+    // filtered-port timeouts. Fall back to host.elapsed (which the ARP
+    // path already overrides with the true reply RTT for LAN hosts).
+    let latency = host
+        .ports
+        .iter()
+        .map(|p| p.rtt)
+        .filter(|r| !r.is_zero())
+        .min()
+        .unwrap_or(host.elapsed);
+    // Adaptive precision: sub-millisecond latencies would collapse to
+    // "0.000s" at 3 decimals, so widen to 6 like nmap does.
+    let lat = latency.as_secs_f64();
+    let lat_str = if lat > 0.0 && lat < 0.001 {
+        format!("{:.6}", lat)
+    } else {
+        format!("{:.3}", lat)
+    };
+    println!("Host is up ({}s latency).", lat_str);
 
     if let Some(os) = &host.os {
         let ttl_s = os.ttl.map(|t| format!(" TTL={}", t)).unwrap_or_default();
@@ -124,6 +173,27 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
         );
         if verbose > 0 && !dev.hints.is_empty() {
             println!("  hints: {}", dev.hints.join(", "));
+        }
+    }
+
+    // MAC address (LAN scans): resolve the OUI vendor for context, the
+    // same line nmap prints. host.mac is populated from the ARP sweep.
+    if let Some(mac) = &host.mac {
+        let vendor = crate::device_fp::vendor_from_mac(mac)
+            .map(|v| format!(" ({})", v))
+            .unwrap_or_default();
+        println!("MAC Address: {}{}", fmt_mac(mac), vendor);
+    }
+
+    // Network distance derived from the fingerprinted TTL/hop-limit —
+    // nmap prints this from its OS-detection probes; we get it for free
+    // from the ping TTL already captured during host discovery.
+    if let Some(os) = &host.os {
+        if let Some(ttl) = os.ttl {
+            let hops = network_distance(ttl);
+            let unit = if hops == 1 { "hop" } else { "hops" };
+            let extra = if hops == 0 { " (directly connected)" } else { "" };
+            println!("Network Distance: {} {}{}", hops, unit, extra);
         }
     }
 
@@ -164,28 +234,63 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
         return;
     }
 
+    // RTT column is extra detail nmap does not print by default; show it
+    // once the user asks for any verbosity. Columns are assembled
+    // dynamically so REASON/RTT slot in without breaking alignment.
+    let show_rtt = verbose >= 1;
+    let mut header: Vec<String> = vec![
+        format!("{:<10}", "PORT").bold().to_string(),
+        format!("{:<14}", "STATE").bold().to_string(),
+    ];
     if show_reason {
-        println!("{:<10} {:<10} {:<18} {:<16} VERSION", "PORT", "STATE", "REASON", "SERVICE");
-    } else {
-        println!("{:<10} {:<10} {:<16} VERSION", "PORT", "STATE", "SERVICE");
+        header.push(format!("{:<18}", "REASON").bold().to_string());
     }
+    if show_rtt {
+        header.push(format!("{:<10}", "RTT").bold().to_string());
+    }
+    header.push(format!("{:<16}", "SERVICE").bold().to_string());
+    header.push("VERSION".bold().to_string());
+    println!("{}", header.join(" "));
+
     for p in &host.ports {
         let port_s = format!("{}/tcp", p.port);
-        let (state_s, colored_state) = match p.state {
-            PortState::Open => ("open", "open".green().bold()),
-            PortState::Closed => ("closed", "closed".red()),
-            PortState::Filtered => ("filtered", "filtered".yellow()),
-            PortState::OpenFiltered => ("open|filtered", "open|filtered".cyan()),
-            PortState::Unfiltered => ("unfiltered", "unfiltered".magenta()),
+        // Pad the plain text to width FIRST, then colorize, so the ANSI
+        // escapes don't throw off column alignment.
+        let state_plain = format!("{:<14}", p.state.as_str());
+        let colored_state = match p.state {
+            PortState::Open => state_plain.green().bold(),
+            PortState::Closed => state_plain.red(),
+            PortState::Filtered => state_plain.yellow(),
+            PortState::OpenFiltered => state_plain.cyan(),
+            PortState::Unfiltered => state_plain.magenta(),
         };
         let service = service_name(p.port).unwrap_or("unknown");
         let version = p.service.as_ref().map(|s| s.display()).unwrap_or_default();
-        let _ = state_s;
+        let mut cells: Vec<String> = vec![
+            format!("{:<10}", port_s),
+            colored_state.to_string(),
+        ];
         if show_reason {
-            let reason = reason_for(scan_type, p.state);
-            println!("{:<10} {:<10} {:<18} {:<16} {}", port_s, colored_state, reason, service, version);
-        } else {
-            println!("{:<10} {:<10} {:<16} {}", port_s, colored_state, service, version);
+            cells.push(format!("{:<18}", reason_for(scan_type, p.state)));
+        }
+        if show_rtt {
+            cells.push(format!("{:<10}", fmt_rtt(p.rtt)));
+        }
+        cells.push(format!("{:<16}", service));
+        cells.push(version);
+        println!("{}", cells.join(" "));
+        // Raw service banner at -vv — the actual bytes we matched on,
+        // more transparent than nmap's cooked service line.
+        if verbose >= 2 {
+            if let Some(svc) = &p.service {
+                if let Some(b) = &svc.banner {
+                    let first = b.lines().next().unwrap_or("").trim();
+                    if !first.is_empty() {
+                        let shown: String = first.chars().take(120).collect();
+                        println!("           banner: {}", shown.dimmed());
+                    }
+                }
+            }
         }
         if let Some(svc) = &p.service {
             if let Some(tls) = &svc.tls {
@@ -211,6 +316,37 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
                 }
             }
         }
+    }
+
+    // Service Info rollup — one nmap-style line summarising OS, device
+    // class and every distinct product detected across the open ports.
+    let mut products: Vec<String> = Vec::new();
+    for p in &host.ports {
+        if let Some(svc) = &p.service {
+            let d = svc.display();
+            if !d.is_empty() && !products.contains(&d) {
+                products.push(d);
+            }
+        }
+    }
+    let mut info_bits: Vec<String> = Vec::new();
+    if let Some(os) = &host.os {
+        let fam = os.family.trim();
+        if !fam.is_empty() && !fam.eq_ignore_ascii_case("unknown") {
+            info_bits.push(format!("OS: {}", fam));
+        }
+    }
+    if let Some(dev) = &host.device {
+        let class = dev.class.as_str();
+        if !class.eq_ignore_ascii_case("unknown") {
+            info_bits.push(format!("Device: {}", class));
+        }
+    }
+    if !products.is_empty() {
+        info_bits.push(format!("Services: {}", products.join(", ")));
+    }
+    if !info_bits.is_empty() {
+        println!("Service Info: {}", info_bits.join("; "));
     }
 }
 

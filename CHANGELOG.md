@@ -4,6 +4,85 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.68.0] - 2026-09-24
+
+Fase 27 kickoff — richer-than-nmap scan output, a host-discovery
+optimization, and a localhost-scan hang fix. (The Criterion bench harness
+and `PERFORMANCE.md` are the remainder of Fase 27, still to come.)
+
+### Output detail — now exceeds nmap's default report
+- **Per-port RTT column** (shown at `-v`). nmap does not print per-port
+  round-trip times at all; RustyMap now surfaces the RTT it was already
+  measuring (previously captured then discarded as dead code).
+- **Accurate host latency.** The "Host is up" line now reports the
+  fastest real probe RTT instead of the scan wall-clock, which was
+  inflated by filtered-port timeouts (localhost went from a bogus
+  "1.504s latency" to a true "0.000292s"). Sub-millisecond latencies
+  print at 6-decimal precision like nmap.
+- **MAC Address line with OUI vendor** on LAN scans. The ARP-discovered
+  MAC is finally plumbed into the host result — it used to be discovered
+  and then dropped (the "real MAC plumbing happens later" TODO), so the
+  device classifier always saw `None`. Now it feeds both the MAC line
+  and device classification.
+- **Network Distance** (hop count) derived from the fingerprinted
+  TTL/hop-limit, the way nmap reports it.
+- **Raw service banner** printed at `-vv` — the actual bytes matched on,
+  more transparent than nmap's cooked service line.
+- **"Service Info:" rollup** line summarising OS, device class, and every
+  distinct product detected across the open ports.
+- Port-table columns are assembled dynamically (REASON/RTT slot in
+  cleanly) and state colouring no longer throws off column alignment.
+
+### Performance
+- **Host discovery short-circuits.** `tcp_ping` probed 10 high-value
+  ports concurrently but then `collect()`ed *all* results before
+  deciding — so a host proven up by an open port in 1 ms was still held
+  hostage by 9 filtered ports resolving only at the full timeout. It now
+  streams with `.any()` and returns on the first positive probe, bounding
+  per-host discovery latency by the fastest reply instead of the slowest
+  timeout. Compounds across a `/24` sweep.
+
+### Fixes
+- **Localhost scan hung for minutes.** `127.0.0.1` was matched by the
+  Npcap loopback adapter's `127.0.0.0/8` and driven into an ARP sweep
+  that could never get a reply and blocked well past its deadline (Npcap
+  ignores `read_timeout` on an idle adapter). ARP now refuses loopback /
+  unspecified / broadcast targets at the single chokepoint both the LAN
+  check and the sweep pass through. A localhost scan that previously hung
+  >4 minutes now completes in ~0.03s. Regression tests added.
+
+- 497/497 tests pass.
+
+## [0.67.6] - 2026-09-24
+- **Root cause found: the `[KEV]` badge was never broken.** v0.67.3–0.67.5
+  chased a missing `[KEV]` badge on `CVE-2024-6387` (regreSSHion) under
+  the assumption that it is a CISA KEV entry. It is not. Verified against
+  the live CISA KEV feed: **1721 entries, zero OpenSSH CVEs, no
+  CVE-2024-6387.** regreSSHion never entered KEV because there was no
+  confirmed in-the-wild exploitation (the exploit is a hard-to-win race).
+  A missing badge on it is *correct output*, not a bug. The sync → save →
+  load → lookup pipeline is healthy; the diagnostic premise was wrong.
+- **Fix — the wrong assumption was baked into the code.** The
+  `--inspect-exploit-cache` reference probe hardcoded
+  `CVE-2024-6387 (regreSSHion, known KEV)` as its "known KEV" anchor, so
+  every diagnostic run kept re-confirming a false hypothesis. Replaced
+  with `CVE-2021-44228` (Log4Shell), a permanent CISA KEV entry, and
+  reworded the output: if the anchor shows `kev:true` and the probed CVE
+  doesn't, the pipeline is healthy and the probed CVE simply isn't
+  KEV-listed.
+- **Fix — hardcoded cache path in diagnostic.** `--inspect-exploit-cache`
+  printed a literal `~/.cache/rustymap/exploit_refs.json`, which is only
+  correct when `dirs_cache_dir()` takes the `HOME/.cache` branch. It
+  resolves elsewhere under `XDG_CACHE_HOME` or the `LOCALAPPDATA`
+  fallback. Now prints the actual resolved `exploit_refs::cache_path()`
+  so the operator always looks in the real location.
+- **Guide sync.** `--inspect-exploit-cache` (added in v0.67.5) was missing
+  from `--guide`; added it next to the other exploit-refs diagnostics,
+  documenting the Log4Shell KEV anchor.
+- **LAB_VALIDATION.md.** Logged the finding and added a KEV-badge
+  validation task that anchors on Log4Shell, so this thread stays closed.
+- 495/495 tests pass.
+
 ## [0.67.5] - 2026-05-22
 - **New diagnostic flag — `--inspect-exploit-cache CVE-XXXX-NNNN`.**
   v0.67.4 sync said "1602 CISA KEV CVEs flagged" but --cve-for

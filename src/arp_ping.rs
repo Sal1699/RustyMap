@@ -19,6 +19,17 @@ use std::time::{Duration, Instant};
 /// Pick the first interface whose IPv4 subnet contains `target`.
 /// Returns the interface, our source IP, and our MAC.
 pub fn pick_interface_for(target: Ipv4Addr) -> Option<(NetworkInterface, Ipv4Addr, MacAddr)> {
+    // Never ARP for a non-on-link address. Loopback is the important one:
+    // on Windows the Npcap loopback adapter is not always flagged as
+    // loopback and carries 127.0.0.1/8, so a naive subnet match treats
+    // `localhost` as a LAN host and drives us into an ARP capture that
+    // never gets a reply and (Npcap ignoring read_timeout on an idle
+    // adapter) blocks well past the deadline. Scanning localhost is
+    // routine, so guard it here at the single chokepoint both the LAN
+    // check and the ARP sweep go through.
+    if target.is_loopback() || target.is_unspecified() || target.is_broadcast() {
+        return None;
+    }
     for iface in datalink::interfaces() {
         if iface.is_loopback() || iface.mac.is_none() {
             continue;
@@ -139,4 +150,24 @@ pub fn arp_discover_timed(
 /// `target` — i.e. ARP is going to work and is preferable to TCP ping.
 pub fn target_is_on_lan(target: Ipv4Addr) -> bool {
     pick_interface_for(target).is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loopback_is_never_on_lan() {
+        // Regression: 127.0.0.1 was matched by the Npcap loopback
+        // adapter's 127.0.0.0/8 and driven into an ARP sweep that hung
+        // past the deadline. Localhost must always bypass ARP.
+        assert!(!target_is_on_lan(Ipv4Addr::new(127, 0, 0, 1)));
+        assert!(pick_interface_for(Ipv4Addr::new(127, 0, 0, 1)).is_none());
+    }
+
+    #[test]
+    fn unspecified_and_broadcast_bypass_arp() {
+        assert!(pick_interface_for(Ipv4Addr::UNSPECIFIED).is_none());
+        assert!(pick_interface_for(Ipv4Addr::BROADCAST).is_none());
+    }
 }

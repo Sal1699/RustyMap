@@ -69,7 +69,6 @@ pub struct PortResult {
     pub port: u16,
     pub state: PortState,
     #[serde(skip)]
-    #[allow(dead_code)]
     pub rtt: Duration,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub service: Option<crate::service_probe::ServiceInfo>,

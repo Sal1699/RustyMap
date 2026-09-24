@@ -497,12 +497,15 @@ pub fn print_guide() {
     line("--update              Scarica e installa l'ultima release da GitHub");
     line("--update-cve-db       Sync NVD JSON 2.0 (last 5y) → ~/.cache/rustymap/nvd.sqlite");
     line("--update-exploit-refs Sync KEV + ExploitDB + Nuclei → exploit_refs.json");
+    line("--inspect-exploit-cache CVE  Diagnostica cache exploit: conteggi + voce del CVE");
+    line("                      Ancora KEV: CVE-2021-44228 (Log4Shell, sempre in KEV)");
     example("rustymap --sS --audit-log audit.jsonl 10.0.0.5");
     example("rustymap --install-npcap");
     example("rustymap --check-update");
     example("rustymap --update");
     example("rustymap --update-cve-db");
     example("rustymap --update-exploit-refs");
+    example("rustymap --inspect-exploit-cache CVE-2024-6387");
 
     section("ALTRO");
     line("--help                Help breve (clap)");

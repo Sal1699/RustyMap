@@ -13,7 +13,14 @@ const PROBE_PORTS: &[u16] = &[80, 443, 22, 445, 3389, 21, 25, 53, 139, 8080];
 
 pub async fn tcp_ping(target: &Target, timeout_dur: Duration) -> bool {
     let ip = target.ip;
-    let probes = stream::iter(PROBE_PORTS.iter().copied())
+    // Probe the high-value ports concurrently, but return the instant any
+    // one proves the host alive (open OR RST). Streaming `.any()`
+    // short-circuits — it drops the still-pending probes instead of
+    // blocking on the slowest one, so a host whose first responsive port
+    // answers in 1 ms is not held hostage by 9 filtered ports that will
+    // only resolve at the full timeout. Bounds discovery latency per host
+    // by the fastest reply rather than the slowest timeout.
+    stream::iter(PROBE_PORTS.iter().copied())
         .map(|port| async move {
             let addr = SocketAddr::new(ip, port);
             match timeout(timeout_dur, TcpStream::connect(addr)).await {
@@ -22,10 +29,9 @@ pub async fn tcp_ping(target: &Target, timeout_dur: Duration) -> bool {
                 Err(_) => false,
             }
         })
-        .buffer_unordered(PROBE_PORTS.len());
-
-    let results: Vec<bool> = probes.collect().await;
-    results.into_iter().any(|up| up)
+        .buffer_unordered(PROBE_PORTS.len())
+        .any(|up| async move { up })
+        .await
 }
 
 pub async fn discover_hosts(

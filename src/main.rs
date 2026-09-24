@@ -416,7 +416,7 @@ async fn main() -> Result<()> {
         let exploit_total = cat.by_cve.values().filter(|r| !r.exploitdb.is_empty()).count();
         let metasploit_total = cat.by_cve.values().filter(|r| !r.metasploit.is_empty()).count();
         let nuclei_total = cat.by_cve.values().filter(|r| !r.nuclei.is_empty()).count();
-        println!("[inspect] catalog: ~/.cache/rustymap/exploit_refs.json");
+        println!("[inspect] catalog: {}", exploit_refs::cache_path().display());
         println!("[inspect] total CVEs: {}", total);
         println!("[inspect] KEV-flagged: {}", kev_total);
         println!("[inspect] with ExploitDB entries: {}", exploit_total);
@@ -428,11 +428,26 @@ async fn main() -> Result<()> {
             Some(r) => println!("{}", serde_json::to_string_pretty(r).unwrap_or_default()),
             None => println!("  (not in catalog)"),
         }
-        if probe != "CVE-2024-6387" {
-            println!("\n[inspect] reference probe CVE-2024-6387 (regreSSHion, known KEV):");
-            match cat.by_cve.get("CVE-2024-6387") {
+        // Reference anchor: a CVE that is PERMANENTLY in CISA KEV (KEV
+        // entries are never removed once added). If this anchor shows
+        // kev:true but the probed CVE doesn't, the pipeline is HEALTHY
+        // and the probed CVE simply isn't a KEV entry — not every
+        // serious CVE is. Note: CVE-2024-6387 (regreSSHion) is NOT in
+        // CISA KEV (verified against the live feed 2026-05-22: 1721
+        // entries, zero OpenSSH) because there was never confirmed
+        // in-the-wild exploitation, so a missing [KEV] badge on it is
+        // correct, not a bug. Use Log4Shell as the always-present anchor.
+        const KEV_ANCHOR: &str = "CVE-2021-44228"; // Log4Shell
+        if probe != KEV_ANCHOR {
+            println!(
+                "\n[inspect] reference anchor {} (Log4Shell, permanent CISA KEV entry):",
+                KEV_ANCHOR
+            );
+            match cat.by_cve.get(KEV_ANCHOR) {
                 Some(r) => println!("{}", serde_json::to_string_pretty(r).unwrap_or_default()),
-                None => println!("  (not in catalog)"),
+                None => {
+                    println!("  (not in catalog — catalog empty or KEV sync failed; re-run --update-exploit-refs)")
+                }
             }
         }
         return Ok(());
@@ -1734,6 +1749,13 @@ async fn main() -> Result<()> {
     // post-scan host.elapsed fixup at the report stage can read it.
     let mut arp_rtt: std::collections::HashMap<std::net::Ipv4Addr, std::time::Duration> =
         std::collections::HashMap::new();
+    // MAC map hoisted to the outer scope too (like arp_rtt), so the
+    // report stage can attach host.mac — feeds the OUI vendor lookup,
+    // device classification, and the "MAC Address" output line. Before
+    // this the MAC was discovered by ARP then dropped (the "real MAC
+    // plumbing happens later" comment below never got wired up).
+    let mut arp_alive: std::collections::HashMap<std::net::Ipv4Addr, pnet::util::MacAddr> =
+        std::collections::HashMap::new();
     if !effective_skip_discovery && !matches!(scan_type, ScanType::List) {
         let before = targets.len();
 
@@ -1754,8 +1776,6 @@ async fn main() -> Result<()> {
             || !args.ping_sctp.is_empty();
         let prefer_arp = args.ping_arp || (any_lan_v4 && !explicit_other_discovery);
         let arp_only_explicit = args.ping_arp;
-        let mut arp_alive: std::collections::HashMap<std::net::Ipv4Addr, pnet::util::MacAddr> =
-            std::collections::HashMap::new();
         if prefer_arp {
             #[cfg(windows)]
             npcap::ensure_available()?;
@@ -2273,6 +2293,19 @@ async fn main() -> Result<()> {
                 if !has_signal { continue; }
             }
             h.os = Some(os_fp::fingerprint(h, timeout_dur));
+        }
+    }
+
+    // 4.65) Attach ARP-discovered MAC addresses to the host results so
+    // the OUI vendor lookup, device classification, and the report's
+    // "MAC Address" line can all use them (nmap parity for LAN scans).
+    if !arp_alive.is_empty() {
+        for h in results.iter_mut() {
+            if let std::net::IpAddr::V4(v) = h.target.ip {
+                if let Some(mac) = arp_alive.get(&v) {
+                    h.mac = Some([mac.0, mac.1, mac.2, mac.3, mac.4, mac.5]);
+                }
+            }
         }
     }
 
