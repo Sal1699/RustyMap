@@ -257,10 +257,75 @@ pub fn cpe_matches_banner(cpe: &str, banner_product: &str, version: &str) -> boo
     false
 }
 
+/// Range-aware affected-version match. `cpe_matches_banner` already checks
+/// the vendor/product (and any concrete version in the CPE itself); this
+/// adds the NVD version-range bounds as a further constraint, so a
+/// wildcard-version CPE no longer matches *every* version of a product
+/// (lab bug 2.B: CVE-2024-6387 matched OpenSSH 6.6.1, which is outside its
+/// affected 8.5–9.8 range). Bounds are the NVD fields versionStart/End
+/// Including/Excluding.
+pub fn cpe_criteria_matches(
+    criteria: &str,
+    vsi: Option<&str>,
+    vse: Option<&str>,
+    vei: Option<&str>,
+    vee: Option<&str>,
+    product: &str,
+    version: &str,
+) -> bool {
+    use std::cmp::Ordering;
+    // Vendor/product (and concrete-version CPEs) handled by the existing
+    // matcher; if that already rejects, we're done.
+    if !cpe_matches_banner(criteria, product, version) {
+        return false;
+    }
+    let has_range = vsi.is_some() || vse.is_some() || vei.is_some() || vee.is_some();
+    if !has_range {
+        return true;
+    }
+    let nv = normalize_version(version);
+    if nv.is_empty() {
+        // Nothing to range-check against — keep the (product-matched) hit.
+        return true;
+    }
+    if let Some(s) = vsi {
+        if version_compare(&nv, &normalize_version(s)) == Ordering::Less {
+            return false; // below inclusive start
+        }
+    }
+    if let Some(s) = vse {
+        if version_compare(&nv, &normalize_version(s)) != Ordering::Greater {
+            return false; // at or below exclusive start
+        }
+    }
+    if let Some(e) = vei {
+        if version_compare(&nv, &normalize_version(e)) == Ordering::Greater {
+            return false; // above inclusive end
+        }
+    }
+    if let Some(e) = vee {
+        if version_compare(&nv, &normalize_version(e)) != Ordering::Less {
+            return false; // at or above exclusive end
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cmp::Ordering::*;
+
+    #[test]
+    fn regresshion_range_excludes_openssh_6() {
+        // CVE-2024-6387 affects OpenSSH 8.5..<9.8. A wildcard-version CPE
+        // would otherwise match 6.6.1 (the lab false positive).
+        let cpe = "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*";
+        assert!(!cpe_criteria_matches(cpe, Some("8.5"), None, None, Some("9.8"), "OpenSSH", "6.6.1p1"));
+        assert!(cpe_criteria_matches(cpe, Some("8.5"), None, None, Some("9.8"), "OpenSSH", "9.6"));
+        // No range → falls back to wildcard match (all versions).
+        assert!(cpe_criteria_matches(cpe, None, None, None, None, "OpenSSH", "6.6.1p1"));
+    }
 
     #[test]
     fn normalize_strips_distro_suffixes() {

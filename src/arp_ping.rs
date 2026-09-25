@@ -63,16 +63,6 @@ pub fn pick_interface_for(target: Ipv4Addr) -> Option<(NetworkInterface, Ipv4Add
     None
 }
 
-/// Send ARP "who has X.X.X.X tell <us>" for each target in `targets`,
-/// listen for replies for `timeout`, and return the set of IPs that
-/// answered (with their MAC, useful for vendor classification later).
-pub fn arp_discover(
-    targets: &[Ipv4Addr],
-    timeout: Duration,
-) -> Result<HashMap<Ipv4Addr, MacAddr>> {
-    arp_discover_timed(targets, timeout).map(|m| m.into_iter().map(|(k, (mac, _))| (k, mac)).collect())
-}
-
 /// Same as `arp_discover` but also records the per-target reply RTT
 /// (Bug-06 fix). The old API kept all hosts at the call-site's
 /// scan-elapsed time which equalled the discovery timeout, masking the

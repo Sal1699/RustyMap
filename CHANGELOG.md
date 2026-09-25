@@ -4,6 +4,50 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.68.3] - 2026-09-25
+
+Third lab-report wave. Closes the tractable Tier-1/Tier-3 bugs; the two
+Tier-2 architectural items (real TCP-stack OS fingerprinting, full SSL
+cipher enumeration) plus a few probe/data-heavy items are called out as
+remaining work below — they need packet-level implementation and varied
+real-target validation, not a rushed one-commit change.
+
+### Fixed
+- **CVE version-range false positives (lab bug 2.B).** `--cve-for` /
+  correlation matched a wildcard-version CPE against *every* version of a
+  product — e.g. CVE-2024-6387 (regreSSHion, affects OpenSSH 8.5–<9.8) was
+  reported for OpenSSH 6.6.1. The NVD `versionStart/End Including/Excluding`
+  bounds are now captured during sync and enforced at match time.
+  **Re-run `rustymap --update-cve-db`** to populate the ranges (old caches
+  fall back to the previous behaviour until re-synced).
+- **`-n` with a hostname errored out (lab bug 3.4).** `-n`/`--no-dns` now
+  only suppresses *reverse* DNS; command-line hostnames are still forward-
+  resolved (via the system resolver), matching nmap. `rustymap -n
+  scanme.nmap.org` scans instead of failing "DNS disabled".
+- **`--http-methods` over-flagged rejected methods (lab bug 4.C).** A PUT
+  that came back 405/403/422 was labelled `critical`. Severity is now
+  contextual: a method's inherent risk only applies when the server
+  actually *accepts* it; refused/inconclusive answers are `info`.
+- **UDP ports were labelled `/tcp` and states were hidden (lab bug 1.A).**
+  UDP scans now print `/udp`, and per-port UDP states (open / open|filtered
+  / closed) are shown individually or collapsed via the 0.68.2 "Not shown"
+  path instead of a bare summary count.
+- **Confusing `NOT_TLS` label (lab bug 5.D).** The CCS-injection check now
+  prints `n/a (port not TLS)` instead of the verdict-looking `NOT_TLS`.
+- Removed dead `arp_discover` wrapper (superseded by `arp_discover_timed`).
+- 501/501 tests pass; core commands smoke-tested.
+
+### Still open (dedicated follow-ups, not in this release)
+- **OS fingerprinting** is still TTL-only — real TCP/IP stack
+  fingerprinting (ISN, window, options, DF, T1–T7) and using `--nmap-os-db`
+  is a substantial effort (Tier 2).
+- **SSL cipher enumeration** still shows the negotiated cipher only; full
+  per-suite enumeration (+ SWEET32/3DES warnings) is Tier 2.
+- **Discovery of RST-only remote hosts (0.D)** needs an ICMP/ACK probe
+  fallback (raw sockets) validated against varied lab targets.
+- `--cloud-fingerprint` for Google/Cloudflare needs IP-range data (4.A);
+  `nmap-service-probes` parser coverage (5.C); TCP traceroute (1.C).
+
 ## [0.68.2] - 2026-09-25
 
 Reliability fixes from the second v0.68.1 vs nmap 7.99 lab comparison —

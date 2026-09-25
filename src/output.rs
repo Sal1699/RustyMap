@@ -282,8 +282,10 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
     header.push("VERSION".bold().to_string());
     println!("{}", header.join(" "));
 
+    // UDP scans must label ports /udp, not /tcp (lab bug 1.A presentation).
+    let proto = if scan_type.eq_ignore_ascii_case("udp") { "udp" } else { "tcp" };
     for p in shown.iter().copied() {
-        let port_s = format!("{}/tcp", p.port);
+        let port_s = format!("{}/{}", p.port, proto);
         // Pad the plain text to width FIRST, then colorize, so the ANSI
         // escapes don't throw off column alignment.
         let state_plain = format!("{:<14}", p.state.as_str());

@@ -38,7 +38,7 @@ impl CcsStatus {
             CcsStatus::Vulnerable => "VULNERABLE",
             CcsStatus::Patched => "PATCHED",
             CcsStatus::Unknown => "UNKNOWN",
-            CcsStatus::NotTls => "NOT_TLS",
+            CcsStatus::NotTls => "n/a (port not TLS)",
         }
     }
 }
@@ -175,7 +175,7 @@ pub fn print_finding(f: &CcsFinding) {
         CcsStatus::Vulnerable => "VULNERABLE".red().bold().to_string(),
         CcsStatus::Patched => "PATCHED".green().to_string(),
         CcsStatus::Unknown => "UNKNOWN".yellow().to_string(),
-        CcsStatus::NotTls => "NOT_TLS".dimmed().to_string(),
+        CcsStatus::NotTls => "n/a (port not TLS)".dimmed().to_string(),
     };
     let alert = f
         .alert_desc
@@ -222,6 +222,6 @@ mod tests {
     fn ccs_status_labels_distinct() {
         assert_ne!(CcsStatus::Vulnerable.label(), CcsStatus::Patched.label());
         assert_ne!(CcsStatus::Patched.label(), CcsStatus::Unknown.label());
-        assert_eq!(CcsStatus::NotTls.label(), "NOT_TLS");
+        assert_eq!(CcsStatus::NotTls.label(), "n/a (port not TLS)");
     }
 }

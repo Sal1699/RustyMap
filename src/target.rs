@@ -223,10 +223,34 @@ async fn expand_one(
         return Ok(());
     }
 
-    Err(anyhow!(
-        "Cannot parse target '{}' (DNS disabled — drop -n/--no-dns or use an IP/CIDR)",
-        spec
-    ))
+    // -n / --no-dns disabled the configured resolver, but a hostname target
+    // still has to be forward-resolved to be scannable at all — nmap does
+    // the same (only *reverse* DNS is suppressed by -n, not forward
+    // resolution of the targets you named). Fall back to the system
+    // resolver for the forward lookup (lab bug 3.4).
+    match tokio::net::lookup_host((clean, 0u16)).await {
+        Ok(addrs) => {
+            let mut any = false;
+            for sa in addrs {
+                out.push(Target {
+                    ip: sa.ip(),
+                    hostname: Some(spec.to_string()),
+                    zone: zone_owned.clone(),
+                });
+                any = true;
+            }
+            if any {
+                return Ok(());
+            }
+            Err(anyhow!("No A/AAAA records for '{}'", spec))
+        }
+        Err(e) => Err(anyhow!(
+            "Cannot resolve target '{}' ({}). With -n/--no-dns you can still pass an \
+             IP/CIDR; drop -n to use the configured resolver.",
+            spec,
+            e
+        )),
+    }
 }
 
 /// Split off the "%zone" suffix from an IPv6 spec. Handles both bare

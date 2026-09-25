@@ -140,6 +140,17 @@ pub fn severity(method: &str) -> &'static str {
     }
 }
 
+/// Risk actually posed, given how the server answered. A method's inherent
+/// severity only matters when the server *accepts* it — a PUT that comes
+/// back 405/403 (Refused) or 404/422 (inconclusive) is not "critical", it
+/// is blocked/rejected (lab bug 4.C: a 422 on PUT was flagged critical).
+pub fn effective_severity(method: &str, allowed: AllowedKind) -> &'static str {
+    match allowed {
+        AllowedKind::Accepted | AllowedKind::Listed => severity(method),
+        AllowedKind::Refused | AllowedKind::Unknown => "info",
+    }
+}
+
 pub fn print_finding(f: &MethodsFinding) {
     use colored::*;
     println!();
@@ -156,7 +167,7 @@ pub fn print_finding(f: &MethodsFinding) {
             AllowedKind::Refused => "REFUSED".green().to_string(),
             AllowedKind::Unknown => "UNKNOWN".dimmed().to_string(),
         };
-        let sev = severity(&r.method);
+        let sev = effective_severity(&r.method, r.allowed);
         println!(
             "  {:<10} {:<10} status={:<3} sev={}",
             r.method, label, r.status, sev

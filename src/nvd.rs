@@ -20,7 +20,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -46,7 +46,7 @@ pub struct NvdEntry {
     pub cvss40_vector: Option<String>,
     pub cvss40_base: Option<f64>,
     pub cvss40_severity: Option<String>,
-    pub cpe_match: Vec<String>,
+    pub cpe_match: Vec<CpeCriteria>,
     pub published: String,
     pub references: Vec<String>,
     pub kev: bool,
@@ -136,6 +136,32 @@ struct NvdCpeMatch {
     criteria: String,
     #[serde(rename = "vulnerable", default)]
     _vulnerable: bool,
+    #[serde(rename = "versionStartIncluding", default)]
+    version_start_including: Option<String>,
+    #[serde(rename = "versionStartExcluding", default)]
+    version_start_excluding: Option<String>,
+    #[serde(rename = "versionEndIncluding", default)]
+    version_end_including: Option<String>,
+    #[serde(rename = "versionEndExcluding", default)]
+    version_end_excluding: Option<String>,
+}
+
+/// A stored affected-configuration entry: the CPE 2.3 pattern plus the NVD
+/// version-range bounds when the CVE expresses affected versions as a range
+/// rather than a concrete CPE version. Kept so version matching can reject
+/// out-of-range products instead of treating a wildcard-version CPE as
+/// "every version affected" (lab bug 2.B).
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct CpeCriteria {
+    pub criteria: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vsi: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vse: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vei: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vee: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -313,10 +339,10 @@ pub fn sync(conn: &mut Connection, verbose: bool) -> Result<usize> {
                 .unwrap_or_default();
             let v31 = cve.metrics.v31.first().map(|m| &m.cvss_data);
             let v40 = cve.metrics.v40.first().map(|m| &m.cvss_data);
-            let cpe_match: Vec<String> = cve
+            let cpe_match: Vec<CpeCriteria> = cve
                 .configurations
                 .iter()
-                .flat_map(|c| collect_cpes(&c.nodes))
+                .flat_map(|c| collect_cpe_criteria(&c.nodes))
                 .collect();
             let refs: Vec<String> = cve.references.iter().map(|r| r.url.clone()).collect();
             let kev_flag = cve.cisa_exploit_add.is_some() as i64;
@@ -364,13 +390,19 @@ pub fn sync(conn: &mut Connection, verbose: bool) -> Result<usize> {
     Ok(total_inserted)
 }
 
-fn collect_cpes(nodes: &[NvdNode]) -> Vec<String> {
+fn collect_cpe_criteria(nodes: &[NvdNode]) -> Vec<CpeCriteria> {
     let mut out = Vec::new();
     for n in nodes {
         for m in &n.cpe_match {
-            out.push(m.criteria.clone());
+            out.push(CpeCriteria {
+                criteria: m.criteria.clone(),
+                vsi: m.version_start_including.clone(),
+                vse: m.version_start_excluding.clone(),
+                vei: m.version_end_including.clone(),
+                vee: m.version_end_excluding.clone(),
+            });
         }
-        out.extend(collect_cpes(&n.children));
+        out.extend(collect_cpe_criteria(&n.children));
     }
     out
 }
@@ -423,7 +455,18 @@ pub fn lookup(
         let rows = stmt.query_map(params![pattern, sql_limit], |r| {
             let cpe_json: String = r.get(8)?;
             let refs_json: String = r.get(10)?;
-            let cpe_match: Vec<String> = serde_json::from_str(&cpe_json).unwrap_or_default();
+            // New format: array of {criteria, version bounds}. Old DBs (pre
+            // range capture) stored a plain array of criteria strings — fall
+            // back to that so a not-yet-resynced cache still works.
+            let cpe_match: Vec<CpeCriteria> = serde_json::from_str::<Vec<CpeCriteria>>(&cpe_json)
+                .or_else(|_| {
+                    serde_json::from_str::<Vec<String>>(&cpe_json).map(|v| {
+                        v.into_iter()
+                            .map(|s| CpeCriteria { criteria: s, ..Default::default() })
+                            .collect()
+                    })
+                })
+                .unwrap_or_default();
             let references: Vec<String> = serde_json::from_str(&refs_json).unwrap_or_default();
             Ok(NvdEntry {
                 id: r.get(0)?,
@@ -449,9 +492,17 @@ pub fn lookup(
             let keep = if version.trim().is_empty() {
                 true
             } else {
-                row.cpe_match
-                    .iter()
-                    .any(|cpe| crate::cpe_match::cpe_matches_banner(cpe, product, version))
+                row.cpe_match.iter().any(|c| {
+                    crate::cpe_match::cpe_criteria_matches(
+                        &c.criteria,
+                        c.vsi.as_deref(),
+                        c.vse.as_deref(),
+                        c.vei.as_deref(),
+                        c.vee.as_deref(),
+                        product,
+                        version,
+                    )
+                })
             };
             if keep {
                 seen_ids.insert(row.id.clone());
