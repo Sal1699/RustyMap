@@ -13,6 +13,13 @@ const PROBE_PORTS: &[u16] = &[80, 443, 22, 445, 3389, 21, 25, 53, 139, 8080];
 
 pub async fn tcp_ping(target: &Target, timeout_dur: Duration) -> bool {
     let ip = target.ip;
+    // Loopback is always up — nmap has the same localhost shortcut. Without
+    // it, scanning 127.0.0.1 on a host with no service on the probe ports
+    // (common on a fresh Kali) wrongly reports "host seems down" (lab bug
+    // 0.C). We are, by definition, reachable to ourselves.
+    if ip.is_loopback() {
+        return true;
+    }
     // Probe the high-value ports concurrently, but return the instant any
     // one proves the host alive (open OR RST). Streaming `.any()`
     // short-circuits — it drops the still-pending probes instead of

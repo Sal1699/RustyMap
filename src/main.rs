@@ -2040,7 +2040,13 @@ async fn main() -> Result<()> {
 
     let timeout_dur = args.timeout();
     let parallel = args.parallel();
-    let show_closed = args.verbose >= 2 && !args.only_open;
+    // Retain closed/filtered results by default so the report can show
+    // their states (nmap-style "Not shown: N closed ports"), instead of
+    // silently dropping every non-open port (lab bug 0.A: 10/13 ports were
+    // invisible). `--open` suppresses them entirely. The output layer
+    // collapses large runs and only lists individual non-open ports when
+    // there are few or `-v` is set, so the default stays readable.
+    let show_closed = !args.only_open;
 
     // --progress: spinner with elapsed time + scan type until results return.
     let progress_bar: Option<indicatif::ProgressBar> = if args.progress {

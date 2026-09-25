@@ -1,6 +1,6 @@
 use crate::file_out;
 use crate::ports::service_name;
-use crate::scanner::{HostResult, PortState};
+use crate::scanner::{HostResult, PortResult, PortState};
 use anyhow::Result;
 use colored::*;
 use std::io::Write;
@@ -190,34 +190,64 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
     // from the ping TTL already captured during host discovery.
     if let Some(os) = &host.os {
         if let Some(ttl) = os.ttl {
+            let is_local = host.target.ip.is_loopback()
+                || matches!(host.target.ip,
+                    std::net::IpAddr::V4(v) if v.is_private() || v.is_link_local());
             let hops = network_distance(ttl);
-            let unit = if hops == 1 { "hop" } else { "hops" };
-            let extra = if hops == 0 { " (directly connected)" } else { "" };
-            println!("Network Distance: {} {}{}", hops, unit, extra);
+            if hops == 0 {
+                if is_local {
+                    println!("Network Distance: 0 hops (directly connected)");
+                } else {
+                    // A remote host cannot really be 0 hops away — the
+                    // observed TTL just happens to equal a standard initial
+                    // value (64/128/255), so single-TTL distance estimation
+                    // is indeterminate here (lab bug 5.A). Say so rather than
+                    // claiming "directly connected".
+                    println!(
+                        "Network Distance: unknown (TTL {} sits at an initial-value boundary)",
+                        ttl
+                    );
+                }
+            } else {
+                let unit = if hops == 1 { "hop" } else { "hops" };
+                println!("Network Distance: {} {}", hops, unit);
+            }
         }
     }
 
-    if open_count == 0 && verbose == 0 {
-        // Bug-04 / Bug-05 (v0.66.3): break out the actual state counts
-        // so the user can tell apart "all RST'd" (Closed) from "all
-        // dropped" (Filtered) from "ambiguous no-reply" (OpenFiltered)
-        // from "passes the firewall" (Unfiltered, ACK-scan-specific).
+    // Split ports into what we list individually vs. what we collapse into
+    // an nmap-style "Not shown" summary. Open ports are always listed;
+    // non-open ports are listed only with -v or when there are few enough
+    // to be useful, so the default report shows the signal (open services)
+    // without a wall of closed/filtered rows — but their counts are never
+    // hidden the way they used to be (lab bug 0.A: 10/13 ports invisible).
+    let nonopen_count =
+        closed_count + filtered_count + open_filtered_count + unfiltered_count;
+    let list_nonopen = verbose >= 1 || nonopen_count <= 25;
+
+    if nonopen_count > 0 && !list_nonopen {
         let mut parts: Vec<String> = Vec::new();
         if closed_count > 0 { parts.push(format!("{} closed", closed_count)); }
         if filtered_count > 0 { parts.push(format!("{} filtered", filtered_count)); }
         if open_filtered_count > 0 { parts.push(format!("{} open|filtered", open_filtered_count)); }
         if unfiltered_count > 0 { parts.push(format!("{} unfiltered", unfiltered_count)); }
-        if parts.is_empty() {
+        println!("Not shown: {} ({})", nonopen_count, parts.join(", "));
+    }
+
+    let shown: Vec<&PortResult> = host
+        .ports
+        .iter()
+        .filter(|p| p.state == PortState::Open || list_nonopen)
+        .collect();
+
+    if shown.is_empty() {
+        if nonopen_count == 0 {
             println!("No probed ports yielded a state — likely all probes were dropped silently.");
-        } else {
-            println!("No open ports. State breakdown: {}.", parts.join(", "));
         }
-        // Bug-04 follow-up (v0.66.5): FIN/NULL/Xmas defeated by a
-        // Windows target. Per RFC 793, Windows RSTs even on open ports
-        // (instead of dropping), so every probed port comes back
-        // Closed — and the user can't distinguish "no open ports" from
-        // "this target type defeats the scan strategy". Surface the
-        // hint when the symptom matches.
+        // FIN/NULL/Xmas defeated by a Windows target: per RFC 793 Windows
+        // RSTs even open ports, so every probe comes back Closed. Surface
+        // the hint so "no open ports" isn't confused with "scan can't
+        // enumerate this target type".
         if matches!(scan_type, "FIN" | "NULL" | "Xmas")
             && closed_count > 0
             && filtered_count == 0
@@ -252,7 +282,7 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
     header.push("VERSION".bold().to_string());
     println!("{}", header.join(" "));
 
-    for p in &host.ports {
+    for p in shown.iter().copied() {
         let port_s = format!("{}/tcp", p.port);
         // Pad the plain text to width FIRST, then colorize, so the ANSI
         // escapes don't throw off column alignment.

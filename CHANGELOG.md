@@ -4,6 +4,33 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.68.2] - 2026-09-25
+
+Reliability fixes from the second v0.68.1 vs nmap 7.99 lab comparison —
+targeting the "affidabilità 4/10" cluster (port-state coverage).
+
+- **Closed/filtered ports were invisible (lab bug 0.A).** The scanner only
+  kept open ports unless `-vv` was set, so a default scan of a host with 13
+  ports showed 3 (open) and silently dropped the other 10, and an
+  all-closed/all-filtered host printed "no probed ports yielded a state".
+  Non-open results are now retained by default and the report collapses
+  them nmap-style: open ports are always listed, and closed/filtered are
+  either listed individually (with `-v`, or when there are ≤25) or summed
+  into a `Not shown: N (… closed, … filtered)` line. `--open` still
+  suppresses them entirely.
+- **Loopback wrongly reported "host seems down" (lab bug 0.C).** Scanning
+  `127.0.0.1` on a host with no service on the discovery probe ports (a
+  fresh Kali) failed discovery. Loopback is now always treated as up, the
+  same localhost shortcut nmap has.
+- **"Network Distance: 0 hops (directly connected)" on remote hosts (lab
+  bug 5.A).** When a remote host's observed TTL happened to equal a
+  standard initial value (64/128/255), the hop count came out 0 and the
+  line falsely claimed the host was directly connected. Remote hosts now
+  report `Network Distance: unknown (TTL … at an initial-value boundary)`;
+  "directly connected" is reserved for genuinely local (loopback/private)
+  targets.
+- 500/500 tests pass.
+
 ## [0.68.1] - 2026-09-25
 
 Bug-fix wave from the first v0.68.0 lab comparison against nmap 7.99
