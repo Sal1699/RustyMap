@@ -4,6 +4,27 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.69.1] - 2026-09-25
+
+Two more Tier-3 lab items. Both use raw sockets and are validated on the
+Kali (root) lab; from the Windows dev box they compile and fail closed to
+the previous behaviour.
+
+- **RST-only remote hosts wrongly "down" (lab bug 0.D).** Default discovery
+  was TCP-connect ping only, so a host that answers ICMP but not on any of
+  the probe ports (or RSTs on a port outside the probe set) was missed.
+  Added an ICMP-echo fallback: IPv4 targets the TCP ping didn't confirm are
+  re-probed with an echo request before being declared down. Needs raw
+  sockets (root/Npcap); when unavailable it fails closed and the TCP result
+  stands.
+- **Traceroute all-`*` through firewalls (lab bug 1.C).** `--traceroute`
+  now runs an nmap-style TCP trace to an open port on Unix
+  (`traceroute -T -p <port>`), which traverses firewalls that drop the
+  ICMP/UDP probes the default mode uses. The port is chosen from the host's
+  open ports (443/80/22 preferred); with no open port it falls back to the
+  default probe. Windows `tracert` stays ICMP-only.
+- 503/503 tests pass.
+
 ## [0.69.0] - 2026-09-25
 
 Tier-2/Tier-3 work from the lab comparison. Ships the two items that could

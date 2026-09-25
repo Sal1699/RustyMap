@@ -1872,7 +1872,28 @@ async fn main() -> Result<()> {
             }
             alive
         } else {
-            discovery::discover_hosts(targets, args.timeout(), args.parallel()).await
+            // Default discovery: TCP-connect ping, then an ICMP echo
+            // fallback for IPv4 hosts it missed (lab bug 0.D — a host that
+            // only answers ICMP, or RSTs on a port outside the probe set,
+            // was wrongly marked down). ICMP needs raw sockets (root on
+            // Linux / Npcap on Windows); it fails closed otherwise, so the
+            // TCP result still stands.
+            let all = targets.clone();
+            let mut alive =
+                discovery::discover_hosts(targets, args.timeout(), args.parallel()).await;
+            let up: std::collections::HashSet<std::net::IpAddr> =
+                alive.iter().map(|t| t.ip).collect();
+            for t in all {
+                if up.contains(&t.ip) {
+                    continue;
+                }
+                if let std::net::IpAddr::V4(v4) = t.ip {
+                    if icmp_ping::icmp_echo(v4, args.timeout()) {
+                        alive.push(t);
+                    }
+                }
+            }
+            alive
         };
         if args.verbose > 0 {
             println!("{}/{} hosts responded to ping", targets.len(), before);
@@ -2777,7 +2798,21 @@ async fn main() -> Result<()> {
         let mut traces = Vec::new();
         println!("\n-- Traceroute --");
         for h in sorted.iter().filter(|h| h.up) {
-            match traceroute::trace(&h.target, args.trace_hops).await {
+            // Prefer a TCP-based trace to an open port (traverses firewalls
+            // that drop ICMP/UDP); fall back to the default probe if the
+            // host has no open port to aim at.
+            let open: Vec<u16> = h
+                .ports
+                .iter()
+                .filter(|p| p.state == PortState::Open)
+                .map(|p| p.port)
+                .collect();
+            let tcp_port = [443u16, 80, 22]
+                .iter()
+                .copied()
+                .find(|p| open.contains(p))
+                .or_else(|| open.first().copied());
+            match traceroute::trace(&h.target, args.trace_hops, tcp_port).await {
                 Ok(tr) => {
                     println!("{}:", h.target.display());
                     for hop in &tr.hops {

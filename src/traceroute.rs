@@ -26,12 +26,19 @@ pub struct TraceResult {
     pub hops: Vec<Hop>,
 }
 
-pub async fn trace(target: &Target, max_hops: u8) -> Result<TraceResult> {
+/// `tcp_port` selects nmap-style TCP traceroute (`traceroute -T -p <port>`)
+/// on Unix: TCP SYN probes look like ordinary traffic and traverse
+/// firewalls that silently drop the ICMP/UDP probes the default mode uses
+/// (lab bug 1.C: all `*`). Needs an open port and root. `None` keeps the
+/// default probe. Windows `tracert` is ICMP-only, so the flag is ignored
+/// there.
+pub async fn trace(target: &Target, max_hops: u8, tcp_port: Option<u16>) -> Result<TraceResult> {
     let target_s = target.ip.to_string();
     let max = max_hops.to_string();
 
     #[cfg(windows)]
     let mut cmd = {
+        let _ = tcp_port; // tracert has no TCP mode
         let mut c = Command::new("tracert");
         c.args(["-d", "-h", &max, "-w", "1500", &target_s]);
         c
@@ -39,7 +46,15 @@ pub async fn trace(target: &Target, max_hops: u8) -> Result<TraceResult> {
     #[cfg(unix)]
     let mut cmd = {
         let mut c = Command::new("traceroute");
-        c.args(["-n", "-w", "2", "-m", &max, &target_s]);
+        let mut a: Vec<String> =
+            vec!["-n".into(), "-w".into(), "2".into(), "-m".into(), max.clone()];
+        if let Some(p) = tcp_port {
+            a.push("-T".into());
+            a.push("-p".into());
+            a.push(p.to_string());
+        }
+        a.push(target_s.clone());
+        c.args(&a);
         c
     };
 
