@@ -2431,7 +2431,6 @@ async fn main() -> Result<()> {
         }
     }
 
-    let elapsed = t_start.elapsed().as_secs_f64();
     if let Some((handle, stop)) = stats_handle {
         stop.store(true, Ordering::Relaxed);
         handle.abort();
@@ -2445,7 +2444,11 @@ async fn main() -> Result<()> {
     if let Some(pb) = progress_bar {
         pb.finish_and_clear();
     }
-    output::print_summary(&sorted, elapsed);
+    // NOTE: the "RustyMap done: scanned in X" summary is printed LAST
+    // (after CVE correlation + script findings), not here — those phases
+    // run below and can do slow network I/O, so timing them in keeps the
+    // reported duration honest against wall-clock (lab bug #2). This also
+    // matches nmap, which prints its "done" line at the very end.
 
     // CVE correlation (requires -sV to have populated service info).
     // Use --cve-db when given, otherwise fall back to the built-in DB
@@ -2784,25 +2787,52 @@ async fn main() -> Result<()> {
                 .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
         })
         .collect();
+    // Script engines use reqwest::blocking (HTTP probes) internally.
+    // Calling them directly here would create and drop reqwest's own
+    // runtime inside our async runtime, which panics ("Cannot drop a
+    // runtime in a context where blocking is not allowed"). This only
+    // surfaced once remote-host discovery started working (lab bug #1),
+    // because HTTP scripts finally had a live web port to probe. Offload
+    // to a blocking thread, the canonical fix for blocking reqwest in
+    // async code.
     if !args.no_builtin_scripts && args.script_path.is_none() {
         let scripts = scripting::builtin_scripts();
-        let f = scripting::run_inline(&scripts, &sorted, &parsed_args);
+        let sorted_for_scripts = sorted.clone();
+        let args_for_scripts = parsed_args.clone();
+        let f = tokio::task::spawn_blocking(move || {
+            scripting::run_inline(&scripts, &sorted_for_scripts, &args_for_scripts)
+        })
+        .await
+        .unwrap_or_default();
         scripting::print_findings(&f);
         if !f.is_empty() {
             audit.event("scripts_builtin_run", json!({ "count": f.len() }));
         }
     }
     if let Some(sp) = &args.script_path {
-        match scripting::run_scripts(sp, &sorted, &parsed_args) {
-            Ok(f) => {
+        let sp = sp.clone();
+        let sorted_for_scripts = sorted.clone();
+        let args_for_scripts = parsed_args.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            scripting::run_scripts(&sp, &sorted_for_scripts, &args_for_scripts)
+        })
+        .await;
+        match result {
+            Ok(Ok(f)) => {
                 scripting::print_findings(&f);
                 audit.event("scripts_run", json!({ "count": f.len() }));
             }
-            Err(e) => {
-                eprintln!("[!] script error: {}", e);
-            }
+            Ok(Err(e)) => eprintln!("[!] script error: {}", e),
+            Err(e) => eprintln!("[!] script task panicked: {}", e),
         }
     }
+
+    // Honest end-of-run summary: total wall time including CVE correlation
+    // and script findings (which ran above). Printed here, last, nmap-style.
+    // This same total feeds the DB record and every report writer below,
+    // so console and file outputs agree.
+    let elapsed = t_start.elapsed().as_secs_f64();
+    output::print_summary(&sorted, elapsed);
 
     // 6) Persist to DB and run diff
     let mut diffs: std::collections::HashMap<String, db::PortDiff> = std::collections::HashMap::new();

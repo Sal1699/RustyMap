@@ -4,6 +4,42 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.68.1] - 2026-09-25
+
+Bug-fix wave from the first v0.68.0 lab comparison against nmap 7.99
+(scanme.nmap.org / github.com, Kali). Addresses the two CRITICAL findings
+plus a panic they exposed and the top-ports gap.
+
+- **CRITICAL — remote host discovery reported "0 hosts up" (lab bug #1).**
+  A public target (scanme.nmap.org, github.com, …) could match a local
+  interface carrying a broad/unusual subnet and be routed into an ARP
+  sweep, which of course got no reply, so the host was marked down and
+  nothing was scanned without `-Pn`. ARP is now restricted to genuinely
+  on-link targets (RFC1918 private, RFC3927 link-local, RFC6598 CGNAT) at
+  the single chokepoint both the LAN check and the sweep pass through —
+  matching nmap, which only ARP-scans local-net targets. Public IPs go
+  via the gateway and straight to TCP-ping discovery. (Subsumes the
+  earlier loopback guard: localhost is non-private too.)
+- **Panic on remote scans, exposed by the fix above.** Once discovery
+  worked, HTTP scripts finally ran against live web ports and crashed:
+  `Cannot drop a runtime in a context where blocking is not allowed`. The
+  script engines use `reqwest::blocking`, which created and dropped its
+  own runtime inside our async runtime. The script-findings phase now runs
+  on a blocking thread via `spawn_blocking`, the canonical fix.
+- **CRITICAL — reported scan time excluded post-scan work (lab bug #2).**
+  The "RustyMap done: scanned in X" line was printed before CVE
+  correlation and script findings, so their (sometimes slow, network-
+  bound) time was not counted, making the number misleading against
+  wall-clock. The summary now prints LAST, after those phases, nmap-style,
+  and the same total feeds the DB record and every report writer, so
+  console and file outputs agree.
+- **top-ports missed high-frequency high ports (lab bug #3).** `--top-ports
+  N` above ~200 fell back to a numeric 1-1024 sweep, so ports like 9929
+  and 31337 — which are in nmap's top-1000 (ranks ~923/929) but sit above
+  1024 — were never scanned. Replaced with the real 1000-port
+  nmap-services frequency ranking, so `--top-ports N` now matches nmap.
+- 500/500 tests pass.
+
 ## [0.68.0] - 2026-09-24
 
 Fase 27 kickoff — richer-than-nmap scan output, a host-discovery

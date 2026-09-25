@@ -18,16 +18,34 @@ use std::time::{Duration, Instant};
 
 /// Pick the first interface whose IPv4 subnet contains `target`.
 /// Returns the interface, our source IP, and our MAC.
+/// True only for IPv4 addresses that can actually be on our local link:
+/// RFC1918 private, RFC3927 link-local, and RFC6598 CGNAT (100.64/10).
+/// A public/routable address is always reached via the default gateway,
+/// never by ARP — so it must never enter the ARP path. Loopback,
+/// unspecified and broadcast are all non-private, so this also excludes
+/// them.
+fn is_lan_ipv4(ip: Ipv4Addr) -> bool {
+    if ip.is_private() || ip.is_link_local() {
+        return true;
+    }
+    let o = ip.octets();
+    o[0] == 100 && (o[1] & 0xC0) == 0x40 // 100.64.0.0/10 (CGNAT)
+}
+
 pub fn pick_interface_for(target: Ipv4Addr) -> Option<(NetworkInterface, Ipv4Addr, MacAddr)> {
-    // Never ARP for a non-on-link address. Loopback is the important one:
-    // on Windows the Npcap loopback adapter is not always flagged as
-    // loopback and carries 127.0.0.1/8, so a naive subnet match treats
-    // `localhost` as a LAN host and drives us into an ARP capture that
-    // never gets a reply and (Npcap ignoring read_timeout on an idle
-    // adapter) blocks well past the deadline. Scanning localhost is
-    // routine, so guard it here at the single chokepoint both the LAN
-    // check and the ARP sweep go through.
-    if target.is_loopback() || target.is_unspecified() || target.is_broadcast() {
+    // Only ARP for genuinely on-link (private/link-local) targets. Two
+    // failure modes this guards against:
+    //  1. A PUBLIC target (scanme.nmap.org, github.com, …) could match an
+    //     interface carrying a broad or unusual subnet (VPN, virtual
+    //     adapter) and get dropped into an ARP sweep that finds nothing
+    //     and wrongly marks the host down — breaking default discovery on
+    //     remote hosts (lab bug #1). Public IPs go via the gateway.
+    //  2. Localhost: on Windows the Npcap loopback adapter carries
+    //     127.0.0.0/8 without a loopback flag, so a naive subnet match
+    //     ARP-swept localhost and hung past the deadline.
+    // Both are non-private, so a single range check at this chokepoint —
+    // which both the LAN check and the ARP sweep pass through — fixes them.
+    if !is_lan_ipv4(target) {
         return None;
     }
     for iface in datalink::interfaces() {
@@ -163,6 +181,29 @@ mod tests {
         // past the deadline. Localhost must always bypass ARP.
         assert!(!target_is_on_lan(Ipv4Addr::new(127, 0, 0, 1)));
         assert!(pick_interface_for(Ipv4Addr::new(127, 0, 0, 1)).is_none());
+    }
+
+    #[test]
+    fn public_ip_is_never_on_lan() {
+        // Lab bug #1: public targets (scanme.nmap.org 45.33.32.156,
+        // github.com 140.82.x, google.com 142.250.x) must never be
+        // ARP-swept — they go via the gateway. If they did, ARP would
+        // find nothing and the host would be wrongly marked down.
+        assert!(!target_is_on_lan(Ipv4Addr::new(45, 33, 32, 156)));
+        assert!(pick_interface_for(Ipv4Addr::new(140, 82, 121, 3)).is_none());
+        assert!(pick_interface_for(Ipv4Addr::new(8, 8, 8, 8)).is_none());
+    }
+
+    #[test]
+    fn range_classifier_matches_rfc() {
+        assert!(is_lan_ipv4(Ipv4Addr::new(10, 0, 0, 5)));
+        assert!(is_lan_ipv4(Ipv4Addr::new(172, 16, 4, 9)));
+        assert!(is_lan_ipv4(Ipv4Addr::new(192, 168, 1, 1)));
+        assert!(is_lan_ipv4(Ipv4Addr::new(169, 254, 3, 2))); // link-local
+        assert!(is_lan_ipv4(Ipv4Addr::new(100, 64, 0, 1))); // CGNAT
+        assert!(!is_lan_ipv4(Ipv4Addr::new(100, 128, 0, 1))); // outside CGNAT
+        assert!(!is_lan_ipv4(Ipv4Addr::new(8, 8, 8, 8)));
+        assert!(!is_lan_ipv4(Ipv4Addr::new(127, 0, 0, 1)));
     }
 
     #[test]
