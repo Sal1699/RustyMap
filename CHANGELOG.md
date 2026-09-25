@@ -4,6 +4,41 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.69.0] - 2026-09-25
+
+Tier-2/Tier-3 work from the lab comparison. Ships the two items that could
+be built and validated from here; the remaining ones need raw sockets and
+real-target lab validation (see below).
+
+### Added / improved
+- **Full TLS cipher-suite enumeration (Tier 2, lab bug #26/#27).** `--ssl-enum`
+  previously showed only the single suite rustls negotiated per version
+  (2 ciphers vs nmap's 17+). New `tls_cipher_enum` module does sslscan-style
+  protocol-level enumeration: it offers candidate suites in a hand-crafted
+  ClientHello, reads the server's pick from the ServerHello, removes it and
+  repeats — enumerating the full accepted set, **including weak suites
+  rustls will not negotiate** (3DES/SWEET32, RC4, CBC, export). Each is
+  flagged `⚠ weak`, weak suites raise a compliance finding, and the summary
+  reports `N ciphers (⚠M weak)`. Verified against google:443 (10 suites, 5
+  weak incl. 3DES). TLS 1.3 suite still comes from the rustls probe.
+- **Cloud/CDN detection by IP range (Tier 3, lab bug 4.A).** `--cloud-fingerprint`
+  matched only CNAME/PTR suffixes, so apex domains fronted by a plain A
+  record in a provider's IP space went unidentified. Added the well-known
+  published edge ranges for Cloudflare, Google, AWS CloudFront, Fastly and
+  Akamai, matched against the resolved A/AAAA records. Verified:
+  `google.com` → Google, `cloudflare.com` → Cloudflare.
+- 503/503 tests pass.
+
+### Still open — need raw sockets + Kali (root) lab validation
+These can't be implemented safely from the Windows dev box (no raw-socket
+testing), so they're deferred rather than shipped untested:
+- **OS fingerprinting** via real TCP/IP stack analysis (SYN-ACK window, MSS,
+  options ordering, DF) + wiring `--nmap-os-db` (Tier 2, bugs #20–22/5.B).
+- **RST-only remote host discovery** (0.D) — ICMP echo / TCP-ACK probe
+  fallback in the default discovery path.
+- **TCP-based traceroute** (1.C) instead of ICMP-only.
+- **nmap-service-probes parser** coverage (5.C).
+
 ## [0.68.3] - 2026-09-25
 
 Third lab-report wave. Closes the tractable Tier-1/Tier-3 bugs; the two

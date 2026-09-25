@@ -381,6 +381,7 @@ mod tests {
             tls13,
             cipher_tls12: c12.map(String::from),
             cipher_tls13: c13.map(String::from),
+            ..Default::default()
         }
     }
 

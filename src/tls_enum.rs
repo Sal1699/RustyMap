@@ -35,6 +35,12 @@ pub struct TlsEnum {
     /// Cipher negotiated when each modern version handshakes.
     pub cipher_tls12: Option<String>,
     pub cipher_tls13: Option<String>,
+    /// Full set of cipher suites the server accepts (sslscan-style
+    /// enumeration), and the subset flagged weak (3DES/RC4/CBC/export).
+    #[serde(default)]
+    pub ciphers: Vec<String>,
+    #[serde(default)]
+    pub weak_ciphers: Vec<String>,
 }
 
 impl TlsEnum {
@@ -52,6 +58,14 @@ impl TlsEnum {
             parts.push(match &self.cipher_tls13 {
                 Some(c) => format!("1.3({})", c),
                 None => "1.3".into(),
+            });
+        }
+        if !self.ciphers.is_empty() {
+            let w = self.weak_ciphers.len();
+            parts.push(if w > 0 {
+                format!("{} ciphers (⚠{} weak)", self.ciphers.len(), w)
+            } else {
+                format!("{} ciphers", self.ciphers.len())
             });
         }
         if parts.is_empty() {
@@ -226,6 +240,12 @@ pub async fn enumerate(ip: IpAddr, port: u16, sni: Option<&str>, dur: Duration) 
     out.tls12 = out.cipher_tls12.is_some();
     out.cipher_tls13 = probe_modern(ip, port, sni, ProtocolVersion::TLSv1_3, dur).await;
     out.tls13 = out.cipher_tls13.is_some();
+    // Full sslscan-style cipher enumeration (protocol-level, catches weak
+    // suites rustls won't offer). TLS 1.2 record carries supported_versions
+    // so 1.3-only servers answer too.
+    let ciphers = crate::tls_cipher_enum::enumerate(ip, port, 0x0303, sni, dur).await;
+    out.weak_ciphers = ciphers.iter().filter(|c| c.weak).map(|c| c.name.clone()).collect();
+    out.ciphers = ciphers.into_iter().map(|c| c.name).collect();
     Ok(out)
 }
 
@@ -242,6 +262,7 @@ mod tests {
             tls13: true,
             cipher_tls12: Some("AES_128_GCM".into()),
             cipher_tls13: Some("AES_256_GCM".into()),
+            ..Default::default()
         };
         let s = e.summary();
         assert!(s.contains("1.2(AES_128_GCM)"));

@@ -120,6 +120,7 @@ mod smtp_audit;
 mod ssh_audit;
 mod threat_intel;
 mod timing_jitter;
+mod tls_cipher_enum;
 mod tls_enum;
 mod tls_grade;
 mod tls_probe;
@@ -2497,6 +2498,24 @@ async fn main() -> Result<()> {
                         let host_port = format!("{}:{}", h.target.ip, p.port);
                         let dep = if e.has_deprecated() { " ⚠ deprecated TLS supported".to_string() } else { String::new() };
                         println!("[ssl-enum] {} :{} → {}{}", label, p.port, e.summary(), dep);
+                        // Full accepted-cipher list (sslscan-style), weak
+                        // suites flagged so SWEET32/RC4/CBC stand out.
+                        for c in &e.ciphers {
+                            let weak = e.weak_ciphers.iter().any(|w| w == c);
+                            if weak {
+                                println!("           cipher: {}  ⚠ weak", c);
+                            } else {
+                                println!("           cipher: {}", c);
+                            }
+                        }
+                        if !e.weak_ciphers.is_empty() {
+                            compliance_findings.push(compliance::Finding::new(
+                                "tls_weak_ciphers",
+                                &host_port,
+                                format!("{} weak cipher suite(s): {}",
+                                    e.weak_ciphers.len(), e.weak_ciphers.join(", ")),
+                            ));
+                        }
                         compliance_findings.push(compliance::Finding::new(
                             "tls_evaluated",
                             &host_port,

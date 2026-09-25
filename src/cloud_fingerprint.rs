@@ -100,6 +100,52 @@ const PTR_RULES: &[(&str, &str, &str)] = &[
     (".ovhcloud.com", "OVH", "VM"),
 ];
 
+/// (CIDR, provider, service) — matched against the resolved A/AAAA records.
+/// The big CDNs/clouds front their apex domains with plain A records in
+/// their own IP space (no CNAME), so suffix matching alone misses them
+/// (lab bug 4.A: google.com / Cloudflare went unidentified). These are the
+/// well-known published edge ranges; not exhaustive (AWS/GCP publish huge
+/// dynamic lists), but they catch the common cases.
+const IP_RANGES: &[(&str, &str, &str)] = &[
+    // Cloudflare
+    ("104.16.0.0/13", "Cloudflare", "CDN"),
+    ("172.64.0.0/13", "Cloudflare", "CDN"),
+    ("162.158.0.0/15", "Cloudflare", "CDN"),
+    ("173.245.48.0/20", "Cloudflare", "CDN"),
+    ("103.21.244.0/22", "Cloudflare", "CDN"),
+    ("141.101.64.0/18", "Cloudflare", "CDN"),
+    ("108.162.192.0/18", "Cloudflare", "CDN"),
+    ("190.93.240.0/20", "Cloudflare", "CDN"),
+    ("188.114.96.0/20", "Cloudflare", "CDN"),
+    ("198.41.128.0/17", "Cloudflare", "CDN"),
+    ("131.0.72.0/22", "Cloudflare", "CDN"),
+    // Google
+    ("142.250.0.0/15", "Google", "Edge/Serving"),
+    ("172.217.0.0/16", "Google", "Edge/Serving"),
+    ("216.58.192.0/19", "Google", "Edge/Serving"),
+    ("192.178.0.0/15", "Google", "Edge/Serving"),
+    ("74.125.0.0/16", "Google", "Edge/Serving"),
+    ("64.233.160.0/19", "Google", "Edge/Serving"),
+    ("209.85.128.0/17", "Google", "Edge/Serving"),
+    ("8.8.8.0/24", "Google", "Public DNS"),
+    ("8.8.4.0/24", "Google", "Public DNS"),
+    // AWS CloudFront (common edge blocks)
+    ("13.32.0.0/15", "AWS", "CloudFront"),
+    ("13.35.0.0/16", "AWS", "CloudFront"),
+    ("52.84.0.0/15", "AWS", "CloudFront"),
+    ("54.192.0.0/16", "AWS", "CloudFront"),
+    ("99.84.0.0/16", "AWS", "CloudFront"),
+    ("205.251.192.0/19", "AWS", "CloudFront"),
+    // Fastly
+    ("151.101.0.0/16", "Fastly", "CDN"),
+    ("199.232.0.0/16", "Fastly", "CDN"),
+    // Akamai
+    ("23.32.0.0/11", "Akamai", "CDN"),
+    ("104.64.0.0/10", "Akamai", "CDN"),
+    ("184.24.0.0/13", "Akamai", "CDN"),
+    ("2.16.0.0/13", "Akamai", "CDN"),
+];
+
 pub async fn fingerprint(host: &str, dur: Duration) -> Result<CloudFingerprint> {
     let resolver = TokioAsyncResolver::tokio_from_system_conf()?;
     let mut fp = CloudFingerprint {
@@ -182,6 +228,25 @@ fn classify(fp: &mut CloudFingerprint) {
                         service: service.to_string(),
                         evidence: format!("PTR ends with {}", suffix),
                     });
+                }
+            }
+        }
+    }
+
+    // A/AAAA record IP ranges — catches apex domains fronted by a CDN/cloud
+    // with a plain A record and no CNAME (lab bug 4.A).
+    for ip in &fp.a_records {
+        for (cidr, provider, service) in IP_RANGES {
+            if let Ok(net) = cidr.parse::<ipnet::IpNet>() {
+                if net.contains(ip) {
+                    let key = (*provider, *service);
+                    if seen.insert(key) {
+                        fp.classifications.push(Classification {
+                            provider: provider.to_string(),
+                            service: service.to_string(),
+                            evidence: format!("IP {} in {}", ip, cidr),
+                        });
+                    }
                 }
             }
         }
