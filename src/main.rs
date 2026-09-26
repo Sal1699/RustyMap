@@ -23,6 +23,7 @@ mod net_util;
 mod nmap_db;
 mod notify;
 mod npcap;
+mod os_db;
 mod os_fp;
 mod output;
 mod ports;

@@ -412,20 +412,50 @@ fn refine_from_tcp_fp(host: &HostResult, guess: &mut OsGuess, timeout: Duration)
     };
 
     let probe_to = timeout.min(Duration::from_secs(2));
+    // Real TTL comes from the ICMP/ping probe (guess.ttl); the TCP-only
+    // capture path can't read the IP header, so fp.ttl is unreliable.
+    let ttl = guess.ttl.unwrap_or(0);
     if let Some(fp) = crate::tcp_fp::probe(src, v4, port, probe_to) {
         guess.hints.push(format!("tcp-fp: {}", fp.summary()));
-        // Classify from the full stack signature (window / window-scale /
-        // timestamp / TTL), not just the TTL family (lab bug B6). When the
-        // stack signature is at least as confident as the current guess,
-        // it wins — it distinguishes Linux vs macOS/BSD vs Windows and
-        // correctly calls TTL-255 hosts network gear rather than a desktop.
-        if let Some((os, conf)) = crate::tcp_fp::classify_stack(&fp) {
+        let (ws, ts, sack) = fp.signals();
+        let init_ttl = if ttl <= 64 {
+            64
+        } else if ttl <= 128 {
+            128
+        } else {
+            255
+        };
+        // 1) Match against the built-in signature DB for a specific
+        // OS + version (lab bug 5.B, partial).
+        let db_hits = if ttl > 0 {
+            crate::os_db::match_os(init_ttl, fp.window, ws, ts, sack)
+        } else {
+            Vec::new()
+        };
+        if let Some((label, conf)) = db_hits.first().copied() {
+            guess.family = label.to_string();
+            guess.confidence = guess.confidence.max(conf);
+            let others: Vec<String> = db_hits
+                .iter()
+                .skip(1)
+                .take(2)
+                .map(|(l, c)| format!("{} ({}%)", l, c))
+                .collect();
+            if !others.is_empty() {
+                guess.hints.push(format!("os-db also: {}", others.join(", ")));
+            }
+        } else if let Some((os, conf)) = crate::tcp_fp::classify_stack(&fp, ttl) {
+            // 2) Fall back to the stack-family heuristic (lab bug B6).
             if conf >= guess.confidence {
                 guess.family = os;
             }
             guess.confidence = guess.confidence.max(conf);
         } else if guess.confidence < 75 {
             guess.confidence = (guess.confidence + 10).min(85);
+        }
+        // 3) ISN predictability — nmap's "TCP Sequence Prediction".
+        if let Some(isn) = crate::tcp_fp::probe_isn_class(src, v4, port, probe_to) {
+            guess.hints.push(format!("ISN: {}", isn.label()));
         }
     }
 }

@@ -4,6 +4,39 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.70.0] - 2026-09-26
+
+Deepens OS detection toward nmap parity: a built-in signature database and
+ISN sequence-prediction. Raw sockets + open port (root); validated on Kali.
+
+### Added
+- **Built-in OS fingerprint DB — top 100 signatures (`os_db.rs`).** Extracted
+  from the upstream `nmap-os-db` (Linux, Windows, macOS/iOS, *BSD, Cisco,
+  and common devices), keyed on the fields a single SYN/ACK exposes:
+  initial TTL, window size, window-scale shift, timestamp/SACK presence.
+  `match_os()` scores an observed signature against all 100 and returns the
+  best matches with a 0–100 confidence, so `-O` now reports a specific
+  **OS + version** ("Linux 5.X", "Windows 10", "FreeBSD 13.X") instead of
+  just a family, with runner-up matches surfaced as a hint. Partial nmap-os-db
+  parity (bug 5.B) — matches on the SYN/ACK-observable subset, not the full
+  16-test signature.
+- **ISN sequence-prediction (`tcp_fp::probe_isn_class`).** Sends several SYN
+  probes, samples the SYN/ACK initial sequence numbers and classifies the
+  increments (constant / small-increment / time-dependent / randomized) —
+  nmap's "TCP Sequence Prediction". Surfaced on the `-O` line.
+- OS classification now uses the **real (ping) TTL** rather than the
+  TCP-capture path's unavailable TTL, fixing family selection.
+- 512/512 tests pass (`match_os` and `analyze_isn` unit-tested).
+
+### Still open — the two largest raw-socket efforts
+- **`-sV` binary-protocol probe engine (bug B2).** Version detection works
+  for text-banner services (SSH/HTTP) but not for MSRPC/135, SMB/445,
+  VMware-auth/902, which need protocol-specific probes.
+- **Full secondary probe suite (T2–T7 / ECN / ICMP IE / UDP U1).** Only the
+  T1 SYN and the SEQ/ISN probes are implemented; the remaining probes and
+  full nmap-os-db 16-test scoring would close the last OS-detection gap
+  (exact device ID like "VirtualBox NAT"). Both need lab (root) validation.
+
 ## [0.69.3] - 2026-09-26
 
 Tackles the last big Tier-2 item — **OS fingerprinting beyond TTL** (bug

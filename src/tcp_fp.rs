@@ -53,6 +53,9 @@ pub struct TcpFingerprint {
     /// Reserved for the future T probe (TCP timestamp jitter analysis).
     #[allow(dead_code)]
     pub round_trip_us: u64,
+    /// Initial sequence number from the SYN/ACK — sampled across several
+    /// probes for ISN-predictability analysis.
+    pub isn: u32,
 }
 
 impl TcpFingerprint {
@@ -113,14 +116,16 @@ fn linux_window_hint(win: u16) -> &'static str {
 /// (lab bug B6): Linux, Windows and macOS/BSD all differ in window-scale
 /// value, timestamp presence and default window even when their TTL
 /// collides. Returns `(label, confidence)`.
-pub fn classify_stack(fp: &TcpFingerprint) -> Option<(String, u8)> {
+pub fn classify_stack(fp: &TcpFingerprint, ttl: u8) -> Option<(String, u8)> {
     let has_ts = fp.options.contains('T');
     let has_sack = fp.options.contains('S');
     let ws = parse_wscale(&fp.options);
     let win = fp.window;
-    let init_ttl = if fp.ttl <= 64 {
+    // `fp.ttl` is not available from the TCP-only capture path (always 0),
+    // so the real TTL is passed in from the ICMP/ping probe.
+    let init_ttl = if ttl <= 64 {
         64
-    } else if fp.ttl <= 128 {
+    } else if ttl <= 128 {
         128
     } else {
         255
@@ -160,6 +165,96 @@ pub fn classify_stack(fp: &TcpFingerprint) -> Option<(String, u8)> {
         }
     };
     Some(result)
+}
+
+impl TcpFingerprint {
+    /// Parsed SYN/ACK signals used for DB matching: (window scale, timestamp
+    /// present, SACK permitted).
+    pub fn signals(&self) -> (Option<u8>, bool, bool) {
+        (
+            parse_wscale(&self.options),
+            self.options.contains('T'),
+            self.options.contains('S'),
+        )
+    }
+}
+
+/// TCP ISN-predictability class (nmap's "TCP Sequence Prediction").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsnClass {
+    /// ISN never changes — trivially spoofable (old/embedded stacks).
+    Constant,
+    /// Small fixed increments — predictable (legacy Windows/Unix).
+    Incremental,
+    /// Large clock-derived common divisor — time-dependent.
+    TimeDependent,
+    /// Large, varied increments — properly randomized (modern OS).
+    Random,
+}
+
+impl IsnClass {
+    pub fn label(&self) -> &'static str {
+        match self {
+            IsnClass::Constant => "constant ISN — trivial (spoofable)",
+            IsnClass::Incremental => "small fixed increments — predictable",
+            IsnClass::TimeDependent => "time-dependent (clock-based)",
+            IsnClass::Random => "randomized — good (Difficulty: hard)",
+        }
+    }
+}
+
+fn gcd(a: u32, b: u32) -> u32 {
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
+}
+
+/// Classify a set of sampled ISNs by the increments between consecutive
+/// SYN/ACKs (a lightweight take on nmap's SEQ GCD/SP analysis).
+pub fn analyze_isn(samples: &[u32]) -> Option<IsnClass> {
+    if samples.len() < 2 {
+        return None;
+    }
+    let diffs: Vec<u32> = samples
+        .windows(2)
+        .map(|w| w[1].wrapping_sub(w[0]))
+        .collect();
+    if diffs.iter().all(|&d| d == 0) {
+        return Some(IsnClass::Constant);
+    }
+    let all_equal = diffs.windows(2).all(|w| w[0] == w[1]);
+    if all_equal && diffs[0] < 0x1_0000 {
+        return Some(IsnClass::Incremental);
+    }
+    let g = diffs.iter().copied().reduce(gcd).unwrap_or(1);
+    if g >= 20_000 {
+        return Some(IsnClass::TimeDependent);
+    }
+    Some(IsnClass::Random)
+}
+
+/// Send several SYN probes and classify the ISN predictability. Raw
+/// sockets, so it returns None without privileges / on IPv6.
+pub fn probe_isn_class(
+    src_ip: Ipv4Addr,
+    dst_ip: Ipv4Addr,
+    open_port: u16,
+    timeout: Duration,
+) -> Option<IsnClass> {
+    let mut isns: Vec<u32> = Vec::with_capacity(5);
+    for _ in 0..5 {
+        if let Some(fp) = probe(src_ip, dst_ip, open_port, timeout) {
+            isns.push(fp.isn);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if isns.len() >= 3 {
+        analyze_isn(&isns)
+    } else {
+        None
+    }
 }
 
 /// Encode the captured options into the compact nmap-style notation.
@@ -331,6 +426,7 @@ pub fn probe(
                     ttl: 0,  // not available from tcp_packet_iter
                     df: false,
                     round_trip_us: probe_t0.elapsed().as_micros() as u64,
+                    isn: reply.get_sequence(),
                 };
                 return Some(fp);
             }
@@ -401,6 +497,7 @@ mod tests {
             ttl: 64,
             df: true,
             round_trip_us: 0,
+            isn: 0,
         };
         assert_eq!(fp.summary(), "T1 W=0xffff O=M5B4NW7L TTL=64 DF=true");
     }
@@ -412,24 +509,33 @@ mod tests {
         assert_eq!(parse_wscale("M5B4NNS"), None); // no window scale
     }
 
-    fn fp(win: u16, opts: &str, ttl: u8) -> TcpFingerprint {
-        TcpFingerprint { src_port: 0, window: win, options: opts.into(), ttl, df: true, round_trip_us: 0 }
+    fn fp(win: u16, opts: &str) -> TcpFingerprint {
+        TcpFingerprint { src_port: 0, window: win, options: opts.into(), ttl: 0, df: true, round_trip_us: 0, isn: 0 }
     }
 
     #[test]
     fn classify_linux_vs_macos_vs_windows() {
         // Linux: TTL 64, timestamp, WS 7
-        let (os, c) = classify_stack(&fp(64240, "M5B4STNW7", 64)).unwrap();
+        let (os, c) = classify_stack(&fp(64240, "M5B4STNW7"), 64).unwrap();
         assert!(os.contains("Linux"), "{}", os);
         assert!(c >= 85);
         // macOS/BSD: TTL 64, timestamp, WS 6
-        let (os, _) = classify_stack(&fp(65535, "M5B4NW6ST", 64)).unwrap();
+        let (os, _) = classify_stack(&fp(65535, "M5B4NW6ST"), 64).unwrap();
         assert!(os.contains("macOS") || os.contains("FreeBSD"), "{}", os);
         // Windows: TTL 128, WS 8, SACK, no timestamp
-        let (os, _) = classify_stack(&fp(64240, "M5B4NW8NNS", 128)).unwrap();
+        let (os, _) = classify_stack(&fp(64240, "M5B4NW8NNS"), 128).unwrap();
         assert!(os.contains("Windows"), "{}", os);
         // TTL 255 → network gear, not a desktop OS
-        let (os, _) = classify_stack(&fp(65535, "M5B4", 255)).unwrap();
+        let (os, _) = classify_stack(&fp(65535, "M5B4"), 255).unwrap();
         assert!(os.contains("Network device") || os.contains("router"), "{}", os);
+    }
+
+    #[test]
+    fn isn_classification() {
+        assert_eq!(analyze_isn(&[100, 100, 100]), Some(IsnClass::Constant));
+        assert_eq!(analyze_isn(&[100, 164, 228, 292]), Some(IsnClass::Incremental)); // +64 fixed
+        // Large varied increments → randomized
+        assert_eq!(analyze_isn(&[1000, 999_888_777, 111_222_333, 3_000_000_001]), Some(IsnClass::Random));
+        assert_eq!(analyze_isn(&[42]), None);
     }
 }
