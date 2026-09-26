@@ -4,6 +4,43 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.69.2] - 2026-09-26
+
+Bug fixes from the full v0.69.1 lab validation (57 tests, 85% pass, all
+regressions held). Closes the five low/medium bugs found.
+
+- **B1 — UDP `--top-ports` used the TCP ranking.** A UDP scan with
+  `--top-ports N` scanned the TCP top-N, missing the common UDP services
+  (tftp/69, ntp/123, snmp/161, dhcp/67, isakmp/500, upnp/1900). Added a
+  separate `top_udp()` list from the nmap-services UDP frequency ranking;
+  UDP scans (and the default port set under `-sU`) now use it.
+- **B4 — default port set was a sequential 1-1000.** Without `-p` we swept
+  ports 1-1000 in order, missing high-frequency ports above 1024 that nmap
+  includes (5357/wsdapi, 9080). The default is now the nmap-style top-1000
+  **by frequency** (TCP or UDP), matching nmap's default.
+- **B7 — `--origin-discovery` reported 127.0.0.1 as HIGH-confidence origin.**
+  Cloudflare sinkholes non-existent subdomains to 127.0.0.1, which piled up
+  as an 18-source "origin". Loopback/unspecified/link-local/multicast/
+  broadcast are now filtered before scoring (private RFC1918 IPs are kept —
+  a leaked internal address is a real finding).
+- **B3 — `--cloud-fingerprint` missed Akamai.** Added the 23.192.0.0/11,
+  23.0.0.0/12, 96.x Akamai ranges and a `.akamaitechnologies.com` PTR rule.
+  Verified: `akamai.com` now → Akamai (by PTR and IP range).
+- **B5 — two ECDSA-CBC cipher suites missing from `--ssl-enum`.** Added
+  `ECDHE_ECDSA_AES_128/256_CBC_SHA` (0xC009/0xC00A) and the SHA384 variant
+  to the enumeration candidate list.
+- 505/505 tests pass.
+
+### Not fixed here — the two big items
+- **B2 (`-sV` depth).** Version detection **works** for text-banner services
+  (SSH, HTTP — verified `github:22` → a version string), but does not cover
+  binary protocols with no plaintext banner (MSRPC/135, SMB/445,
+  VMware-auth/902) which need protocol-specific probes, and banner parsing
+  is still crude. Real fix = a probe-execution engine (like nmap's
+  service-probes). Dedicated effort.
+- **B6 (OS fingerprinting).** Still TTL-only; real TCP/IP stack
+  fingerprinting is the last big Tier-2 item.
+
 ## [0.69.1] - 2026-09-25
 
 Two more Tier-3 lab items. Both use raw sockets and are validated on the

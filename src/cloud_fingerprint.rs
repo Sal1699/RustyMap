@@ -98,6 +98,8 @@ const PTR_RULES: &[(&str, &str, &str)] = &[
     (".hetzner.com", "Hetzner", "VM"),
     (".ovh.net", "OVH", "VM"),
     (".ovhcloud.com", "OVH", "VM"),
+    (".akamaitechnologies.com", "Akamai", "Edge CDN"),
+    (".deploy.static.akamaitechnologies.com", "Akamai", "Edge CDN"),
 ];
 
 /// (CIDR, provider, service) — matched against the resolved A/AAAA records.
@@ -140,10 +142,14 @@ const IP_RANGES: &[(&str, &str, &str)] = &[
     ("151.101.0.0/16", "Fastly", "CDN"),
     ("199.232.0.0/16", "Fastly", "CDN"),
     // Akamai
+    ("23.0.0.0/12", "Akamai", "CDN"),
     ("23.32.0.0/11", "Akamai", "CDN"),
+    ("23.192.0.0/11", "Akamai", "CDN"),
     ("104.64.0.0/10", "Akamai", "CDN"),
     ("184.24.0.0/13", "Akamai", "CDN"),
     ("2.16.0.0/13", "Akamai", "CDN"),
+    ("96.16.0.0/15", "Akamai", "CDN"),
+    ("96.6.0.0/15", "Akamai", "CDN"),
 ];
 
 pub async fn fingerprint(host: &str, dur: Duration) -> Result<CloudFingerprint> {

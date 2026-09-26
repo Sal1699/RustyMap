@@ -217,7 +217,7 @@ pub async fn discover_origin(apex: &str, timeout: Duration) -> Result<Vec<Origin
             let host = rec.exchange().to_string();
             if let Ok(ips) = resolver.lookup_ip(host.as_str()).await {
                 for ip in ips.iter() {
-                    if !cdn_ips.contains(&ip) {
+                    if !cdn_ips.contains(&ip) && !is_bogus_origin(&ip) {
                         out.push(OriginCandidate {
                             ip,
                             source: "MX",
@@ -240,7 +240,7 @@ pub async fn discover_origin(apex: &str, timeout: Duration) -> Result<Vec<Origin
                 if let Some(ip4) = tok.strip_prefix("ip4:") {
                     let ip4 = ip4.split('/').next().unwrap_or(ip4);
                     if let Ok(ip) = ip4.parse::<IpAddr>() {
-                        if !cdn_ips.contains(&ip) {
+                        if !cdn_ips.contains(&ip) && !is_bogus_origin(&ip) {
                             out.push(OriginCandidate {
                                 ip,
                                 source: "SPF",
@@ -279,7 +279,7 @@ async fn timeout_lookup(
         return Ok(());
     };
     for ip in ips.iter() {
-        if !cdn_ips.contains(&ip) {
+        if !cdn_ips.contains(&ip) && !is_bogus_origin(&ip) {
             out.push(OriginCandidate {
                 ip,
                 source,
@@ -288,6 +288,25 @@ async fn timeout_lookup(
         }
     }
     Ok(())
+}
+
+/// True for addresses that can never be a real origin — loopback,
+/// unspecified, link-local, multicast, broadcast. CDNs (notably
+/// Cloudflare) sinkhole non-existent subdomains to 127.0.0.1, which
+/// otherwise piled up as an 18-source "HIGH confidence" origin (lab bug
+/// B7). Private RFC1918 IPs are deliberately kept — a subdomain leaking an
+/// internal address is a genuine finding.
+fn is_bogus_origin(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v) => {
+            v.is_loopback()
+                || v.is_unspecified()
+                || v.is_link_local()
+                || v.is_multicast()
+                || v.is_broadcast()
+        }
+        IpAddr::V6(v) => v.is_loopback() || v.is_unspecified() || v.is_multicast(),
+    }
 }
 
 /// Print candidates grouped by source. Marks the candidate as

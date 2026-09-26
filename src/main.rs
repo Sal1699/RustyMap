@@ -1972,10 +1972,18 @@ async fn main() -> Result<()> {
             args.ports
         );
     }
+    // UDP has its own frequency ranking — using the TCP top-ports list for
+    // a UDP scan misses tftp/ntp/snmp/dhcp/isakmp/upnp (lab bug B1).
+    let is_udp = matches!(scan_type, ScanType::Udp);
     let mut port_vec = if args.fast {
-        top_ports::top(100)
+        if is_udp { top_ports::top_udp(100) } else { top_ports::top(100) }
     } else if let Some(n) = args.top_ports {
-        top_ports::top(n as usize)
+        if is_udp { top_ports::top_udp(n as usize) } else { top_ports::top(n as usize) }
+    } else if !p_was_set_explicitly && !args.all_ports {
+        // No explicit -p: default to the nmap-style top-1000 BY FREQUENCY
+        // (not a sequential 1-1000 sweep, which misses common high ports
+        // like 5357/9080 — lab bug B4).
+        if is_udp { top_ports::top_udp(1000) } else { top_ports::top(1000) }
     } else {
         ports::parse_ports(&args.effective_ports())?
     };
