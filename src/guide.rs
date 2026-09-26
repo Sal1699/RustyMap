@@ -233,6 +233,9 @@ pub fn print_guide() {
 
     section("SERVICE & OS DETECTION");
     line("--sV                  Probe servizi/versione (banner + probe attivi)");
+    line("                      (protocolli binari: SMB 445/139 → dialetto +");
+    line("                       OS build/host/dominio via NTLMSSP, MSRPC 135 →");
+    line("                       bind DCE/RPC, VMware authd 902)");
     line("--version-intensity N Aggressività 0-9 (default 5; ≥7 attiva probe TLS)");
     line("--version-light       Alias di --version-intensity 2");
     line("--version-all         Alias di --version-intensity 9");
@@ -245,8 +248,11 @@ pub fn print_guide() {
     line("                       Cisco, Fortinet, pfSense, OPNsense");
     line("                       + web tech Wappalyzer-style: CMS, framework,");
     line("                       JS lib, CDN, cloud, WAF — con versione)");
-    line("-O, --os              Fingerprinting OS (TTL + porte/banner)");
-    line("                      (device-class auto: router/camera/printer/NAS/IoT…)");
+    line("-O, --os              Fingerprinting OS (TTL + porte/banner + stack TCP)");
+    line("                      (device-class auto: router/camera/printer/NAS/IoT…;");
+    line("                       match su DB firme integrato → OS+versione, ISN");
+    line("                       sequence-prediction, e con raw socket la suite");
+    line("                       secondaria T2-T7/ECN/ICMP-IE/UDP-U1)");
     example("rustymap --sT --sV 10.0.0.5");
     example("rustymap --sS --sV -O 10.0.0.5");
 

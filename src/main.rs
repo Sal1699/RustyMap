@@ -1,5 +1,6 @@
 mod arp_ping;
 mod audit;
+mod binary_probe;
 mod ble;
 mod cli;
 mod ct_logs;
@@ -41,6 +42,7 @@ mod spoof_mac;
 mod syn_emu;
 mod target;
 mod tcp_fp;
+mod tcp_probe_suite;
 mod apk_scan;
 mod baseline_diff;
 mod cloud_buckets;

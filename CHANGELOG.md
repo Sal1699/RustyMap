@@ -4,6 +4,49 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.71.0] - 2026-09-26
+
+Closes the two largest detection gaps left open at 0.70.0: binary-protocol
+`-sV` and the secondary OS-probe suite. The SMB/MSRPC probes are plain TCP
+(testable anywhere); the T2–T7/ECN/ICMP/UDP suite needs raw sockets (root).
+
+### Added
+- **`-sV` binary-protocol probe engine (`binary_probe.rs`, bug B2).** Three
+  common enterprise ports speak pure binary and never emit a printable
+  banner, so the text-probe engine returned nothing for them. Now:
+  - **SMB (445/139)** — an SMB2 NEGOTIATE reports the top dialect
+    (2.0.2 → 3.1.1), and an SMBv1 SESSION SETUP carrying an NTLMSSP
+    NEGOTIATE (delegated to `smb_deep`, pre-auth, **no credentials**)
+    harvests the OS build, NetBIOS host and workgroup/domain.
+  - **MSRPC (135)** — a DCE/RPC BIND to the endpoint-mapper interface;
+    a BIND_ACK/BIND_NAK confirms "Microsoft Windows RPC".
+  - **VMware Authentication Daemon (902)** — recognised from its `220`
+    text greeting via a new `service_probe` signature.
+- **Secondary OS-probe suite (`tcp_probe_suite.rs`).** nmap's T2–T7 probes
+  (NULL/Xmas-ish/ACK to open ports, SYN/ACK/FIN to closed ports, each with
+  its own window and DF setting), the ECN probe, an ICMP echo (IE) and a
+  UDP U1 probe to a closed port. Built on an IPv4 **Layer3** channel so the
+  reply's TTL and DF bit are captured (which the Layer4 T1 path could not) —
+  this also gives `-O` a multi-probe TTL **mode** that is far steadier than a
+  single ping, feeding `os_db::match_os` a better initial TTL. Surfaces an
+  nmap-style diagnostic block (`T2(R=N) T5(R=Y TTL=64 W=0 F=AR) …`) and
+  behavioural notes (ECN negotiated, closed-port RST, UDP unreachable) on
+  `-O`. Experimental: unvalidated on the lab and can be perturbed by the
+  scanning host's own kernel emitting RSTs — treat as best-effort until
+  Kali-root validated.
+- Guide (`src/guide.rs`) updated for both under SERVICE & OS DETECTION.
+- New unit tests: SMB2/DCE-RPC packet framing + response parsing, probe-table
+  shape, TCP-flag notation, IPv4/TCP packet building, TTL-mode selection and
+  diagnostic rendering. Full suite green.
+
+### Notes / validation
+- SMB and MSRPC probes are ordinary TCP and run without privileges — test
+  with `rustymap -sV -p 135,445 <host>`.
+- The T2–T7/ECN/IE/U1 suite requires `sudo`/Administrator + a raw-capable
+  driver (Npcap on Windows) and only fires under `-O` when the T1 SYN already
+  got a reply; validate with `sudo rustymap -O -v <host>` and compare the
+  diagnostic block against `nmap -O`.
+
 ## [0.70.0] - 2026-09-26
 
 Deepens OS detection toward nmap parity: a built-in signature database and

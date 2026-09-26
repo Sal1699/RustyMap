@@ -319,6 +319,13 @@ static SIGS: Lazy<Vec<Signature>> = Lazy::new(|| {
             product: Some("NoMachine NX"), product_group: None, version_group: None, extra_group: None,
         },
         // ── Hypervisor management ──
+        // VMware Authentication Daemon (tcp/902) greets with a text 220
+        // line the moment you connect — the NULL probe reads it and this
+        // signature pulls out the daemon version (lab bug B2).
+        Signature {
+            regex: Regex::new(r"(?i)VMware Authentication Daemon Version\s*([\d.]+)").unwrap(),
+            product: Some("VMware Authentication Daemon"), product_group: None, version_group: Some(1), extra_group: None,
+        },
         Signature {
             regex: Regex::new(r"(?i)VMware ESX(?:i)?\s*([\d.]+)?").unwrap(),
             product: Some("VMware ESXi"), product_group: None, version_group: Some(1), extra_group: None,
@@ -560,6 +567,14 @@ pub async fn probe(
     sni: Option<&str>,
     intensity: u8,
 ) -> Option<ServiceInfo> {
+    // Binary-only protocols (SMB / MSRPC) never emit a printable banner,
+    // so hand them to the dedicated binary probe first (lab bug B2).
+    if let Some(info) = crate::binary_probe::probe(ip, port, timeout_dur).await {
+        if !info.is_empty() {
+            return Some(info);
+        }
+    }
+
     let addr = SocketAddr::new(ip, port);
     let mut best: Option<ServiceInfo> = None;
     for p in probes_for_port(port) {

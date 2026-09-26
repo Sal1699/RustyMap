@@ -414,9 +414,34 @@ fn refine_from_tcp_fp(host: &HostResult, guess: &mut OsGuess, timeout: Duration)
     let probe_to = timeout.min(Duration::from_secs(2));
     // Real TTL comes from the ICMP/ping probe (guess.ttl); the TCP-only
     // capture path can't read the IP header, so fp.ttl is unreliable.
-    let ttl = guess.ttl.unwrap_or(0);
+    let mut ttl = guess.ttl.unwrap_or(0);
     if let Some(fp) = crate::tcp_fp::probe(src, v4, port, probe_to) {
         guess.hints.push(format!("tcp-fp: {}", fp.summary()));
+
+        // Secondary probe suite (T2–T7 / ECN / ICMP-IE / UDP-U1). Only
+        // runs when raw sockets are available (run_suite returns None
+        // otherwise). Its responders give a far more robust initial-TTL
+        // reading than a single ping — the IP header is captured here.
+        let closed_tcp = host
+            .ports
+            .iter()
+            .find(|p| p.state == PortState::Closed)
+            .map(|p| p.port);
+        let suite_to = timeout.min(Duration::from_millis(700));
+        if let Some(suite) =
+            crate::tcp_probe_suite::run_suite(src, v4, port, closed_tcp, 40125, suite_to)
+        {
+            guess.hints.push(format!("secondary probes: {}", suite.diagnostic()));
+            for n in suite.notes() {
+                guess.hints.push(format!("probe signal: {}", n));
+            }
+            if let Some(observed) = suite.observed_ttl() {
+                // Prefer the multi-probe TTL mode over the single ping.
+                ttl = observed;
+                guess.ttl = Some(observed);
+            }
+        }
+
         let (ws, ts, sack) = fp.signals();
         let init_ttl = if ttl <= 64 {
             64
