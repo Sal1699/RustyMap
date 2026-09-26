@@ -4,6 +4,43 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.71.1] - 2026-09-26
+
+Fixes surfaced by the v0.71.0 Kali lab validation (22/26 PASS → the 4 FAILs
+addressed here). All in the raw-socket OS-probe path; needs Kali-root re-run.
+
+### Fixed
+- **B8 — T5/T6/T7 skipped when no closed port was found.** The suite pushed
+  `R=N` for all closed-port probes when the scan had no confirmed-closed TCP
+  port (common on fully-filtered hosts and VirtualBox NAT). Now it probes a
+  **presumed-closed high port**, exactly as nmap does — eliciting the RST
+  that fingerprints Slirp-style stacks and reading a true `R=N` on genuinely
+  filtered hosts. (nmap got `T6/T7 R=Y` on 10.0.2.2 where RustyMap reported
+  `R=N`.)
+- **B9 — UDP U1 probe always reported `TTL=0`.** The ICMP port-unreachable
+  was received on a Layer4 channel that hides the outer IP header. Now
+  received on a **Layer3** channel so the reply TTL is captured (nmap sees
+  255 on the NAT gateway, 64 on Linux).
+- **B11 — window-scale printed in decimal (`NW10`) instead of nmap's hex
+  (`NWA`).** `encode_options`/`parse_wscale` now use hex in the `O=` field,
+  so RustyMap's T1 options string is byte-comparable with nmap's.
+
+### Added
+- **VirtualBox/QEMU Slirp NAT heuristic (B10).** A single T1 signature can't
+  separate Slirp from Linux, so `-O` now flags the gateway from the
+  *combination* the suite observes: max-TTL (255) replies with the DF bit
+  **cleared** + a predictable ISN + a `0xFFFF` SYN/ACK window
+  (`SuiteResult::nat_gateway_signature()`). Fixes the "Linux general purpose"
+  misclassification of 10.0.2.2/10.0.2.3.
+
+### Notes
+- Text-banner `-sV` (SSH/HTTP) is **not** broken — the v0.71.0 report's
+  `scanme:22` "gap" was a network timeout to scanme; extraction verified
+  working against github (`af8ca74 2.0`). No change made.
+- T1 `TTL=0`/`DF` via the connect path remains a known limitation (the suite
+  now supplies the authoritative TTL); not a regression.
+- 527/527 tests pass (+2: NAT signature, hex window-scale).
+
 ## [0.71.0] - 2026-09-26
 
 Closes the two largest detection gaps left open at 0.70.0: binary-protocol

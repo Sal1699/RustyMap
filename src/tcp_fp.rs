@@ -85,15 +85,18 @@ fn t1_options() -> Vec<TcpOption> {
 }
 
 /// Extract the window-scale shift from the encoded options string
-/// (`…W7…` → 7). Returns None if no window-scale option was present.
+/// (`…W7…` → 7, `…WA…` → 10). The shift is encoded in hex to match
+/// nmap's O= notation (B11); parse it the same way. Returns None if no
+/// window-scale option was present. Parsing stops at the first non-hex
+/// char, which is always the next option letter (M/N/S/T/L — none of
+/// which are hex digits A–F), so it never over-consumes.
 fn parse_wscale(options: &str) -> Option<u8> {
-    let bytes = options.as_bytes();
     let pos = options.find('W')?;
     let mut n: u32 = 0;
     let mut any = false;
-    for &c in &bytes[pos + 1..] {
-        if c.is_ascii_digit() {
-            n = n * 10 + (c - b'0') as u32;
+    for c in options[pos + 1..].chars() {
+        if let Some(d) = c.to_digit(16) {
+            n = n * 16 + d;
             any = true;
         } else {
             break;
@@ -284,11 +287,13 @@ fn encode_options(buf: &[u8]) -> String {
                 i += 4;
             }
             3 => {
-                // Window scale — 3-byte option
+                // Window scale — 3-byte option. nmap prints the shift in
+                // hex in its O= field (WS 10 → "WA"), so we match that
+                // notation (lab bug B11 — was decimal "W10").
                 if i + 3 > buf.len() {
                     break;
                 }
-                out.push_str(&format!("W{}", buf[i + 2]));
+                out.push_str(&format!("W{:X}", buf[i + 2]));
                 i += 3;
             }
             4 => {
@@ -507,6 +512,18 @@ mod tests {
         assert_eq!(parse_wscale("M5B4STNW7"), Some(7));
         assert_eq!(parse_wscale("M5B4NW8ST"), Some(8));
         assert_eq!(parse_wscale("M5B4NNS"), None); // no window scale
+    }
+
+    #[test]
+    fn wscale_uses_hex_notation_like_nmap() {
+        // WS 10 encodes as "WA" (hex), matching nmap's O= field.
+        let buf = [3u8, 3, 10]; // window scale option, shift 10
+        assert_eq!(encode_options(&buf), "WA");
+        // …and parses back to 10 (not stopping at a bogus digit).
+        assert_eq!(parse_wscale("M5B4ST11NWA"), Some(10));
+        assert_eq!(parse_wscale("MFFD7ST11NWA"), Some(10));
+        // A single-digit shift is unchanged by the hex switch.
+        assert_eq!(parse_wscale("M5B4NW7"), Some(7));
     }
 
     fn fp(win: u16, opts: &str) -> TcpFingerprint {

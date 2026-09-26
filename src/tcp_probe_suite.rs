@@ -237,6 +237,22 @@ impl SuiteResult {
 
         out
     }
+
+    /// Slirp/QEMU user-mode NAT signature (lab bug B10): its RST/reply
+    /// probes come back with the maximum initial TTL (255) **and** the DF
+    /// bit cleared — unlike a real Linux/BSD host, whose RSTs carry TTL 64
+    /// and usually set DF. Callers combine this with a predictable ISN and
+    /// a 0xFFFF T1 window to name the gateway. Requires at least two
+    /// responders so a lone stray reply can't trigger it.
+    pub fn nat_gateway_signature(&self) -> bool {
+        let resp: Vec<&TResult> = self.t.iter().filter(|r| r.responded).collect();
+        if resp.len() < 2 {
+            return false;
+        }
+        let ttl255 = resp.iter().filter(|r| r.ttl >= 129).count();
+        let df_clear = resp.iter().filter(|r| !r.df).count();
+        ttl255 * 2 > resp.len() && df_clear * 2 > resp.len()
+    }
 }
 
 /// Encoded byte length of the T-series option template (below).
@@ -406,10 +422,11 @@ fn send_tcp_probe(
 }
 
 /// UDP U1 probe: send a UDP datagram to a (presumed) closed port and
-/// wait for the ICMP port-unreachable it elicits.
+/// wait for the ICMP port-unreachable it elicits. Received on a Layer3
+/// ICMP channel so the outer IP header's TTL is captured (lab bug B9 —
+/// the Layer4 path returned TTL 0).
 fn send_u1(src: Ipv4Addr, dst: Ipv4Addr, closed_udp_port: u16, timeout: Duration) -> U1Result {
     use pnet::packet::icmp::{IcmpPacket, IcmpTypes};
-    use pnet::transport::{icmp_packet_iter, TransportChannelType::Layer4, TransportProtocol::Ipv4};
     let _ = src;
 
     // Send the UDP datagram (kernel builds the IP header).
@@ -421,7 +438,7 @@ fn send_u1(src: Ipv4Addr, dst: Ipv4Addr, closed_udp_port: u16, timeout: Duration
     let payload = vec![0x43u8; 300];
 
     // Open the ICMP listener BEFORE sending so we don't race the reply.
-    let (_itx, mut irx) = match transport_channel(4096, Layer4(Ipv4(IpNextHeaderProtocols::Icmp))) {
+    let (_itx, mut irx) = match transport_channel(4096, Layer3(IpNextHeaderProtocols::Icmp)) {
         Ok(p) => p,
         Err(_) => return U1Result::default(),
     };
@@ -435,21 +452,23 @@ fn send_u1(src: Ipv4Addr, dst: Ipv4Addr, closed_udp_port: u16, timeout: Duration
 
     let (chan_tx, chan_rx) = mpsc::channel::<U1Result>();
     thread::spawn(move || {
-        let mut iter = icmp_packet_iter(&mut irx);
+        let mut iter = ipv4_packet_iter(&mut irx);
         loop {
             match iter.next() {
                 Ok((pkt, addr)) => {
                     if addr != IpAddr::V4(dst) {
                         continue;
                     }
-                    if pkt.get_icmp_type() == IcmpTypes::DestinationUnreachable {
-                        // The Layer4 ICMP path doesn't hand us the outer IP
-                        // TTL; report responded with ttl 0 (unknown) — the
-                        // fact of the unreachable is the useful signal.
-                        let _ = chan_tx.send(U1Result { responded: true, ttl: 0 });
+                    if pkt.get_next_level_protocol() != IpNextHeaderProtocols::Icmp {
+                        continue;
+                    }
+                    let Some(icmp) = IcmpPacket::new(pkt.payload()) else { continue };
+                    if icmp.get_icmp_type() == IcmpTypes::DestinationUnreachable {
+                        // Outer IP TTL of the ICMP reply is the useful stack
+                        // signal (Linux 64, Slirp/network gear 255, …).
+                        let _ = chan_tx.send(U1Result { responded: true, ttl: pkt.get_ttl() });
                         return;
                     }
-                    let _ = IcmpPacket::new(pkt.packet());
                 }
                 Err(_) => {
                     let _ = chan_tx.send(U1Result::default());
@@ -568,18 +587,23 @@ pub fn run_suite(
     let mut result = SuiteResult::default();
     let t_opts = t_series_options();
 
-    for spec in T_PROBES {
-        let port = if spec.to_open {
-            open_port
-        } else {
-            match closed_tcp_port {
-                Some(p) => p,
-                None => {
-                    result.t.push(TResult::none(spec.name));
-                    continue;
-                }
+    // T5–T7 target a closed port. When the scan found no confirmed-closed
+    // TCP port, don't skip them (lab bug B8) — probe a presumed-closed high
+    // port, exactly as nmap does. On a stack that RSTs unmapped ports
+    // (e.g. VirtualBox/QEMU Slirp NAT) this still elicits the RST that
+    // fingerprints it; on a fully-filtered host it simply reads R=N.
+    let closed_port = closed_tcp_port.unwrap_or_else(|| {
+        let mut rng = rand::thread_rng();
+        loop {
+            let p = rng.gen_range(40000..60000);
+            if p != open_port {
+                break p;
             }
-        };
+        }
+    });
+
+    for spec in T_PROBES {
+        let port = if spec.to_open { open_port } else { closed_port };
         let r = send_tcp_probe(
             src,
             dst,
@@ -692,6 +716,28 @@ mod tests {
         assert!(d.contains("ECN(R=Y"), "{}", d);
         assert!(d.contains("U1(R=Y"), "{}", d);
         assert!(d.contains("IE(R=Y"), "{}", d);
+    }
+
+    #[test]
+    fn nat_gateway_signature_detects_slirp() {
+        // Slirp: RST replies with TTL 255 and DF cleared.
+        let mut s = SuiteResult::default();
+        for name in ["T2", "T3", "T4", "T6"] {
+            s.t.push(TResult { name, responded: true, df: false, ttl: 255, window: 0, flags: TcpFlags::RST });
+        }
+        assert!(s.nat_gateway_signature());
+
+        // A real Linux host: RSTs carry TTL 64 with DF set → not a NAT gw.
+        let mut lin = SuiteResult::default();
+        for name in ["T4", "T5", "T6", "T7"] {
+            lin.t.push(TResult { name, responded: true, df: true, ttl: 64, window: 0, flags: TcpFlags::RST });
+        }
+        assert!(!lin.nat_gateway_signature());
+
+        // Too few responders → never fires.
+        let mut lone = SuiteResult::default();
+        lone.t.push(TResult { name: "T2", responded: true, df: false, ttl: 255, window: 0, flags: TcpFlags::RST });
+        assert!(!lone.nat_gateway_signature());
     }
 
     #[test]

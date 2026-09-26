@@ -428,14 +428,13 @@ fn refine_from_tcp_fp(host: &HostResult, guess: &mut OsGuess, timeout: Duration)
             .find(|p| p.state == PortState::Closed)
             .map(|p| p.port);
         let suite_to = timeout.min(Duration::from_millis(700));
-        if let Some(suite) =
-            crate::tcp_probe_suite::run_suite(src, v4, port, closed_tcp, 40125, suite_to)
-        {
-            guess.hints.push(format!("secondary probes: {}", suite.diagnostic()));
-            for n in suite.notes() {
+        let suite = crate::tcp_probe_suite::run_suite(src, v4, port, closed_tcp, 40125, suite_to);
+        if let Some(s) = &suite {
+            guess.hints.push(format!("secondary probes: {}", s.diagnostic()));
+            for n in s.notes() {
                 guess.hints.push(format!("probe signal: {}", n));
             }
-            if let Some(observed) = suite.observed_ttl() {
+            if let Some(observed) = s.observed_ttl() {
                 // Prefer the multi-probe TTL mode over the single ping.
                 ttl = observed;
                 guess.ttl = Some(observed);
@@ -481,6 +480,20 @@ fn refine_from_tcp_fp(host: &HostResult, guess: &mut OsGuess, timeout: Duration)
         // 3) ISN predictability — nmap's "TCP Sequence Prediction".
         if let Some(isn) = crate::tcp_fp::probe_isn_class(src, v4, port, probe_to) {
             guess.hints.push(format!("ISN: {}", isn.label()));
+
+            // Slirp/QEMU user-mode NAT heuristic (lab bug B10): a single
+            // T1-signature entry in os_db can't separate it from Linux, but
+            // the *combination* max-TTL replies with DF cleared + a
+            // predictable ISN + a 0xFFFF SYN/ACK window is Slirp-specific.
+            let predictable = !matches!(isn, crate::tcp_fp::IsnClass::Random);
+            let nat_sig = suite.as_ref().map_or(false, |s| s.nat_gateway_signature());
+            if predictable && nat_sig && fp.window == 65535 {
+                guess.family = "VirtualBox/QEMU Slirp NAT (user-mode gateway)".into();
+                guess.confidence = guess.confidence.max(82);
+                guess
+                    .hints
+                    .push("heuristic: TTL 255 + DF clear + predictable ISN + W=0xFFFF → Slirp/QEMU NAT".into());
+            }
         }
     }
 }
