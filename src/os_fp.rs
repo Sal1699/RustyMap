@@ -414,10 +414,17 @@ fn refine_from_tcp_fp(host: &HostResult, guess: &mut OsGuess, timeout: Duration)
     let probe_to = timeout.min(Duration::from_secs(2));
     if let Some(fp) = crate::tcp_fp::probe(src, v4, port, probe_to) {
         guess.hints.push(format!("tcp-fp: {}", fp.summary()));
-        // The window value alone is a strong signal because OSes use
-        // distinctive defaults (Linux 2.6+ ~29200/65535, Windows
-        // ~8192/64240, BSD ~65535). Bump confidence modestly.
-        if guess.confidence < 75 {
+        // Classify from the full stack signature (window / window-scale /
+        // timestamp / TTL), not just the TTL family (lab bug B6). When the
+        // stack signature is at least as confident as the current guess,
+        // it wins — it distinguishes Linux vs macOS/BSD vs Windows and
+        // correctly calls TTL-255 hosts network gear rather than a desktop.
+        if let Some((os, conf)) = crate::tcp_fp::classify_stack(&fp) {
+            if conf >= guess.confidence {
+                guess.family = os;
+            }
+            guess.confidence = guess.confidence.max(conf);
+        } else if guess.confidence < 75 {
             guess.confidence = (guess.confidence + 10).min(85);
         }
     }

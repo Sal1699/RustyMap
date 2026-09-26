@@ -81,6 +81,87 @@ fn t1_options() -> Vec<TcpOption> {
     ]
 }
 
+/// Extract the window-scale shift from the encoded options string
+/// (`…W7…` → 7). Returns None if no window-scale option was present.
+fn parse_wscale(options: &str) -> Option<u8> {
+    let bytes = options.as_bytes();
+    let pos = options.find('W')?;
+    let mut n: u32 = 0;
+    let mut any = false;
+    for &c in &bytes[pos + 1..] {
+        if c.is_ascii_digit() {
+            n = n * 10 + (c - b'0') as u32;
+            any = true;
+        } else {
+            break;
+        }
+    }
+    any.then_some(n.min(255) as u8)
+}
+
+fn linux_window_hint(win: u16) -> &'static str {
+    match win {
+        29200 | 28960 | 14600 | 5840 => " (kernel ~2.6–4.x)",
+        64240 | 64076 | 65160 => " (kernel ~5.x+)",
+        _ => "",
+    }
+}
+
+/// Best-effort OS classification from the SYN/ACK stack fingerprint —
+/// initial TTL + window size + window-scale value + timestamp/SACK presence.
+/// This is not full nmap-os-db matching, but a real step past TTL-only
+/// (lab bug B6): Linux, Windows and macOS/BSD all differ in window-scale
+/// value, timestamp presence and default window even when their TTL
+/// collides. Returns `(label, confidence)`.
+pub fn classify_stack(fp: &TcpFingerprint) -> Option<(String, u8)> {
+    let has_ts = fp.options.contains('T');
+    let has_sack = fp.options.contains('S');
+    let ws = parse_wscale(&fp.options);
+    let win = fp.window;
+    let init_ttl = if fp.ttl <= 64 {
+        64
+    } else if fp.ttl <= 128 {
+        128
+    } else {
+        255
+    };
+
+    let result = match init_ttl {
+        128 => {
+            // Initial TTL 128 → Windows family. Modern Windows uses window
+            // scale 8 and offers SACK; timestamp is off by default.
+            let label = match ws {
+                Some(8) if has_sack => "Windows 10/11 or Server 2016+",
+                Some(_) => "Windows 7/8 or Server 2008–2012",
+                None => "Windows (legacy, no window scaling)",
+            };
+            (label.to_string(), 88)
+        }
+        64 => {
+            // Initial TTL 64 → Unix-like. Window-scale value and timestamp
+            // separate Linux (WS 7) from macOS/FreeBSD (WS 6).
+            if has_ts {
+                match ws {
+                    Some(7) => (format!("Linux (kernel 3.x–6.x){}", linux_window_hint(win)), 88),
+                    Some(6) => ("macOS or FreeBSD".to_string(), 80),
+                    Some(w) => (format!("Linux/Unix (window scale {})", w), 76),
+                    None => ("Linux/Unix (timestamped, no WS)".to_string(), 70),
+                }
+            } else if has_sack {
+                ("Linux-based appliance / embedded (no timestamp)".to_string(), 68)
+            } else {
+                ("Unix-like".to_string(), 60)
+            }
+        }
+        _ => {
+            // Initial TTL 255 → network gear (router/switch/NAT) or legacy
+            // Unix (Solaris/AIX). Not a desktop OS.
+            ("Network device / router / Solaris-AIX (TTL 255)".to_string(), 62)
+        }
+    };
+    Some(result)
+}
+
 /// Encode the captured options into the compact nmap-style notation.
 fn encode_options(buf: &[u8]) -> String {
     let mut out = String::new();
@@ -322,5 +403,33 @@ mod tests {
             round_trip_us: 0,
         };
         assert_eq!(fp.summary(), "T1 W=0xffff O=M5B4NW7L TTL=64 DF=true");
+    }
+
+    #[test]
+    fn parse_wscale_extracts_shift() {
+        assert_eq!(parse_wscale("M5B4STNW7"), Some(7));
+        assert_eq!(parse_wscale("M5B4NW8ST"), Some(8));
+        assert_eq!(parse_wscale("M5B4NNS"), None); // no window scale
+    }
+
+    fn fp(win: u16, opts: &str, ttl: u8) -> TcpFingerprint {
+        TcpFingerprint { src_port: 0, window: win, options: opts.into(), ttl, df: true, round_trip_us: 0 }
+    }
+
+    #[test]
+    fn classify_linux_vs_macos_vs_windows() {
+        // Linux: TTL 64, timestamp, WS 7
+        let (os, c) = classify_stack(&fp(64240, "M5B4STNW7", 64)).unwrap();
+        assert!(os.contains("Linux"), "{}", os);
+        assert!(c >= 85);
+        // macOS/BSD: TTL 64, timestamp, WS 6
+        let (os, _) = classify_stack(&fp(65535, "M5B4NW6ST", 64)).unwrap();
+        assert!(os.contains("macOS") || os.contains("FreeBSD"), "{}", os);
+        // Windows: TTL 128, WS 8, SACK, no timestamp
+        let (os, _) = classify_stack(&fp(64240, "M5B4NW8NNS", 128)).unwrap();
+        assert!(os.contains("Windows"), "{}", os);
+        // TTL 255 → network gear, not a desktop OS
+        let (os, _) = classify_stack(&fp(65535, "M5B4", 255)).unwrap();
+        assert!(os.contains("Network device") || os.contains("router"), "{}", os);
     }
 }

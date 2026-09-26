@@ -4,6 +4,36 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.69.3] - 2026-09-26
+
+Tackles the last big Tier-2 item — **OS fingerprinting beyond TTL** (bug
+B6 / #20–22). Needs raw sockets + an open port (root); validated on Kali.
+
+- **`-O` now classifies from the full SYN/ACK stack signature, not just the
+  TTL.** `tcp_fp` already captured the window size, TCP option order,
+  window-scale value, timestamp/SACK presence and DF bit from the SYN/ACK
+  (nmap's T1 probe) — but the OS guess still came from the TTL alone, so
+  Linux, macOS/BSD and appliances all collapsed to "Linux/Unix" and
+  TTL-255 hosts were mislabelled. New `tcp_fp::classify_stack()` maps the
+  signature to an OS:
+  - initial TTL 128 + WS 8 + SACK → Windows 10/11 / Server 2016+
+  - initial TTL 64 + timestamp + WS 7 → Linux (with a kernel-era hint from
+    the window size), WS 6 → macOS/FreeBSD, no timestamp → embedded/appliance
+  - initial TTL 255 → network device / router / Solaris-AIX (no longer
+    mislabelled as a desktop OS)
+
+  The stack classification replaces the TTL family guess when it is at
+  least as confident, and raises confidence to 60–88%.
+- 507/507 tests pass (`classify_stack` unit-tested for Linux/macOS/Windows/gear).
+
+### Scope / still open
+This is a real step past TTL-only but **not full nmap parity**: no ISN
+sequence-prediction, no T2–T7/ICMP/UDP secondary probes, and no matching
+against the ~6100-signature `nmap-os-db` (wiring that in — bug 5.B — needs
+nmap's fingerprint scoring algorithm). So `-O` gives OS family + a rough
+version bracket, not nmap's exact "Linux 5.0–6.2 (95%)" / specific-device
+identification. The `-sV` binary-protocol probe engine (B2) also remains.
+
 ## [0.69.2] - 2026-09-26
 
 Bug fixes from the full v0.69.1 lab validation (57 tests, 85% pass, all
