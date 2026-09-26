@@ -66,8 +66,9 @@ pub const T_PROBES: &[TProbe] = &[
     TProbe { name: "T7", flags: TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG, window: 65535, df: false, to_open: false },
 ];
 
-/// Captured reply to one TCP probe.
-#[derive(Debug, Clone)]
+/// Captured reply to one TCP probe, with the raw fields the nmap
+/// fingerprint (S/A/O/RD/Q) is computed from.
+#[derive(Debug, Clone, Default)]
 pub struct TResult {
     pub name: &'static str,
     pub responded: bool,
@@ -75,11 +76,23 @@ pub struct TResult {
     pub ttl: u8,
     pub window: u16,
     pub flags: u8,
+    /// IP identification field of the reply (feeds CI/II classification).
+    pub ip_id: u16,
+    /// nmap S field (response SEQ vs the probe's ACK).
+    pub seq_code: &'static str,
+    /// nmap A field (response ACK vs the probe's SEQ).
+    pub ack_code: &'static str,
+    /// nmap O field — TCP options in compact notation.
+    pub opts: String,
+    /// nmap Q field — quirks (reserved bits / urgent-without-URG).
+    pub quirks: String,
+    /// nmap RD field — CRC32 of any RST payload (0 = empty).
+    pub rd: u32,
 }
 
 impl TResult {
     fn none(name: &'static str) -> Self {
-        TResult { name, responded: false, df: false, ttl: 0, window: 0, flags: 0 }
+        TResult { name, ..Default::default() }
     }
 
     /// nmap-flavoured one-probe summary, e.g. `T5(R=Y TTL=64 W=0 F=AR)`.
@@ -95,6 +108,27 @@ impl TResult {
             if self.df { "Y" } else { "N" },
             flags_str(self.flags),
         )
+    }
+
+    /// Full nmap-style coded line (`S=`/`A=`/`O=`/`RD=`/`Q=` …).
+    pub fn fields(&self, cc: Option<char>) -> crate::nmap_fp::ProbeFields {
+        if !self.responded {
+            return crate::nmap_fp::ProbeFields::not_responded(self.name);
+        }
+        crate::nmap_fp::ProbeFields {
+            name: self.name.to_string(),
+            responded: true,
+            df: Some(self.df),
+            ttl: Some(self.ttl),
+            window: Some(self.window),
+            seq: Some(self.seq_code),
+            ack: Some(self.ack_code),
+            flags: Some(flags_str(self.flags)),
+            options: Some(self.opts.clone()),
+            rd: Some(self.rd),
+            quirks: Some(self.quirks.clone()),
+            cc,
+        }
     }
 }
 
@@ -128,6 +162,16 @@ pub struct IeResult {
     pub df: bool,
 }
 
+/// SEQ line: ISN predictability numbers + IP-ID / timestamp generation.
+#[derive(Debug, Clone, Default)]
+pub struct SeqInfo {
+    pub seq: Option<crate::nmap_fp::SeqResult>,
+    /// TI — IP-ID class from the SEQ (open-port SYN) probes.
+    pub ti: &'static str,
+    /// TS — timestamp-option rate class.
+    pub ts: &'static str,
+}
+
 /// Everything the secondary suite gathered.
 #[derive(Debug, Clone, Default)]
 pub struct SuiteResult {
@@ -135,6 +179,7 @@ pub struct SuiteResult {
     pub ecn: Option<TResult>,
     pub u1: U1Result,
     pub ie: IeResult,
+    pub seq: SeqInfo,
 }
 
 impl SuiteResult {
@@ -252,6 +297,70 @@ impl SuiteResult {
         let ttl255 = resp.iter().filter(|r| r.ttl >= 129).count();
         let df_clear = resp.iter().filter(|r| !r.df).count();
         ttl255 * 2 > resp.len() && df_clear * 2 > resp.len()
+    }
+
+    /// Full nmap-style fingerprint block (SEQ + T2–T7 + ECN + IE + U1),
+    /// directly comparable with `nmap -O -d`. T1 and OPS/WIN (nmap's
+    /// six-SEQ-probe option/window lines) are not reproduced here — the
+    /// SEQ line carries the ISN math and this block carries the coded
+    /// per-probe fields (S/A/O/RD/Q/CC), which is the discriminating part.
+    pub fn fingerprint(&self) -> String {
+        let mut lines: Vec<String> = Vec::new();
+
+        // SEQ line.
+        let (sp, gcd, isr) = self
+            .seq
+            .seq
+            .map(|r| (r.sp, format!("{:X}", r.gcd), r.isr))
+            .unwrap_or((0, String::new(), 0));
+        // CI = IP-ID class across the closed-port responses (T5–T7).
+        let ci_ids: Vec<u16> = self
+            .t
+            .iter()
+            .filter(|r| r.responded && matches!(r.name, "T5" | "T6" | "T7"))
+            .map(|r| r.ip_id)
+            .collect();
+        let ci = crate::nmap_fp::ip_id_class(&ci_ids);
+        lines.push(format!(
+            "SEQ(SP={}%GCD={}%ISR={}%TI={}%CI={}%TS={})",
+            sp, gcd, isr, self.seq.ti, ci, self.seq.ts
+        ));
+
+        // T2–T7 coded lines.
+        for r in &self.t {
+            lines.push(r.fields(None).line());
+        }
+
+        // ECN with the CC field.
+        if let Some(e) = &self.ecn {
+            let cc = if e.responded {
+                Some(crate::nmap_fp::ecn_cc(
+                    e.flags & TcpFlags::ECE != 0,
+                    e.flags & TcpFlags::CWR != 0,
+                ))
+            } else {
+                None
+            };
+            lines.push(e.fields(cc).line());
+        }
+
+        // IE / U1 (ICMP / UDP).
+        lines.push(if self.ie.responded {
+            format!(
+                "IE(R=Y%DFI={}%T={:X})",
+                if self.ie.df { "Y" } else { "N" },
+                self.ie.ttl
+            )
+        } else {
+            "IE(R=N)".to_string()
+        });
+        lines.push(if self.u1.responded {
+            format!("U1(R=Y%T={:X})", self.u1.ttl)
+        } else {
+            "U1(R=N)".to_string()
+        });
+
+        lines.join("\n")
     }
 }
 
@@ -400,13 +509,35 @@ fn send_tcp_probe(
                         continue;
                     }
                     let df_set = pkt.get_flags() & Ipv4Flags::DontFragment != 0;
+                    let rflags = tcp.get_flags();
+                    // TCP options bytes = header beyond the fixed 20.
+                    let raw = tcp.packet();
+                    let opt_len = (tcp.get_data_offset() as usize * 4).saturating_sub(20);
+                    let opts = if raw.len() >= 20 + opt_len {
+                        crate::tcp_fp::encode_options(&raw[20..20 + opt_len])
+                    } else {
+                        String::new()
+                    };
+                    let urg = tcp.get_urgent_ptr();
+                    let quirks = crate::nmap_fp::quirks(
+                        tcp.get_reserved() != 0,
+                        urg,
+                        rflags & TcpFlags::URG != 0,
+                    );
                     let _ = chan_tx.send(TResult {
                         name,
                         responded: true,
                         df: df_set,
                         ttl: pkt.get_ttl(),
                         window: tcp.get_window(),
-                        flags: tcp.get_flags(),
+                        flags: rflags,
+                        ip_id: pkt.get_identification(),
+                        // S/A are computed relative to what WE sent.
+                        seq_code: crate::nmap_fp::seq_field(tcp.get_sequence(), ack),
+                        ack_code: crate::nmap_fp::ack_field(tcp.get_acknowledgement(), seq),
+                        opts,
+                        quirks,
+                        rd: crate::nmap_fp::rst_data(tcp.payload()),
                     });
                     return;
                 }
@@ -563,6 +694,153 @@ fn send_ie(src: Ipv4Addr, dst: Ipv4Addr, timeout: Duration) -> IeResult {
     chan_rx.recv_timeout(timeout).unwrap_or_default()
 }
 
+/// Parse the timestamp option's TSval from a TCP options byte slice.
+fn parse_tsval(opts: &[u8]) -> Option<u32> {
+    let mut i = 0usize;
+    while i < opts.len() {
+        match opts[i] {
+            0 => break,     // EOL
+            1 => i += 1,    // NOP
+            8 => {
+                // Timestamp: kind(1) len(1)=10 TSval(4) TSecr(4)
+                if i + 6 <= opts.len() {
+                    return Some(u32::from_be_bytes([
+                        opts[i + 2], opts[i + 3], opts[i + 4], opts[i + 5],
+                    ]));
+                }
+                return None;
+            }
+            _ => {
+                if i + 1 < opts.len() {
+                    let l = opts[i + 1] as usize;
+                    if l < 2 || i + l > opts.len() {
+                        break;
+                    }
+                    i += l;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    None
+}
+
+/// One SEQ sample from an open-port SYN: (ISN, IP-ID, TSval, capture µs).
+fn capture_seq_sample(
+    src: Ipv4Addr,
+    dst: Ipv4Addr,
+    open_port: u16,
+    timeout: Duration,
+) -> Option<(u32, u16, Option<u32>, u64)> {
+    let (mut tx, mut rx) = transport_channel(4096, Layer3(IpNextHeaderProtocols::Tcp)).ok()?;
+    let mut rng = rand::thread_rng();
+    let src_port: u16 = rng.gen_range(40000..60000);
+    let seq: u32 = rng.gen();
+    let opts = t_series_options();
+    let buf = build_ipv4_tcp(src, dst, src_port, open_port, seq, 0, TcpFlags::SYN, 1, 0, &opts, T_OPTS_LEN, false);
+    let ip_pkt = Ipv4Packet::new(&buf)?;
+    let t0 = std::time::Instant::now();
+    if tx.send_to(ip_pkt, IpAddr::V4(dst)).is_err() {
+        return None;
+    }
+
+    let (chan_tx, chan_rx) = mpsc::channel::<(u32, u16, Option<u32>, u64)>();
+    thread::spawn(move || {
+        let mut iter = ipv4_packet_iter(&mut rx);
+        loop {
+            match iter.next() {
+                Ok((pkt, addr)) => {
+                    if addr != IpAddr::V4(dst)
+                        || pkt.get_next_level_protocol() != IpNextHeaderProtocols::Tcp
+                    {
+                        continue;
+                    }
+                    let Some(tcp) = TcpPacket::new(pkt.payload()) else { continue };
+                    if tcp.get_source() != open_port || tcp.get_destination() != src_port {
+                        continue;
+                    }
+                    // Only a SYN/ACK carries a usable ISN.
+                    if tcp.get_flags() & TcpFlags::SYN == 0 {
+                        let _ = chan_tx.send((0, 0, None, 0));
+                        return;
+                    }
+                    let raw = tcp.packet();
+                    let ol = (tcp.get_data_offset() as usize * 4).saturating_sub(20);
+                    let tsval = if raw.len() >= 20 + ol {
+                        parse_tsval(&raw[20..20 + ol])
+                    } else {
+                        None
+                    };
+                    let _ = chan_tx.send((
+                        tcp.get_sequence(),
+                        pkt.get_identification(),
+                        tsval,
+                        t0.elapsed().as_micros() as u64,
+                    ));
+                    return;
+                }
+                Err(_) => {
+                    let _ = chan_tx.send((0, 0, None, 0));
+                    return;
+                }
+            }
+        }
+    });
+    match chan_rx.recv_timeout(timeout) {
+        Ok((isn, _, _, _)) if isn == 0 => None,
+        Ok(sample) => Some(sample),
+        Err(_) => None,
+    }
+}
+
+/// Six SYN probes to the open port → SEQ line (GCD/ISR/SP), TI (IP-ID
+/// class) and TS (timestamp rate class). nmap's Probe #1–#6.
+fn run_seq(src: Ipv4Addr, dst: Ipv4Addr, open_port: u16, timeout: Duration) -> SeqInfo {
+    let mut isns = Vec::new();
+    let mut ids = Vec::new();
+    let mut tsvals = Vec::new();
+    let mut times = Vec::new();
+    let mut ts_supported = false;
+    for _ in 0..6 {
+        if let Some((isn, id, tsval, t)) = capture_seq_sample(src, dst, open_port, timeout) {
+            isns.push(isn);
+            ids.push(id);
+            times.push(t);
+            if let Some(v) = tsval {
+                ts_supported = true;
+                tsvals.push((v, t));
+            }
+        }
+        std::thread::sleep(Duration::from_millis(110));
+    }
+    // Times are per-probe elapsed; make them a monotonic timeline.
+    let mut clock = 0u64;
+    let mut timeline = Vec::with_capacity(times.len());
+    for (i, _t) in times.iter().enumerate() {
+        clock += 110_000 + times[i];
+        timeline.push(clock);
+    }
+    let seq = crate::nmap_fp::seq_analysis(&isns, &timeline);
+    let ti = crate::nmap_fp::ip_id_class(&ids);
+
+    // TS rate from the first/last TSval samples.
+    let ts = if !ts_supported {
+        "U"
+    } else if tsvals.len() >= 2 {
+        let (v0, t0) = tsvals[0];
+        let (v1, t1) = *tsvals.last().unwrap();
+        let dt = (t1.saturating_sub(t0)) as f64 / 1_000_000.0 + 0.11 * (tsvals.len() - 1) as f64;
+        let always_zero = tsvals.iter().all(|(v, _)| *v == 0);
+        let hz = if dt > 0.0 { Some((v1.wrapping_sub(v0) as f64) / dt) } else { None };
+        crate::nmap_fp::ts_field(true, always_zero, hz)
+    } else {
+        crate::nmap_fp::ts_field(true, tsvals.iter().all(|(v, _)| *v == 0), None)
+    };
+
+    SeqInfo { seq, ti, ts }
+}
+
 /// Run the full secondary suite. `open_port` must be an open TCP port;
 /// `closed_tcp_port`/`closed_udp_port` are ports believed closed (used
 /// for T5–T7 and U1). Returns `None` only if no raw channel can be
@@ -638,6 +916,8 @@ pub fn run_suite(
 
     result.u1 = send_u1(src, dst, closed_udp_port, per_probe_timeout);
     result.ie = send_ie(src, dst, per_probe_timeout);
+    // SEQ line (6 open-port SYNs) — ISN math + IP-ID/timestamp classes.
+    result.seq = run_seq(src, dst, open_port, per_probe_timeout);
 
     Some(result)
 }
@@ -691,9 +971,9 @@ mod tests {
     #[test]
     fn observed_ttl_picks_the_mode() {
         let mut s = SuiteResult::default();
-        s.t.push(TResult { name: "T4", responded: true, df: true, ttl: 64, window: 0, flags: TcpFlags::RST });
-        s.t.push(TResult { name: "T5", responded: true, df: false, ttl: 64, window: 0, flags: TcpFlags::RST });
-        s.t.push(TResult { name: "T6", responded: true, df: true, ttl: 128, window: 0, flags: TcpFlags::RST });
+        s.t.push(TResult { name: "T4", responded: true, df: true, ttl: 64, window: 0, flags: TcpFlags::RST, ..Default::default() });
+        s.t.push(TResult { name: "T5", responded: true, df: false, ttl: 64, window: 0, flags: TcpFlags::RST, ..Default::default() });
+        s.t.push(TResult { name: "T6", responded: true, df: true, ttl: 128, window: 0, flags: TcpFlags::RST, ..Default::default() });
         s.t.push(TResult::none("T7"));
         assert_eq!(s.observed_ttl(), Some(64));
     }
@@ -707,8 +987,8 @@ mod tests {
     #[test]
     fn diagnostic_renders_all_probes() {
         let mut s = SuiteResult::default();
-        s.t.push(TResult { name: "T2", responded: false, df: false, ttl: 0, window: 0, flags: 0 });
-        s.ecn = Some(TResult { name: "ECN", responded: true, df: false, ttl: 64, window: 3, flags: TcpFlags::SYN | TcpFlags::ACK | TcpFlags::ECE });
+        s.t.push(TResult { name: "T2", responded: false, df: false, ttl: 0, window: 0, flags: 0, ..Default::default() });
+        s.ecn = Some(TResult { name: "ECN", responded: true, df: false, ttl: 64, window: 3, flags: TcpFlags::SYN | TcpFlags::ACK | TcpFlags::ECE, ..Default::default() });
         s.u1 = U1Result { responded: true, ttl: 64 };
         s.ie = IeResult { responded: true, ttl: 64, df: true };
         let d = s.diagnostic();
@@ -723,28 +1003,28 @@ mod tests {
         // Slirp: RST replies with TTL 255 and DF cleared.
         let mut s = SuiteResult::default();
         for name in ["T2", "T3", "T4", "T6"] {
-            s.t.push(TResult { name, responded: true, df: false, ttl: 255, window: 0, flags: TcpFlags::RST });
+            s.t.push(TResult { name, responded: true, df: false, ttl: 255, window: 0, flags: TcpFlags::RST, ..Default::default() });
         }
         assert!(s.nat_gateway_signature());
 
         // A real Linux host: RSTs carry TTL 64 with DF set → not a NAT gw.
         let mut lin = SuiteResult::default();
         for name in ["T4", "T5", "T6", "T7"] {
-            lin.t.push(TResult { name, responded: true, df: true, ttl: 64, window: 0, flags: TcpFlags::RST });
+            lin.t.push(TResult { name, responded: true, df: true, ttl: 64, window: 0, flags: TcpFlags::RST, ..Default::default() });
         }
         assert!(!lin.nat_gateway_signature());
 
         // Too few responders → never fires.
         let mut lone = SuiteResult::default();
-        lone.t.push(TResult { name: "T2", responded: true, df: false, ttl: 255, window: 0, flags: TcpFlags::RST });
+        lone.t.push(TResult { name: "T2", responded: true, df: false, ttl: 255, window: 0, flags: TcpFlags::RST, ..Default::default() });
         assert!(!lone.nat_gateway_signature());
     }
 
     #[test]
     fn notes_flag_ecn_and_closed_rst() {
         let mut s = SuiteResult::default();
-        s.t.push(TResult { name: "T5", responded: true, df: false, ttl: 64, window: 0, flags: TcpFlags::RST | TcpFlags::ACK });
-        s.ecn = Some(TResult { name: "ECN", responded: true, df: false, ttl: 64, window: 3, flags: TcpFlags::SYN | TcpFlags::ACK | TcpFlags::ECE });
+        s.t.push(TResult { name: "T5", responded: true, df: false, ttl: 64, window: 0, flags: TcpFlags::RST | TcpFlags::ACK, ..Default::default() });
+        s.ecn = Some(TResult { name: "ECN", responded: true, df: false, ttl: 64, window: 3, flags: TcpFlags::SYN | TcpFlags::ACK | TcpFlags::ECE, ..Default::default() });
         let notes = s.notes();
         assert!(notes.iter().any(|n| n.contains("RST")), "{:?}", notes);
         assert!(notes.iter().any(|n| n.contains("ECN")), "{:?}", notes);

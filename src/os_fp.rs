@@ -428,9 +428,18 @@ fn refine_from_tcp_fp(host: &HostResult, guess: &mut OsGuess, timeout: Duration)
             .find(|p| p.state == PortState::Closed)
             .map(|p| p.port);
         let suite_to = timeout.min(Duration::from_millis(700));
+        // Suppress the local kernel's own RSTs for the duration of the raw
+        // suite so T5–T7 aren't clobbered (lab bug #5). RAII: removed on drop.
+        let rst_guard = crate::kernel_guard::guard_for(host.target.ip);
+        guess.hints.push(rst_guard.note.clone());
         let suite = crate::tcp_probe_suite::run_suite(src, v4, port, closed_tcp, 40125, suite_to);
+        drop(rst_guard); // remove the firewall rule as soon as probing is done
         if let Some(s) = &suite {
             guess.hints.push(format!("secondary probes: {}", s.diagnostic()));
+            // Full nmap-style coded fingerprint (compare with `nmap -O -d`).
+            guess
+                .hints
+                .push(format!("nmap-fp: {}", s.fingerprint().replace('\n', " ")));
             for n in s.notes() {
                 guess.hints.push(format!("probe signal: {}", n));
             }

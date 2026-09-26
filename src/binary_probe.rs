@@ -32,8 +32,77 @@ pub async fn probe(ip: IpAddr, port: u16, dur: Duration) -> Option<ServiceInfo> 
     match port {
         445 | 139 => smb(ip, port, dur).await,
         135 => msrpc(ip, port, dur).await,
+        3389 => rdp(ip, port, dur).await,
         _ => None,
     }
+}
+
+// ─────────────────────────────── RDP ───────────────────────────────
+
+/// Build an RDP (X.224) Connection Request carrying an RDP Negotiation
+/// Request that offers standard RDP + TLS + CredSSP (NLA).
+fn rdp_negotiation_request() -> Vec<u8> {
+    // TPKT(4) + X.224 CR(7) + RDP nego request(8) = 19 bytes.
+    vec![
+        0x03, 0x00, 0x00, 0x13, // TPKT: version 3, length 0x0013 = 19
+        0x0E, // X.224 length indicator (14)
+        0xE0, // CR — Connection Request
+        0x00, 0x00, // dst ref
+        0x00, 0x00, // src ref
+        0x00, // class / options
+        0x01, 0x00, 0x08, 0x00, // RDP nego req: type=1, flags=0, length=8
+        0x03, 0x00, 0x00, 0x00, // requestedProtocols = TLS(1) | CredSSP(2)
+    ]
+}
+
+/// Parse the RDP Negotiation Response. Returns the negotiated security
+/// layer, or `None` if the buffer isn't a valid TPKT/X.224 RDP reply.
+fn parse_rdp_response(buf: &[u8]) -> Option<&'static str> {
+    // Must be a TPKT (0x03 0x00 …).
+    if buf.len() < 11 || buf[0] != 0x03 || buf[1] != 0x00 {
+        return None;
+    }
+    // X.224 Connection Confirm has type 0xD0 at offset 5.
+    if buf[5] != 0xD0 {
+        // Still a TPKT → it is RDP, just no negotiation response.
+        return Some("standard RDP security (no negotiation response)");
+    }
+    // RDP Negotiation Response starts at offset 11: type(1) flags(1) len(2)
+    // selectedProtocol(4, LE). Type 2 = response, type 3 = failure.
+    if buf.len() >= 19 && buf[11] == 0x02 {
+        let proto = u32::from_le_bytes([buf[15], buf[16], buf[17], buf[18]]);
+        return Some(match proto {
+            0 => "standard RDP security (no TLS/NLA)",
+            1 => "TLS required",
+            2 => "CredSSP / NLA required",
+            8 => "RDSTLS",
+            _ => "negotiated (mixed)",
+        });
+    }
+    if buf.len() >= 12 && buf[11] == 0x03 {
+        return Some("negotiation failure (legacy RDP only)");
+    }
+    Some("RDP (X.224 confirmed)")
+}
+
+async fn rdp(ip: IpAddr, port: u16, dur: Duration) -> Option<ServiceInfo> {
+    let addr = SocketAddr::new(ip, port);
+    let mut s = timeout(dur, TcpStream::connect(addr)).await.ok()?.ok()?;
+    timeout(dur, s.write_all(&rdp_negotiation_request())).await.ok()?.ok()?;
+    let mut buf = vec![0u8; 64];
+    let n = match timeout(dur, s.read(&mut buf)).await {
+        Ok(Ok(n)) => n,
+        _ => 0,
+    };
+    buf.truncate(n);
+    let security = parse_rdp_response(&buf)?;
+    Some(ServiceInfo {
+        product: Some("Microsoft Terminal Services (RDP)".to_string()),
+        version: None,
+        extra: Some(security.to_string()),
+        banner: Some("RDP".to_string()),
+        tls: None,
+    })
 }
 
 // ─────────────────────────────── SMB ───────────────────────────────
@@ -343,6 +412,30 @@ mod tests {
         // EPM UUID present in the context list
         assert!(pkt.windows(16).any(|w| w == EPM_UUID));
         assert!(pkt.windows(16).any(|w| w == NDR_UUID));
+    }
+
+    #[test]
+    fn rdp_request_is_valid_tpkt() {
+        let pkt = rdp_negotiation_request();
+        assert_eq!(pkt.len(), 19);
+        assert_eq!(pkt[0], 0x03); // TPKT version
+        assert_eq!(pkt[3], 0x13); // length 19
+        assert_eq!(pkt[5], 0xE0); // X.224 CR
+        assert_eq!(pkt[11], 0x01); // RDP nego request type
+    }
+
+    #[test]
+    fn rdp_response_parses_security_layer() {
+        // TPKT + X.224 CC + nego response, selectedProtocol = 2 (CredSSP/NLA).
+        let mut buf = vec![0u8; 19];
+        buf[0] = 0x03;
+        buf[1] = 0x00;
+        buf[5] = 0xD0; // Connection Confirm
+        buf[11] = 0x02; // nego response
+        buf[15] = 0x02; // selectedProtocol = CredSSP
+        assert_eq!(parse_rdp_response(&buf), Some("CredSSP / NLA required"));
+        // Non-TPKT → not RDP.
+        assert_eq!(parse_rdp_response(&[0u8; 19]), None);
     }
 
     #[test]

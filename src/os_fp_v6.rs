@@ -65,11 +65,32 @@ pub async fn fingerprint(
     let connect = timeout(dur, TcpStream::connect(sa)).await;
     match connect {
         Ok(Ok(stream)) => {
-            // We can't see the underlying IPV6_HOPLIMIT through
-            // tokio's TcpStream without unsafe socket-option reads.
-            // Use a coarse classification based on whether the
-            // connect succeeded plus port behaviour.
             let _ = stream;
+            // Try the raw SYN/ACK stack fingerprint first (#6). This runs
+            // on a blocking thread since pnet's transport channel is sync;
+            // it silently no-ops without raw-socket privileges, and we then
+            // fall back to the port heuristic.
+            let raw = {
+                let probe_dur = dur.min(Duration::from_secs(2));
+                tokio::task::spawn_blocking(move || {
+                    crate::tcp_fp_v6::probe(addr, probe_port, probe_dur)
+                })
+                .await
+                .ok()
+                .flatten()
+            };
+            if let Some(fp) = raw {
+                if let Some((family, conf)) = classify_v6(fp.window, fp.ws, fp.ts, fp.sack) {
+                    return Ok(OsFpV6 {
+                        family,
+                        confidence: conf,
+                        hop_limit_observed: None,
+                        hop_limit_initial_estimate: None,
+                        probed_port: probe_port,
+                    });
+                }
+            }
+            // No raw signal → coarse port-based classification.
             Ok(classify_open(probe_port))
         }
         Ok(Err(_)) | Err(_) => {
@@ -80,6 +101,54 @@ pub async fn fingerprint(
                 ..OsFpV6::unknown()
             })
         }
+    }
+}
+
+/// Extract the window-scale shift from an encoded options string
+/// (hex, matching `tcp_fp`'s notation: `…WA…` → 10).
+pub fn parse_ws(opts: &str) -> Option<u8> {
+    let pos = opts.find('W')?;
+    let mut n: u32 = 0;
+    let mut any = false;
+    for c in opts[pos + 1..].chars() {
+        if let Some(d) = c.to_digit(16) {
+            n = n * 16 + d;
+            any = true;
+        } else {
+            break;
+        }
+    }
+    any.then_some(n.min(255) as u8)
+}
+
+/// IPv6 stack classification from the SYN/ACK signature (window scale +
+/// timestamp + SACK + window). This is the real fingerprint that lifts
+/// IPv6 detection past the port-only heuristic (#6). Returns
+/// `(family, confidence)`.
+pub fn classify_v6(window: u16, ws: Option<u8>, ts: bool, sack: bool) -> Option<(String, u8)> {
+    // Window-scale is the strongest single discriminator across stacks:
+    //   Linux → 7, Windows 10/11/Server → 8, macOS/*BSD → 6.
+    let label = match ws {
+        Some(7) if ts => {
+            let hint = match window {
+                64800 | 65160 | 65483 => " 5.x/6.x",
+                28960 | 29200 | 14480 => " 3.x/4.x",
+                _ => "",
+            };
+            (format!("Linux{}", hint), 82)
+        }
+        Some(8) if sack => ("Windows 10/11 or Server 2016+".to_string(), 82),
+        Some(6) if ts => ("macOS or FreeBSD".to_string(), 78),
+        Some(5) if ts => ("Apple iOS/macOS (older)".to_string(), 72),
+        Some(w) if ts => (format!("Unix-like (window scale {})", w), 68),
+        Some(_) => ("Unix-like (no timestamp)".to_string(), 60),
+        None if !ts && !sack => ("legacy / embedded stack (no WS/TS/SACK)".to_string(), 55),
+        None => ("Unknown IPv6 stack".to_string(), 40),
+    };
+    if label.1 == 0 {
+        None
+    } else {
+        Some(label)
     }
 }
 
@@ -244,6 +313,27 @@ mod tests {
     #[test]
     fn hop_limit_close_to_255_estimates_255() {
         assert_eq!(estimate_initial_hop_limit(250), 255);
+    }
+
+    #[test]
+    fn parse_ws_reads_hex() {
+        assert_eq!(parse_ws("M5A0NW7ST11"), Some(7));
+        assert_eq!(parse_ws("M5A0NWAST11"), Some(10));
+        assert_eq!(parse_ws("M5A0NNS"), None);
+    }
+
+    #[test]
+    fn classify_v6_separates_stacks() {
+        // Linux: WS 7 + timestamp.
+        let (os, c) = classify_v6(65160, Some(7), true, true).unwrap();
+        assert!(os.contains("Linux"), "{}", os);
+        assert!(c >= 80);
+        // Windows: WS 8 + SACK.
+        let (os, _) = classify_v6(65535, Some(8), false, true).unwrap();
+        assert!(os.contains("Windows"), "{}", os);
+        // macOS/BSD: WS 6 + timestamp.
+        let (os, _) = classify_v6(65535, Some(6), true, true).unwrap();
+        assert!(os.contains("macOS") || os.contains("FreeBSD"), "{}", os);
     }
 
     #[test]

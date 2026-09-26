@@ -4,6 +4,61 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.72.0] - 2026-09-27
+
+A broad detection-parity release taking all six items from the nmap
+comparison in one cut. Several parts are raw-socket and **experimental
+until Kali-root validated** (compiled + unit-tested here; the pure logic
+is fully tested, 546/546).
+
+### Added
+- **#1 — nmap-style 16-test fingerprint fields (`nmap_fp.rs`).** Pure,
+  unit-tested computation of the coded fields nmap matches on: **S**
+  (seq), **A** (ack), **O** (options), **RD** (RST-data CRC32), **Q**
+  (quirks: reserved bits / urgent-without-URG), **CC** (ECN), plus the
+  SEQ line — **GCD / ISR / SP** (ISN predictability) and **TI/CI**
+  (IP-ID class) and **TS** (timestamp rate). `tcp_probe_suite` now captures
+  seq/ack/IP-ID/options/quirks per probe and adds six SEQ SYN probes, so
+  `-O -v` emits a real `SEQ(...) T2(...) … U1(...)` block via
+  `SuiteResult::fingerprint()`, directly comparable to `nmap -O -d`. (Full
+  `nmap-os-db` pattern-language matching remains future work; scoring stays
+  heuristic + the built-in signature set.)
+- **#2 — service detection: RDP binary probe.** `binary_probe` now speaks
+  X.224 to 3389, confirming "Microsoft Terminal Services (RDP)" and
+  reporting the negotiated security layer (standard / TLS / **CredSSP-NLA**),
+  like nmap's `rdp-ntlm-info`.
+- **#3 — FTP bounce scan (`-b` / `--ftp-bounce`, `ftp_bounce.rs`).** Scans
+  the target *through* a relay FTP server's `PORT` command; flags
+  misconfigured bounce-capable relays, cleanly reports "relay blocked" on
+  hardened servers. (The `-sA`/`-sW`/`-sM`/`-sO`/`-sI`/`-sY`/`-sZ` scans the
+  comparison listed as "missing" already shipped — FTP bounce was the gap.)
+- **#4 — NSE-equivalent Rhai scripts (+10).** `http-robots`,
+  `http-git-exposed`, `http-server-tech`, `http-security-txt`,
+  `mysql-greeting`, `ftp-banner-info`, `smtp-banner`, `ssdp-upnp-info`,
+  `sip-options`, `rdp-exposed` (built-in library 53 → 63). An honest batch,
+  not a full port of nmap's ~600 scripts.
+- **#5 — local-kernel RST guard (`kernel_guard.rs`).** During the raw OS
+  suite, transiently installs a target-scoped `iptables`/`nft` rule that
+  drops the scanning host's own outbound RSTs (RAII: removed on drop), so
+  T5–T7 stop reading `R=N` spuriously (the 10.0.2.2 lab discrepancy).
+  Linux + root only; inert elsewhere.
+- **#6 — IPv6 as a real detector (`tcp_fp_v6.rs` + `os_fp_v6::classify_v6`).**
+  A raw IPv6 SYN/ACK probe captures window + TCP options and a new stack
+  classifier (window-scale/timestamp/SACK) names Linux / Windows /
+  macOS·BSD from the signature — lifting IPv6 `-O` past the old port-only
+  heuristic.
+- Guide (`src/guide.rs`) synced: `-b`, the coded fingerprint block, kernel
+  guard and IPv6 detection.
+
+### Notes / validation
+- `-sV` RDP is plain TCP (no privileges). The T-suite/SEQ fingerprint, the
+  kernel guard and the IPv6 raw probe need `sudo` + a raw driver and are
+  unvalidated on the lab — run `sudo rustymap -O -v <host>` (v4 and `-6`)
+  and compare the block with `nmap -O -d`, and `rustymap -b releay <target>`
+  for bounce.
+- 546/546 tests pass (+ new suites: `nmap_fp`, `kernel_guard`, RDP,
+  `ftp_bounce`, `classify_v6`).
+
 ## [0.71.1] - 2026-09-26
 
 Fixes surfaced by the v0.71.0 Kali lab validation (22/26 PASS → the 4 FAILs

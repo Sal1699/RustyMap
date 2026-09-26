@@ -109,6 +109,13 @@ pub struct Cli {
     #[arg(long = "sZ", group = "scan_type")]
     pub scan_sctp_cookie: bool,
 
+    /// FTP bounce scan (`-b`): scan the positional target(s) THROUGH a relay
+    /// FTP server's PORT command. Spec: `[user:pass@]ftp-host[:port]`
+    /// (default anonymous / 21). Most modern servers refuse cross-host PORT
+    /// (good); this flags misconfigured, bounce-capable relays.
+    #[arg(short = 'b', long = "ftp-bounce", value_name = "RELAY")]
+    pub ftp_bounce: Option<String>,
+
     /// SCTP INIT ping for host discovery — `-PY` in nmap.
     #[arg(long = "PY", value_name = "PORT", default_value = "")]
     pub ping_sctp: String,

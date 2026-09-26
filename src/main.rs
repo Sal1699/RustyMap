@@ -12,6 +12,7 @@ mod discovery;
 mod evasion;
 mod examples;
 mod file_out;
+mod ftp_bounce;
 mod guide;
 mod http_enum;
 mod icmp_ping;
@@ -19,9 +20,11 @@ mod idle_scan;
 mod iflist;
 mod ip_proto_scan;
 mod json_out;
+mod kernel_guard;
 mod log;
 mod net_util;
 mod nmap_db;
+mod nmap_fp;
 mod notify;
 mod npcap;
 mod os_db;
@@ -42,6 +45,7 @@ mod spoof_mac;
 mod syn_emu;
 mod target;
 mod tcp_fp;
+mod tcp_fp_v6;
 mod tcp_probe_suite;
 mod apk_scan;
 mod baseline_diff;
@@ -690,6 +694,27 @@ async fn main() -> Result<()> {
         let timeout = std::time::Duration::from_secs(8);
         let fp = cloud_fingerprint::fingerprint(&host, timeout).await?;
         cloud_fingerprint::print_report(&fp);
+        return Ok(());
+    }
+    if let Some(relay_spec) = &args.ftp_bounce {
+        let relay = ftp_bounce::parse_relay(relay_spec);
+        let dur = args.timeout();
+        let ports = ports::parse_ports(&args.ports)?;
+        let targets = target::expand_targets(&args.targets, !args.no_dns).await?;
+        if targets.is_empty() {
+            println!("[ftp-bounce] no target — pass a host to scan through the relay");
+        }
+        for t in &targets {
+            match t.ip {
+                std::net::IpAddr::V4(v4) => match ftp_bounce::scan(&relay, v4, &ports, dur).await {
+                    Ok(res) => ftp_bounce::print_report(&relay, t.ip, &res),
+                    Err(e) => println!("[ftp-bounce] {} — {}", t.display(), e),
+                },
+                std::net::IpAddr::V6(_) => {
+                    println!("[ftp-bounce] {} — FTP bounce is IPv4-only", t.display());
+                }
+            }
+        }
         return Ok(());
     }
     if let Some(host_spec) = &args.snmp_enum {

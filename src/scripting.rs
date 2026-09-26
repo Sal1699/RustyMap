@@ -224,6 +224,17 @@ pub fn builtin_scripts() -> Vec<(&'static str, &'static str)> {
         ("tls-deprecated", include_str!("../scripts/tls-deprecated.rhai")),
         ("vault-no-auth", include_str!("../scripts/vault-no-auth.rhai")),
         ("vnc-no-auth", include_str!("../scripts/vnc-no-auth.rhai")),
+        // ── v0.72.0 NSE-equivalent batch ──
+        ("ftp-banner-info", include_str!("../scripts/ftp-banner-info.rhai")),
+        ("http-git-exposed", include_str!("../scripts/http-git-exposed.rhai")),
+        ("http-robots", include_str!("../scripts/http-robots.rhai")),
+        ("http-security-txt", include_str!("../scripts/http-security-txt.rhai")),
+        ("http-server-tech", include_str!("../scripts/http-server-tech.rhai")),
+        ("mysql-greeting", include_str!("../scripts/mysql-greeting.rhai")),
+        ("rdp-exposed", include_str!("../scripts/rdp-exposed.rhai")),
+        ("sip-options", include_str!("../scripts/sip-options.rhai")),
+        ("smtp-banner", include_str!("../scripts/smtp-banner.rhai")),
+        ("ssdp-upnp-info", include_str!("../scripts/ssdp-upnp-info.rhai")),
     ]
 }
 

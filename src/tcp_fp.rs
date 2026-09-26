@@ -261,7 +261,7 @@ pub fn probe_isn_class(
 }
 
 /// Encode the captured options into the compact nmap-style notation.
-fn encode_options(buf: &[u8]) -> String {
+pub(crate) fn encode_options(buf: &[u8]) -> String {
     let mut out = String::new();
     let mut i = 0usize;
     while i < buf.len() {

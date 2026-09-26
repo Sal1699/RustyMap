@@ -75,6 +75,10 @@ pub fn print_guide() {
     line("--sU                  UDP scan");
     line("--sY                  SCTP INIT scan (raw, root/Npcap)");
     line("--sZ                  SCTP COOKIE-ECHO scan (raw, root/Npcap)");
+    line("-b, --ftp-bounce R    FTP bounce scan: scansiona il target ATTRAVERSO");
+    line("                      un relay FTP ([user:pass@]host[:port]). Rileva");
+    line("                      relay bounce-capable (misconfig); i server moderni");
+    line("                      rifiutano (bene)");
     line("--PY [PORT]           SCTP INIT ping (host discovery; default port 80)");
     line("--PM                  ICMP Address Mask ping (type 17)");
     line("--PO PROTO            IP-protocol ping (1=ICMP, 17=UDP, 132=SCTP, 47=GRE)");
@@ -252,7 +256,9 @@ pub fn print_guide() {
     line("                      (device-class auto: router/camera/printer/NAS/IoT…;");
     line("                       match su DB firme integrato → OS+versione, ISN");
     line("                       sequence-prediction, e con raw socket la suite");
-    line("                       secondaria T2-T7/ECN/ICMP-IE/UDP-U1)");
+    line("                       secondaria T2-T7/ECN/ICMP-IE/UDP-U1 con blocco");
+    line("                       fingerprint nmap-style S/A/O/RD/Q/CC + SEQ/GCD/");
+    line("                       ISR/SP e guard anti-RST del kernel; IPv6 via -6)");
     example("rustymap --sT --sV 10.0.0.5");
     example("rustymap --sS --sV -O 10.0.0.5");
 
