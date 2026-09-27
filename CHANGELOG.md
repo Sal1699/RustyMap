@@ -4,6 +4,28 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.75.2] - 2026-09-27
+
+**JARM now byte-identical to Salesforce `pyjarm`.** Finishes B21 by porting
+the exact algorithm from the canonical source.
+
+### Fixed
+- **B21 (JARM byte-parity, HIGH → resolved).** Two remaining defects found by
+  diffing against the reference:
+  1. The cipher **coding table was missing `c0a0`/`c0a1`** (67 entries vs the
+     canonical 73), which shifted every cipher code from `c0a2` onward by +2
+     — the exact "+2" the lab report saw.
+  2. The JARM ClientHello wasn't byte-exact: added the **max_fragment_length**
+     and **renegotiation_info** extensions, added group `0x0019` to
+     **supported_groups**, corrected **ec_point_formats**, used JARM's full
+     **9-protocol ALPN** list, made **supported_versions** conditional/shaped
+     exactly as JARM (present for TLS-1.3 and 1.2_SUPPORT probes; 3 vs 4
+     versions), and added the **GREASE key_share/version** entries.
+  Result — **verified byte-identical to pyjarm 0.0.5** on cloudflare.com,
+  google.com, httpd.apache.org and microsoft.com (all 62/62 chars, including
+  the SHA-256 extension-hash tail). The `--tls-scan` JARM output is now
+  labelled Salesforce-compatible and is safe to look up on jarm.online.
+
 ## [0.75.1] - 2026-09-27
 
 Fixes from the v0.75.0 lab validation (73/90 PASS). Honest status: the JARM

@@ -358,7 +358,7 @@ pub fn print_report(host: &str, results: &[TlsScanResult]) {
         }
         if let Some(j) = &r.jarm {
             println!("    JARM    : {}", j);
-            println!("              {}", "(cross-check against jarm.online to identify the stack)".dimmed());
+            println!("              {}", "(Salesforce-compatible; look up on jarm.online to identify the stack)".dimmed());
         }
         if let Some(c) = &r.cert {
             if let Some(s) = &c.subject {

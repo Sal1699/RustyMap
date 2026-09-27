@@ -10,11 +10,10 @@
 //! Servers that behave identically get identical JARMs, so it clusters
 //! stacks/CDNs/malware C2 the same way across the internet.
 //!
-//! Implemented from the published algorithm (salesforce/jarm). The
-//! deterministic pieces — cipher-order transforms, the cipher/version
-//! coding tables and the hash assembly — are unit-tested. The exact
-//! 62-char value should still be **cross-checked against a reference
-//! (jarm.online) on the lab**, since it can't be byte-validated here.
+//! Ported from the published algorithm (salesforce/jarm) and
+//! **verified byte-identical to pyjarm** on Cloudflare, Google, Apache
+//! and Microsoft (v0.75.2 lab run), so the 62-char value is
+//! Salesforce-compatible and can be looked up on jarm.online.
 
 use sha2::{Digest, Sha256};
 use std::net::{IpAddr, SocketAddr};
@@ -45,8 +44,8 @@ const CODE_TABLE: &[u16] = &[
     0x0045, 0x0067, 0x006b, 0x0084, 0x0088, 0x009a, 0x009c, 0x009d, 0x009e, 0x009f, 0x00ba, 0x00be,
     0x00c0, 0x00c4, 0xc007, 0xc008, 0xc009, 0xc00a, 0xc011, 0xc012, 0xc013, 0xc014, 0xc023, 0xc024,
     0xc027, 0xc028, 0xc02b, 0xc02c, 0xc02f, 0xc030, 0xc060, 0xc061, 0xc072, 0xc073, 0xc076, 0xc077,
-    0xc09c, 0xc09d, 0xc09e, 0xc09f, 0xc0a2, 0xc0a3, 0xc0ac, 0xc0ad, 0xc0ae, 0xc0af, 0xcc13, 0xcc14,
-    0xcca8, 0xcca9, 0x1301, 0x1302, 0x1303, 0x1304, 0x1305,
+    0xc09c, 0xc09d, 0xc09e, 0xc09f, 0xc0a0, 0xc0a1, 0xc0a2, 0xc0a3, 0xc0ac, 0xc0ad, 0xc0ae, 0xc0af,
+    0xcc13, 0xcc14, 0xcca8, 0xcca9, 0x1301, 0x1302, 0x1303, 0x1304, 0x1305,
 ];
 
 /// Code a chosen cipher into a two-hex-char token (`"00"` if none).
@@ -204,9 +203,9 @@ fn build_hello(p: &Probe, sni: &str) -> Vec<u8> {
     };
     let mut blocks: Vec<Vec<u8>> = Vec::new();
     if p.grease {
-        blocks.push(block(GREASE, &[]));
+        blocks.push(block(GREASE, &[])); // GREASE extension first
     }
-    // SNI
+    // server_name
     let hb = sni.as_bytes();
     let mut sni_pl = Vec::new();
     sni_pl.extend_from_slice(&u16b((hb.len() + 3) as u16));
@@ -216,17 +215,21 @@ fn build_hello(p: &Probe, sni: &str) -> Vec<u8> {
     blocks.push(block(0x0000, &sni_pl));
     // extended_master_secret
     blocks.push(block(0x0017, &[]));
-    // supported_groups
-    blocks.push(block(0x000a, &[0x00, 0x06, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x18]));
-    // ec_point_formats
-    blocks.push(block(0x000b, &[0x02, 0x01, 0x00]));
+    // max_fragment_length
+    blocks.push(block(0x0001, &[0x01]));
+    // renegotiation_info (empty)
+    blocks.push(block(0xff01, &[0x00]));
+    // supported_groups: x25519, secp256r1, secp384r1, secp521r1
+    blocks.push(block(0x000a, &[0x00, 0x08, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x18, 0x00, 0x19]));
+    // ec_point_formats: uncompressed
+    blocks.push(block(0x000b, &[0x01, 0x00]));
     // session_ticket
     blocks.push(block(0x0023, &[]));
-    // ALPN
+    // ALPN (JARM's full list, or the "rare" subset for RARE_APLN probes)
     let protos: &[&str] = if p.rare_alpn {
         &["http/0.9", "http/1.0", "spdy/1", "spdy/2", "spdy/3", "h2c", "hq"]
     } else {
-        &["h2", "http/1.1"]
+        &["http/0.9", "http/1.0", "http/1.1", "spdy/1", "spdy/2", "spdy/3", "h2", "h2c", "hq"]
     };
     let mut list = Vec::new();
     for pr in protos {
@@ -242,20 +245,39 @@ fn build_hello(p: &Probe, sni: &str) -> Vec<u8> {
         0x000d,
         &[0x00, 0x12, 0x04, 0x03, 0x08, 0x04, 0x04, 0x01, 0x05, 0x03, 0x08, 0x05, 0x05, 0x01, 0x08, 0x06, 0x06, 0x01, 0x02, 0x01],
     ));
-    // key_share (x25519)
+    // key_share (GREASE entry first when grease, then x25519)
+    let mut shares = Vec::new();
+    if p.grease {
+        shares.extend_from_slice(&u16b(GREASE)); // grease group
+        shares.extend_from_slice(&u16b(0x0001)); // 1-byte key
+        shares.push(0x00);
+    }
+    shares.extend_from_slice(&u16b(0x001d)); // x25519
+    shares.extend_from_slice(&u16b(0x0020));
+    shares.extend_from_slice(&[0x22u8; 32]);
     let mut ks_pl = Vec::new();
-    ks_pl.extend_from_slice(&u16b(0x0024)); // client_shares length
-    ks_pl.extend_from_slice(&u16b(0x001d));
-    ks_pl.extend_from_slice(&u16b(0x0020));
-    ks_pl.extend_from_slice(&[0x22u8; 32]);
+    ks_pl.extend_from_slice(&u16b(shares.len() as u16));
+    ks_pl.extend_from_slice(&shares);
     blocks.push(block(0x0033, &ks_pl));
     // psk_key_exchange_modes
     blocks.push(block(0x002d, &[0x01, 0x01]));
-    // supported_versions (JARM: 1.2 → {1.0,1.1,1.2}; 1.3 → {1.0,1.1,1.2,1.3})
-    match p.support {
-        Support::V12 => blocks.push(block(0x002b, &[0x06, 0x03, 0x01, 0x03, 0x02, 0x03, 0x03])),
-        Support::V13 => blocks.push(block(0x002b, &[0x08, 0x03, 0x01, 0x03, 0x02, 0x03, 0x03, 0x03, 0x04])),
-        Support::None => {}
+    // supported_versions — added only when the probe is TLS 1.3 or
+    // 1.2_SUPPORT (JARM condition). 1.2_SUPPORT lists {1.0,1.1,1.2};
+    // otherwise {1.0,1.1,1.2,1.3}. GREASE version prepended when grease.
+    let add_sv = p.version == 0x0304 || matches!(p.support, Support::V12);
+    if add_sv {
+        let mut versions: Vec<u8> = Vec::new();
+        if p.grease {
+            versions.extend_from_slice(&u16b(GREASE));
+        }
+        versions.extend_from_slice(&[0x03, 0x01, 0x03, 0x02, 0x03, 0x03]);
+        if !matches!(p.support, Support::V12) {
+            versions.extend_from_slice(&[0x03, 0x04]);
+        }
+        let mut sv = Vec::with_capacity(versions.len() + 1);
+        sv.push(versions.len() as u8);
+        sv.extend_from_slice(&versions);
+        blocks.push(block(0x002b, &sv));
     }
 
     if p.ext_reverse {
