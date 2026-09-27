@@ -4,6 +4,40 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.76.0] - 2026-09-27
+
+Closes the remaining lab-report items (B12, U1/IE quoted fields, B19, B20).
+
+### Fixed
+- **B12 — connect scan missed slow/proxied ports.** The default was
+  `--max-retries 0` (single-shot), and the adaptive-limiter path didn't retry
+  at all, so VirtualBox-Slirp-forwarded ports (e.g. 902/16012) that SYN found
+  were reported filtered. Default is now **2 retries** and the limiter path
+  retries on timeout like the plain path; pass `--max-retries 0` for the
+  fastest scan.
+- **B19 — `-sV` HTTP banner sometimes empty on slow hosts.** `probe_once` did
+  a single read that could time out before the response arrived. It now
+  accumulates reads until end-of-headers / 8 KiB / EOF, over up to 2× the
+  per-op timeout, so the Server/version line is captured.
+- **B20 — UDP over-reported open|filtered.** Targets rate-limit ICMP
+  port-unreachables (~1/s on Linux), so a single high-parallelism pass
+  suppressed most of them. RustyMap now re-probes the undecided ports
+  sequentially with pacing (up to `--max-retries` rounds), reclassifying
+  genuinely-closed UDP ports as closed.
+
+### Added
+- **U1 quoted-packet fields.** The UDP probe is now a hand-crafted datagram
+  (fixed IP ID 0x1042, 300 'C' bytes) and the ICMP port-unreachable is parsed
+  for nmap's U1 fields: **IPL** (reply IP length), **UN** (ICMP unused),
+  **RIPL/RID** (returned IP length/ID vs sent), **RIPCK** (returned IP-checksum
+  integrity G/Z/I), **RUCK** (returned UDP checksum) and **RUD** (returned UDP
+  data intact) — plus DF.
+- **IE CD/DFI fields.** The two ICMP-echo probes now follow nmap's shapes
+  (code 9/DF/120B and code 0/plain/150B); the SEQ/IE block reports **CD**
+  (ICMP response-code test) and **DFI** (DF-order test) alongside II.
+- Pure parsers (`parse_u1_quote`, `ie_cd`, `ie_dfi`, `ones_sum`) unit-tested.
+  The raw U1/IE wire behaviour needs Kali (root) validation vs `nmap -O -d`.
+
 ## [0.75.3] - 2026-09-27
 
 Closes the SEQ-line gaps (B14/B15/B16) so `-O -v`'s SEQ matches `nmap -O -d`.

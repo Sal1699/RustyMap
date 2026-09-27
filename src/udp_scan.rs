@@ -176,6 +176,31 @@ pub fn run_udp_scan(
     }
     all.sort_by_key(|p| p.port);
 
+    // Re-probe open|filtered ports sequentially with pacing (lab bug B20):
+    // the target rate-limits ICMP port-unreachables (~1/s on Linux), so a
+    // single high-parallelism pass suppresses most of them and over-reports
+    // open|filtered. Retrying the undecided ports slowly lets the limiter
+    // emit the unreachable, reclassifying genuinely-closed ports as closed.
+    let max_retries = crate::scanner::max_retries();
+    for _round in 0..max_retries {
+        let undecided: Vec<usize> = all
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.state == PortState::OpenFiltered)
+            .map(|(i, _)| i)
+            .collect();
+        if undecided.is_empty() {
+            break;
+        }
+        for i in undecided {
+            thread::sleep(Duration::from_millis(200)); // dodge the ICMP rate limit
+            let st = scanner.probe(src, dst, all[i].port, timeout);
+            if st != PortState::OpenFiltered {
+                all[i].state = st;
+            }
+        }
+    }
+
     let interesting: Vec<PortResult> = all.into_iter()
         .filter(|p| matches!(p.state, PortState::Open | PortState::OpenFiltered | PortState::Closed))
         .collect();

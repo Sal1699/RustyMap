@@ -147,14 +147,112 @@ fn flags_str(f: u8) -> String {
     s
 }
 
-/// Result of the UDP U1 probe (closed UDP port → ICMP port-unreachable).
+/// Result of the UDP U1 probe (closed UDP port → ICMP port-unreachable),
+/// including nmap's quoted-packet fields.
 #[derive(Debug, Clone, Default)]
 pub struct U1Result {
     pub responded: bool,
     pub ttl: u8,
+    /// Outer-IP DF bit of the ICMP reply.
+    pub df: bool,
+    /// IPL — outer IP total length of the ICMP port-unreachable.
+    pub ipl: u16,
+    /// UN — the ICMP header's 4 "unused" bytes (usually 0).
+    pub un: u32,
+    /// RIPL — returned IP total length: "G" if it equals what we sent, else hex.
+    pub ripl: String,
+    /// RID — returned IP ID: "G" if it equals what we sent, else hex.
+    pub rid: String,
+    /// RIPCK — returned IP checksum integrity: G(ood)/Z(ero)/I(nvalid).
+    pub ripck: String,
+    /// RUCK — returned UDP checksum: "G" if it equals what we sent, else hex.
+    pub ruck: String,
+    /// RUD — returned UDP data: "G" if intact, "I" if altered/truncated.
+    pub rud: String,
 }
 
-/// Result of the ICMP echo (IE) probe.
+/// The IP ID and (fixed 328-byte) IP total length RustyMap's U1 datagram
+/// carries, so the returned copy can be checked against them.
+const U1_IP_ID: u16 = 0x1042;
+const U1_IP_TOTLEN: u16 = 20 + 8 + 300;
+
+/// Ones-complement 16-bit sum of a byte slice, folded — used to verify the
+/// returned (quoted) IP header checksum. A valid header sums to 0xFFFF.
+fn ones_sum(bytes: &[u8]) -> u16 {
+    let mut sum: u32 = 0;
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        sum += u16::from_be_bytes([bytes[i], bytes[i + 1]]) as u32;
+        i += 2;
+    }
+    if i < bytes.len() {
+        sum += (bytes[i] as u32) << 8;
+    }
+    while sum >> 16 != 0 {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    sum as u16
+}
+
+/// Parse the ICMP port-unreachable message (starting at the ICMP type
+/// byte) into nmap's U1 quoted fields. `sent_udp_ck` is the UDP checksum we
+/// transmitted. Pure — unit-tested.
+fn parse_u1_quote(icmp: &[u8], sent_udp_ck: u16) -> (u32, String, String, String, String, String) {
+    if icmp.len() < 8 {
+        return (0, String::new(), String::new(), String::new(), String::new(), String::new());
+    }
+    let un = u32::from_be_bytes([icmp[4], icmp[5], icmp[6], icmp[7]]);
+    let q = &icmp[8..]; // quoted original IP datagram
+    if q.len() < 20 {
+        return (un, String::new(), String::new(), String::new(), String::new(), String::new());
+    }
+    let qihl = ((q[0] & 0x0f) as usize) * 4;
+    let q_totlen = u16::from_be_bytes([q[2], q[3]]);
+    let q_id = u16::from_be_bytes([q[4], q[5]]);
+    let q_ipck = u16::from_be_bytes([q[10], q[11]]);
+
+    let ripl = if q_totlen == U1_IP_TOTLEN {
+        "G".to_string()
+    } else if q_totlen == 0 {
+        "0".to_string()
+    } else {
+        format!("{:X}", q_totlen)
+    };
+    let rid = if q_id == U1_IP_ID {
+        "G".to_string()
+    } else {
+        format!("{:X}", q_id)
+    };
+    let ripck = if q_ipck == 0 {
+        "Z".to_string()
+    } else if qihl >= 20 && q.len() >= qihl && ones_sum(&q[..qihl]) == 0xFFFF {
+        "G".to_string()
+    } else {
+        "I".to_string()
+    };
+
+    let (ruck, rud) = if qihl >= 20 && q.len() >= qihl + 8 {
+        let uck = u16::from_be_bytes([q[qihl + 6], q[qihl + 7]]);
+        let ruck = if uck == sent_udp_ck {
+            "G".to_string()
+        } else {
+            format!("{:X}", uck)
+        };
+        let data = &q[qihl + 8..];
+        let rud = if data.is_empty() || data.iter().all(|&b| b == 0x43) {
+            "G".to_string()
+        } else {
+            "I".to_string()
+        };
+        (ruck, rud)
+    } else {
+        (String::new(), "G".to_string())
+    };
+
+    (un, ripl, rid, ripck, ruck, rud)
+}
+
+/// Result of one ICMP echo (IE) probe.
 #[derive(Debug, Clone, Default)]
 pub struct IeResult {
     pub responded: bool,
@@ -162,6 +260,8 @@ pub struct IeResult {
     pub df: bool,
     /// IP identification of the echo reply (feeds the II class).
     pub ip_id: u16,
+    /// ICMP code in the echo reply (feeds the CD field).
+    pub code: u8,
 }
 
 /// SEQ line: ISN predictability numbers + IP-ID / timestamp generation.
@@ -183,6 +283,10 @@ pub struct SuiteResult {
     pub ecn: Option<TResult>,
     pub u1: U1Result,
     pub ie: IeResult,
+    /// IE CD field (ICMP response-code test across the two IE probes).
+    pub ie_cd: String,
+    /// IE DFI field (DF-order test across the two IE probes).
+    pub ie_dfi: String,
     pub seq: SeqInfo,
 }
 
@@ -358,18 +462,46 @@ impl SuiteResult {
             lines.push(e.fields(cc).line());
         }
 
-        // IE / U1 (ICMP / UDP).
+        // IE (ICMP echo) — R / DFI / CD / T, like nmap.
         lines.push(if self.ie.responded {
-            format!(
-                "IE(R=Y%DFI={}%T={:X})",
-                if self.ie.df { "Y" } else { "N" },
-                self.ie.ttl
-            )
+            let mut f = vec!["R=Y".to_string()];
+            if !self.ie_dfi.is_empty() {
+                f.push(format!("DFI={}", self.ie_dfi));
+            }
+            f.push(format!("T={:X}", self.ie.ttl));
+            if !self.ie_cd.is_empty() {
+                f.push(format!("CD={}", self.ie_cd));
+            }
+            format!("IE({})", f.join("%"))
         } else {
             "IE(R=N)".to_string()
         });
+        // U1 (UDP → ICMP unreachable) — R/DF/T/IPL/UN/RIPL/RID/RIPCK/RUCK/RUD.
         lines.push(if self.u1.responded {
-            format!("U1(R=Y%T={:X})", self.u1.ttl)
+            let u = &self.u1;
+            let mut f = vec![
+                "R=Y".to_string(),
+                format!("DF={}", if u.df { "Y" } else { "N" }),
+                format!("T={:X}", u.ttl),
+                format!("IPL={:X}", u.ipl),
+            ];
+            if u.un != 0 {
+                f.push(format!("UN={:X}", u.un));
+            } else {
+                f.push("UN=0".to_string());
+            }
+            for (k, v) in [
+                ("RIPL", &u.ripl),
+                ("RID", &u.rid),
+                ("RIPCK", &u.ripck),
+                ("RUCK", &u.ruck),
+                ("RUD", &u.rud),
+            ] {
+                if !v.is_empty() {
+                    f.push(format!("{}={}", k, v));
+                }
+            }
+            format!("U1({})", f.join("%"))
         } else {
             "U1(R=N)".to_string()
         });
@@ -566,32 +698,58 @@ fn send_tcp_probe(
     chan_rx.recv_timeout(timeout).unwrap_or_else(|_| TResult::none(name))
 }
 
-/// UDP U1 probe: send a UDP datagram to a (presumed) closed port and
-/// wait for the ICMP port-unreachable it elicits. Received on a Layer3
-/// ICMP channel so the outer IP header's TTL is captured (lab bug B9 —
-/// the Layer4 path returned TTL 0).
+/// UDP U1 probe: send a hand-crafted UDP datagram (IP ID 0x1042, 300 'C'
+/// bytes) to a presumed-closed port and parse the ICMP port-unreachable —
+/// outer IP (TTL/DF/IPL), the ICMP unused field (UN) and the quoted
+/// original packet (RIPL/RID/RIPCK/RUCK/RUD), like nmap's U1 test.
 fn send_u1(src: Ipv4Addr, dst: Ipv4Addr, closed_udp_port: u16, timeout: Duration) -> U1Result {
     use pnet::packet::icmp::{IcmpPacket, IcmpTypes};
-    let _ = src;
+    use pnet::packet::udp::{ipv4_checksum as udp_checksum, MutableUdpPacket};
 
-    // Send the UDP datagram (kernel builds the IP header).
-    let sock = match std::net::UdpSocket::bind("0.0.0.0:0") {
-        Ok(s) => s,
-        Err(_) => return U1Result::default(),
-    };
-    // 300 bytes of 'C', matching nmap's U1 payload volume.
-    let payload = vec![0x43u8; 300];
+    // Build IPv4 + UDP with a fixed IP ID and 300 bytes of 'C'.
+    let payload = [0x43u8; 300];
+    let udp_len = 8 + payload.len();
+    let total = 20 + udp_len;
+    let mut buf = vec![0u8; total];
+    let src_port: u16 = rand::thread_rng().gen_range(40000..60000);
+    let sent_udp_ck;
+    {
+        let mut ip = MutableIpv4Packet::new(&mut buf[..20]).unwrap();
+        ip.set_version(4);
+        ip.set_header_length(5);
+        ip.set_total_length(total as u16);
+        ip.set_identification(U1_IP_ID);
+        ip.set_ttl(64);
+        ip.set_next_level_protocol(IpNextHeaderProtocols::Udp);
+        ip.set_source(src);
+        ip.set_destination(dst);
+        ip.set_checksum(ipv4_checksum(&ip.to_immutable()));
+    }
+    {
+        let mut udp = MutableUdpPacket::new(&mut buf[20..]).unwrap();
+        udp.set_source(src_port);
+        udp.set_destination(closed_udp_port);
+        udp.set_length(udp_len as u16);
+        udp.set_payload(&payload);
+        let ck = udp_checksum(&udp.to_immutable(), &src, &dst);
+        udp.set_checksum(ck);
+        sent_udp_ck = ck;
+    }
 
     // Open the ICMP listener BEFORE sending so we don't race the reply.
     let (_itx, mut irx) = match transport_channel(4096, Layer3(IpNextHeaderProtocols::Icmp)) {
         Ok(p) => p,
         Err(_) => return U1Result::default(),
     };
-
-    if sock
-        .send_to(&payload, (IpAddr::V4(dst), closed_udp_port))
-        .is_err()
-    {
+    let (mut tx, _urx) = match transport_channel(4096, Layer3(IpNextHeaderProtocols::Udp)) {
+        Ok(p) => p,
+        Err(_) => return U1Result::default(),
+    };
+    let ip_pkt = match Ipv4Packet::new(&buf) {
+        Some(p) => p,
+        None => return U1Result::default(),
+    };
+    if tx.send_to(ip_pkt, IpAddr::V4(dst)).is_err() {
         return U1Result::default();
     }
 
@@ -607,11 +765,24 @@ fn send_u1(src: Ipv4Addr, dst: Ipv4Addr, closed_udp_port: u16, timeout: Duration
                     if pkt.get_next_level_protocol() != IpNextHeaderProtocols::Icmp {
                         continue;
                     }
-                    let Some(icmp) = IcmpPacket::new(pkt.payload()) else { continue };
+                    let icmp_msg = pkt.payload();
+                    let Some(icmp) = IcmpPacket::new(icmp_msg) else { continue };
                     if icmp.get_icmp_type() == IcmpTypes::DestinationUnreachable {
-                        // Outer IP TTL of the ICMP reply is the useful stack
-                        // signal (Linux 64, Slirp/network gear 255, …).
-                        let _ = chan_tx.send(U1Result { responded: true, ttl: pkt.get_ttl() });
+                        let (un, ripl, rid, ripck, ruck, rud) =
+                            parse_u1_quote(icmp_msg, sent_udp_ck);
+                        let df = pkt.get_flags() & Ipv4Flags::DontFragment != 0;
+                        let _ = chan_tx.send(U1Result {
+                            responded: true,
+                            ttl: pkt.get_ttl(),
+                            df,
+                            ipl: pkt.get_total_length(),
+                            un,
+                            ripl,
+                            rid,
+                            ripck,
+                            ruck,
+                            rud,
+                        });
                         return;
                     }
                 }
@@ -626,17 +797,24 @@ fn send_u1(src: Ipv4Addr, dst: Ipv4Addr, closed_udp_port: u16, timeout: Duration
     chan_rx.recv_timeout(timeout).unwrap_or_default()
 }
 
-/// ICMP echo (IE) probe over a Layer3 channel so we can read the reply
-/// TTL and DF bit.
-fn send_ie(src: Ipv4Addr, dst: Ipv4Addr, timeout: Duration) -> IeResult {
-    let _ = src;
+/// ICMP echo (IE) probe over a Layer3 channel. `req_code` sets the ICMP
+/// code, `df` the IP DF bit and `payload_len` the echo payload size — nmap
+/// sends two differently-shaped IE probes (code 9/DF/120B and code 0/plain/
+/// 150B). Captures the reply's TTL, DF, IP-ID and ICMP code.
+fn send_ie(
+    src: Ipv4Addr,
+    dst: Ipv4Addr,
+    req_code: u8,
+    df: bool,
+    payload_len: usize,
+    timeout: Duration,
+) -> IeResult {
     let (mut tx, mut rx) = match transport_channel(4096, Layer3(IpNextHeaderProtocols::Icmp)) {
         Ok(p) => p,
         Err(_) => return IeResult::default(),
     };
 
-    // Build IPv4 + ICMP echo request (DF set, 8-byte payload).
-    let icmp_len = 8 + 8;
+    let icmp_len = 8 + payload_len;
     let total = 20 + icmp_len;
     let mut buf = vec![0u8; total];
     {
@@ -646,7 +824,9 @@ fn send_ie(src: Ipv4Addr, dst: Ipv4Addr, timeout: Duration) -> IeResult {
         ip.set_total_length(total as u16);
         ip.set_identification(rand::thread_rng().gen());
         ip.set_ttl(64);
-        ip.set_flags(Ipv4Flags::DontFragment);
+        if df {
+            ip.set_flags(Ipv4Flags::DontFragment);
+        }
         ip.set_next_level_protocol(IpNextHeaderProtocols::Icmp);
         ip.set_source(src);
         ip.set_destination(dst);
@@ -657,10 +837,10 @@ fn send_ie(src: Ipv4Addr, dst: Ipv4Addr, timeout: Duration) -> IeResult {
         use pnet::packet::icmp::{IcmpCode, IcmpTypes};
         let mut echo = MutableEchoRequestPacket::new(&mut buf[20..]).unwrap();
         echo.set_icmp_type(IcmpTypes::EchoRequest);
-        echo.set_icmp_code(IcmpCode(0));
+        echo.set_icmp_code(IcmpCode(req_code));
         echo.set_identifier(std::process::id() as u16);
         echo.set_sequence_number(1);
-        echo.set_payload(&[0xAB, 0xCD, 0xEF, 0x01, 0x02, 0x03, 0x04, 0x05]);
+        echo.set_payload(&vec![0x00u8; payload_len]);
         let cs = pnet::util::checksum(echo.packet(), 1);
         echo.set_checksum(cs);
     }
@@ -694,6 +874,7 @@ fn send_ie(src: Ipv4Addr, dst: Ipv4Addr, timeout: Duration) -> IeResult {
                             ttl: pkt.get_ttl(),
                             df: df_set,
                             ip_id: pkt.get_identification(),
+                            code: icmp.get_icmp_code().0,
                         });
                         return;
                     }
@@ -707,6 +888,37 @@ fn send_ie(src: Ipv4Addr, dst: Ipv4Addr, timeout: Duration) -> IeResult {
     });
 
     chan_rx.recv_timeout(timeout).unwrap_or_default()
+}
+
+/// IE CD field (ICMP response-code test) from the two IE replies and the
+/// codes we sent (9 and 0).
+fn ie_cd(ie1: &IeResult, ie2: &IeResult) -> String {
+    if !ie1.responded || !ie2.responded {
+        return String::new();
+    }
+    if ie1.code == 0 && ie2.code == 0 {
+        "Z".to_string()
+    } else if ie1.code == 9 && ie2.code == 0 {
+        "S".to_string() // both echoed the request code
+    } else if ie1.code == ie2.code {
+        format!("{:X}", ie1.code)
+    } else {
+        "O".to_string()
+    }
+}
+
+/// IE DFI field (DF-order test) from the two IE replies. We sent DF=1 on
+/// probe 1 and DF=0 on probe 2.
+fn ie_dfi(ie1: &IeResult, ie2: &IeResult) -> String {
+    if !ie1.responded || !ie2.responded {
+        return String::new();
+    }
+    match (ie1.df, ie2.df) {
+        (false, false) => "N".to_string(),
+        (true, false) => "S".to_string(), // both echo the DF we sent
+        (true, true) => "Y".to_string(),
+        _ => "O".to_string(),
+    }
 }
 
 /// Parse the timestamp option's TSval from a TCP options byte slice.
@@ -931,11 +1143,13 @@ pub fn run_suite(
     result.ecn = Some(ecn);
 
     result.u1 = send_u1(src, dst, closed_udp_port, per_probe_timeout);
-    // nmap sends TWO ICMP echoes for the IE test; the pair's IP-IDs give
-    // the II class.
-    let ie1 = send_ie(src, dst, per_probe_timeout);
-    let ie2 = send_ie(src, dst, per_probe_timeout);
+    // nmap's two IE probes: IE1 = code 9, DF set, 120-byte payload;
+    // IE2 = code 0, no DF, 150-byte payload. The pair yields II/CD/DFI.
+    let ie1 = send_ie(src, dst, 9, true, 120, per_probe_timeout);
+    let ie2 = send_ie(src, dst, 0, false, 150, per_probe_timeout);
     result.ie = ie1.clone();
+    result.ie_cd = ie_cd(&ie1, &ie2);
+    result.ie_dfi = ie_dfi(&ie1, &ie2);
     // SEQ line (6 open-port SYNs) — ISN math + IP-ID/timestamp classes.
     result.seq = run_seq(src, dst, open_port, per_probe_timeout);
     if ie1.responded && ie2.responded {
@@ -1012,13 +1226,62 @@ mod tests {
         let mut s = SuiteResult::default();
         s.t.push(TResult { name: "T2", responded: false, df: false, ttl: 0, window: 0, flags: 0, ..Default::default() });
         s.ecn = Some(TResult { name: "ECN", responded: true, df: false, ttl: 64, window: 3, flags: TcpFlags::SYN | TcpFlags::ACK | TcpFlags::ECE, ..Default::default() });
-        s.u1 = U1Result { responded: true, ttl: 64 };
-        s.ie = IeResult { responded: true, ttl: 64, df: true, ip_id: 0 };
+        s.u1 = U1Result { responded: true, ttl: 64, ..Default::default() };
+        s.ie = IeResult { responded: true, ttl: 64, df: true, ip_id: 0, code: 0 };
         let d = s.diagnostic();
         assert!(d.contains("T2(R=N)"), "{}", d);
         assert!(d.contains("ECN(R=Y"), "{}", d);
         assert!(d.contains("U1(R=Y"), "{}", d);
         assert!(d.contains("IE(R=Y"), "{}", d);
+    }
+
+    #[test]
+    fn u1_quote_parses_returned_fields() {
+        // Build an ICMP port-unreachable: type 3, code 3, checksum(2),
+        // unused(4)=0, then a quoted IP header (20B) + UDP header (8B) + data.
+        let mut q = Vec::new();
+        // quoted IPv4 header (IHL=5): ver/ihl, tos, totlen=328, id=0x1042,
+        // flags/frag, ttl, proto=17, checksum, src, dst.
+        q.extend_from_slice(&[0x45, 0x00]);
+        q.extend_from_slice(&U1_IP_TOTLEN.to_be_bytes()); // 328
+        q.extend_from_slice(&U1_IP_ID.to_be_bytes()); // 0x1042
+        q.extend_from_slice(&[0x00, 0x00, 0x40, 0x11]); // frag, ttl, proto UDP
+        q.extend_from_slice(&[0x00, 0x00]); // ip checksum (0 → "Z")
+        q.extend_from_slice(&[10, 0, 0, 9, 10, 0, 0, 2]); // src, dst
+        // quoted UDP: sport, dport, len, checksum=0xBEEF, then 'C' data
+        q.extend_from_slice(&[0x9c, 0x40, 0x00, 0x35]);
+        q.extend_from_slice(&(308u16).to_be_bytes());
+        q.extend_from_slice(&[0xBE, 0xEF]);
+        q.extend_from_slice(&[0x43u8; 4]); // some quoted data
+
+        let mut icmp = vec![0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        icmp.extend_from_slice(&q);
+
+        let (un, ripl, rid, ripck, ruck, rud) = parse_u1_quote(&icmp, 0xBEEF);
+        assert_eq!(un, 0);
+        assert_eq!(ripl, "G"); // matches U1_IP_TOTLEN
+        assert_eq!(rid, "G"); // matches U1_IP_ID
+        assert_eq!(ripck, "Z"); // stored checksum was 0
+        assert_eq!(ruck, "G"); // matches the sent 0xBEEF
+        assert_eq!(rud, "G"); // all 'C'
+    }
+
+    #[test]
+    fn ie_cd_and_dfi_classify() {
+        let r = |code: u8, df: bool| IeResult { responded: true, ttl: 64, df, ip_id: 0, code };
+        // Both replies echoed the sent codes (9,0) → CD "S"; DF sent 1,0 → "S".
+        assert_eq!(ie_cd(&r(9, true), &r(0, false)), "S");
+        assert_eq!(ie_dfi(&r(9, true), &r(0, false)), "S");
+        // Both code 0 → "Z"; neither DF → "N".
+        assert_eq!(ie_cd(&r(0, false), &r(0, false)), "Z");
+        assert_eq!(ie_dfi(&r(0, false), &r(0, false)), "N");
+    }
+
+    #[test]
+    fn ones_sum_folds() {
+        // A header that already sums to 0xFFFF stays 0xFFFF.
+        assert_eq!(ones_sum(&[0xFF, 0xFF]), 0xFFFF);
+        assert_eq!(ones_sum(&[0x00, 0x01, 0x00, 0x02]), 0x0003);
     }
 
     #[test]

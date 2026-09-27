@@ -11,6 +11,10 @@ use tokio::net::TcpStream;
 /// Global retry budget for the connect-scan path. Set by main from --max-retries.
 static MAX_RETRIES: AtomicU8 = AtomicU8::new(0);
 
+pub fn max_retries() -> u8 {
+    MAX_RETRIES.load(Ordering::Relaxed)
+}
+
 pub fn set_max_retries(n: u8) {
     MAX_RETRIES.store(n, Ordering::Relaxed);
 }
@@ -126,16 +130,30 @@ pub async fn tcp_connect_scan(
                 }
                 let addr = SocketAddr::new(ip, port);
                 let t0 = Instant::now();
-                let res = dial(addr, timeout_dur).await;
+                // Retry on timeout up to MAX_RETRIES (lab bug B12): the
+                // single-shot path missed slow/proxied ports (Slirp forwards)
+                // that a second, warmed-up connect reaches.
+                let max_retries = MAX_RETRIES.load(Ordering::Relaxed);
+                let mut attempt = 0u8;
+                let (mut state, mut timed_out);
+                loop {
+                    let res = dial(addr, timeout_dur).await;
+                    let (s, to) = match res {
+                        Ok(_s) => (PortState::Open, false),
+                        Err(e) => match e.kind() {
+                            std::io::ErrorKind::ConnectionRefused => (PortState::Closed, false),
+                            std::io::ErrorKind::TimedOut => (PortState::Filtered, true),
+                            _ => (PortState::Filtered, false),
+                        },
+                    };
+                    state = s;
+                    timed_out = to;
+                    if state != PortState::Filtered || attempt >= max_retries {
+                        break;
+                    }
+                    attempt += 1;
+                }
                 let rtt = t0.elapsed();
-                let (state, timed_out) = match res {
-                    Ok(_s) => (PortState::Open, false),
-                    Err(e) => match e.kind() {
-                        std::io::ErrorKind::ConnectionRefused => (PortState::Closed, false),
-                        std::io::ErrorKind::TimedOut => (PortState::Filtered, true),
-                        _ => (PortState::Filtered, false),
-                    },
-                };
                 lim_task.record(timed_out, rtt);
                 PortResult { port, state, rtt, service: None }
             }));

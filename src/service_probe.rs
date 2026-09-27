@@ -733,18 +733,37 @@ async fn probe_once(addr: SocketAddr, p: &Probe, dur: Duration) -> Option<Servic
     if !p.payload.is_empty() {
         timeout(dur, stream.write_all(p.payload)).await.ok()?.ok()?;
     }
-    let mut buf = vec![0u8; 2048];
-    let n = match timeout(dur, stream.read(&mut buf)).await {
-        Ok(Ok(n)) => n,
-        _ => 0,
-    };
-    if n == 0 { return None; }
-    buf.truncate(n);
-    if let Some(info) = match_signatures(&buf) {
+    // Accumulate reads until we see the end of the HTTP headers, reach 8 KiB,
+    // hit EOF, or run out of time. A single read often returned only a
+    // partial response on slow hosts, leaving the Server/version line unseen
+    // (lab bug B19). Allow up to 2× the per-op timeout overall for this.
+    let deadline = std::time::Instant::now() + dur.saturating_mul(2);
+    let mut data: Vec<u8> = Vec::with_capacity(2048);
+    let mut tmp = vec![0u8; 2048];
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match timeout(remaining.min(dur), stream.read(&mut tmp)).await {
+            Ok(Ok(0)) => break, // EOF
+            Ok(Ok(n)) => {
+                data.extend_from_slice(&tmp[..n]);
+                if data.len() >= 8192 || data.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            _ => break, // timeout / error → use whatever we have
+        }
+    }
+    if data.is_empty() {
+        return None;
+    }
+    if let Some(info) = match_signatures(&data) {
         return Some(info);
     }
     Some(ServiceInfo {
-        banner: first_line(&String::from_utf8_lossy(&buf)),
+        banner: first_line(&String::from_utf8_lossy(&data)),
         ..Default::default()
     })
 }

@@ -537,8 +537,11 @@ pub struct Cli {
     #[arg(long = "append-output")]
     pub append_output: bool,
 
-    /// Retry filtered/no-response ports up to N times before giving up
-    #[arg(long = "max-retries", default_value_t = 0u8)]
+    /// Retry filtered/no-response ports up to N times before giving up.
+    /// Default 2 — a single-shot connect (0) misses slow/proxied ports such
+    /// as VirtualBox-Slirp-forwarded services (lab bug B12). Pass 0 for the
+    /// fastest, most aggressive scan.
+    #[arg(long = "max-retries", default_value_t = 2u8)]
     pub max_retries: u8,
 
     /// IP protocol scan — discover which IP protocols (TCP/UDP/ICMP/GRE/…) the target supports
