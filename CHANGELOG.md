@@ -4,6 +4,48 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.75.1] - 2026-09-27
+
+Fixes from the v0.75.0 lab validation (73/90 PASS). Honest status: the JARM
+work is a real fix but **not yet confirmed byte-identical** to Salesforce
+JARM — re-validate on the lab.
+
+### Fixed
+- **B21 (JARM version coding, HIGH).** `version_code` was one letter low on
+  every probe: it indexed `"abcdef"` by `nibble-1` instead of the last
+  version nibble directly (Salesforce `version_byte`), so a TLS 1.2 legacy
+  version (0x0303) coded as `c` instead of `d`. Also, JARM now reads the
+  ServerHello **legacy** version field (0x0303 on modern servers) rather
+  than following the supported_versions extension, matching pyjarm.
+- **B21 (JARM hash material + probes).** The extension-hash material now
+  follows JARM's format (negotiated ALPN string + hyphen-joined hex of the
+  server's extension types); `supported_versions` sends the correct version
+  *lists* (1.2 → {1.0,1.1,1.2}; 1.3 → {…,1.3}); and the extension blocks are
+  emitted in **reverse order** on the four probes that require it. This moves
+  JARM toward byte-parity but is **not verified** here — re-run against
+  `pyjarm`/jarm.online on the lab and report the remaining diff.
+- **B13 (Akamai cloud-fp).** Added a PTR-keyword fallback (akamai/cloudflare/
+  fastly/googleusercontent/amazonaws/azure/cloudfront) so a provider is
+  identified even when the exact PTR suffix isn't in the table, without
+  double-reporting a provider already matched by suffix.
+
+### Known / deferred (from the report, unchanged this release)
+- **B12** connect scan misses a couple of Slirp-proxied ports (902/16012 on
+  10.0.2.2) that SYN finds — a Slirp connect-latency quirk; not blindly
+  widening the global connect timeout to chase it.
+- **SEQ** SP/ISR/TS values and the II field don't match nmap's exact formula
+  (INFO — doesn't change classification); **U1/IE** don't emit the
+  IPL/UN/RIPL/…/CD quoted-packet fields (only needed for full nmap-os-db
+  pattern matching, which RustyMap doesn't do).
+- **B19** `-sV` HTTP banner occasionally empty on slow hosts (web-scan gets
+  it); **B20** UDP over-reports open|filtered where nmap says closed.
+
+### Validated in the report (kept green)
+- OS 16-field block **byte-identical** to `nmap -O -d` on T2–T7/ECN (incl. the
+  new S/A/O/RD/Q/CC), U1 TTL, Slirp NAT id, kernel-RST guard; EUI-64 → MAC
+  byte-identical to the real MAC; cert self-signed/expired/wildcard flags;
+  all scan types; web-scan; TLS matrix/ALPN/HSTS. 22× faster `-A` on LAN.
+
 ## [0.75.0] - 2026-09-27
 
 Extends `--tls-scan` with JARM active fingerprinting and certificate

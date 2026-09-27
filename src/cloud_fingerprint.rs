@@ -239,6 +239,35 @@ fn classify(fp: &mut CloudFingerprint) {
         }
     }
 
+    // PTR keyword fallback (lab bug B13): some Akamai/CDN PTRs don't match a
+    // listed suffix exactly (extra labels, regional forms). A provider
+    // keyword anywhere in the PTR still identifies it, so catch that too.
+    const PTR_KEYWORDS: &[(&str, &str)] = &[
+        ("akamai", "Akamai"),
+        ("cloudflare", "Cloudflare"),
+        ("fastly", "Fastly"),
+        ("googleusercontent", "Google"),
+        ("amazonaws", "AWS"),
+        ("azure", "Microsoft Azure"),
+        ("cloudfront", "AWS CloudFront"),
+    ];
+    let already: std::collections::HashSet<String> =
+        fp.classifications.iter().map(|c| c.provider.clone()).collect();
+    for ptr in &fp.ptr_records {
+        for (kw, provider) in PTR_KEYWORDS {
+            if ptr.contains(kw) && !already.contains(*provider) {
+                let key = (*provider, "PTR keyword");
+                if seen.insert(key) {
+                    fp.classifications.push(Classification {
+                        provider: provider.to_string(),
+                        service: "(PTR match)".to_string(),
+                        evidence: format!("PTR contains '{}'", kw),
+                    });
+                }
+            }
+        }
+    }
+
     // A/AAAA record IP ranges — catches apex domains fronted by a CDN/cloud
     // with a plain A record and no CNAME (lab bug 4.A).
     for ip in &fp.a_records {

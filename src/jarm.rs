@@ -60,15 +60,19 @@ pub fn cipher_code(cipher: Option<u16>) -> String {
     }
 }
 
-/// Code a negotiated version into one char (`a`=1.0 … `d`=1.3, `0`=none).
+/// Code a negotiated version into one char, exactly as Salesforce JARM's
+/// `version_byte`: index `"abcdef"` by the **last hex nibble** of the
+/// version (0x0303 → index 3 → 'd', 0x0301 → 'b', 0x0304 → 'e'), NOT by
+/// `nibble-1` (lab bug B21: RustyMap was one letter low on every probe).
 pub fn version_code(ver: Option<u16>) -> char {
     match ver {
         None => '0',
         Some(v) => {
-            let low = (v & 0x00ff) as usize; // 0x0301->1 … 0x0304->4
-            match low {
-                1..=6 => "abcdef".as_bytes()[low - 1] as char,
-                _ => '0',
+            let idx = (v & 0x000f) as usize; // 0x0303 -> 3
+            if idx < 6 {
+                "abcdef".as_bytes()[idx] as char
+            } else {
+                '0'
             }
         }
     }
@@ -140,22 +144,24 @@ struct Probe {
     grease: bool,
     rare_alpn: bool,
     support: Support,
+    /// Emit the extension blocks in reverse order (JARM's 9th parameter).
+    ext_reverse: bool,
 }
 
 fn probes() -> Vec<Probe> {
     use Order::*;
     use Support::*;
     vec![
-        Probe { version: 0x0303, no13: false, order: Forward, grease: false, rare_alpn: false, support: V12 },
-        Probe { version: 0x0303, no13: false, order: Reverse, grease: false, rare_alpn: false, support: V12 },
-        Probe { version: 0x0303, no13: false, order: TopHalf, grease: false, rare_alpn: false, support: None },
-        Probe { version: 0x0303, no13: false, order: BottomHalf, grease: false, rare_alpn: true, support: None },
-        Probe { version: 0x0303, no13: false, order: MiddleOut, grease: true, rare_alpn: true, support: None },
-        Probe { version: 0x0302, no13: false, order: Forward, grease: false, rare_alpn: false, support: None },
-        Probe { version: 0x0304, no13: false, order: Forward, grease: false, rare_alpn: false, support: V13 },
-        Probe { version: 0x0304, no13: false, order: Reverse, grease: false, rare_alpn: false, support: V13 },
-        Probe { version: 0x0304, no13: true, order: Forward, grease: false, rare_alpn: true, support: None },
-        Probe { version: 0x0304, no13: false, order: MiddleOut, grease: true, rare_alpn: false, support: V13 },
+        Probe { version: 0x0303, no13: false, order: Forward, grease: false, rare_alpn: false, support: V12, ext_reverse: true },
+        Probe { version: 0x0303, no13: false, order: Reverse, grease: false, rare_alpn: false, support: V12, ext_reverse: false },
+        Probe { version: 0x0303, no13: false, order: TopHalf, grease: false, rare_alpn: false, support: None, ext_reverse: false },
+        Probe { version: 0x0303, no13: false, order: BottomHalf, grease: false, rare_alpn: true, support: None, ext_reverse: false },
+        Probe { version: 0x0303, no13: false, order: MiddleOut, grease: true, rare_alpn: true, support: None, ext_reverse: true },
+        Probe { version: 0x0302, no13: false, order: Forward, grease: false, rare_alpn: false, support: None, ext_reverse: false },
+        Probe { version: 0x0304, no13: false, order: Forward, grease: false, rare_alpn: false, support: V13, ext_reverse: true },
+        Probe { version: 0x0304, no13: false, order: Reverse, grease: false, rare_alpn: false, support: V13, ext_reverse: false },
+        Probe { version: 0x0304, no13: true, order: Forward, grease: false, rare_alpn: true, support: None, ext_reverse: false },
+        Probe { version: 0x0304, no13: false, order: MiddleOut, grease: true, rare_alpn: false, support: V13, ext_reverse: true },
     ]
 }
 
@@ -187,30 +193,35 @@ fn build_hello(p: &Probe, sni: &str) -> Vec<u8> {
     body.push(0x01); // compression len
     body.push(0x00);
 
-    // extensions
-    let mut ext = Vec::new();
+    // Build each extension as its own TLV block so we can emit them in
+    // reverse order for the probes that require it (JARM's 9th parameter).
+    let block = |etype: u16, payload: &[u8]| -> Vec<u8> {
+        let mut b = Vec::with_capacity(payload.len() + 4);
+        b.extend_from_slice(&u16b(etype));
+        b.extend_from_slice(&u16b(payload.len() as u16));
+        b.extend_from_slice(payload);
+        b
+    };
+    let mut blocks: Vec<Vec<u8>> = Vec::new();
     if p.grease {
-        ext.extend_from_slice(&u16b(GREASE));
-        ext.extend_from_slice(&u16b(0));
+        blocks.push(block(GREASE, &[]));
     }
     // SNI
     let hb = sni.as_bytes();
-    let mut sni_ext = Vec::new();
-    sni_ext.extend_from_slice(&u16b((hb.len() + 3) as u16));
-    sni_ext.push(0x00);
-    sni_ext.extend_from_slice(&u16b(hb.len() as u16));
-    sni_ext.extend_from_slice(hb);
-    ext.extend_from_slice(&u16b(0x0000));
-    ext.extend_from_slice(&u16b(sni_ext.len() as u16));
-    ext.extend_from_slice(&sni_ext);
+    let mut sni_pl = Vec::new();
+    sni_pl.extend_from_slice(&u16b((hb.len() + 3) as u16));
+    sni_pl.push(0x00);
+    sni_pl.extend_from_slice(&u16b(hb.len() as u16));
+    sni_pl.extend_from_slice(hb);
+    blocks.push(block(0x0000, &sni_pl));
     // extended_master_secret
-    ext.extend_from_slice(&[0x00, 0x17, 0x00, 0x00]);
+    blocks.push(block(0x0017, &[]));
     // supported_groups
-    ext.extend_from_slice(&[0x00, 0x0a, 0x00, 0x08, 0x00, 0x06, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x18]);
+    blocks.push(block(0x000a, &[0x00, 0x06, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x18]));
     // ec_point_formats
-    ext.extend_from_slice(&[0x00, 0x0b, 0x00, 0x02, 0x01, 0x00]);
+    blocks.push(block(0x000b, &[0x02, 0x01, 0x00]));
     // session_ticket
-    ext.extend_from_slice(&[0x00, 0x23, 0x00, 0x00]);
+    blocks.push(block(0x0023, &[]));
     // ALPN
     let protos: &[&str] = if p.rare_alpn {
         &["http/0.9", "http/1.0", "spdy/1", "spdy/2", "spdy/3", "h2c", "hq"]
@@ -222,37 +233,35 @@ fn build_hello(p: &Probe, sni: &str) -> Vec<u8> {
         list.push(pr.len() as u8);
         list.extend_from_slice(pr.as_bytes());
     }
-    let mut alpn_ext = Vec::new();
-    alpn_ext.extend_from_slice(&u16b(list.len() as u16));
-    alpn_ext.extend_from_slice(&list);
-    ext.extend_from_slice(&u16b(0x0010));
-    ext.extend_from_slice(&u16b(alpn_ext.len() as u16));
-    ext.extend_from_slice(&alpn_ext);
+    let mut alpn_pl = Vec::new();
+    alpn_pl.extend_from_slice(&u16b(list.len() as u16));
+    alpn_pl.extend_from_slice(&list);
+    blocks.push(block(0x0010, &alpn_pl));
     // signature_algorithms
-    ext.extend_from_slice(&[
-        0x00, 0x0d, 0x00, 0x14, 0x00, 0x12, 0x04, 0x03, 0x08, 0x04, 0x04, 0x01, 0x05, 0x03, 0x08,
-        0x05, 0x05, 0x01, 0x08, 0x06, 0x06, 0x01, 0x02, 0x01,
-    ]);
+    blocks.push(block(
+        0x000d,
+        &[0x00, 0x12, 0x04, 0x03, 0x08, 0x04, 0x04, 0x01, 0x05, 0x03, 0x08, 0x05, 0x05, 0x01, 0x08, 0x06, 0x06, 0x01, 0x02, 0x01],
+    ));
     // key_share (x25519)
-    let mut ks = Vec::new();
-    ks.extend_from_slice(&u16b(0x001d));
-    ks.extend_from_slice(&u16b(0x0020));
-    ks.extend_from_slice(&[0x22u8; 32]);
-    let mut ks_ext = Vec::new();
-    ks_ext.extend_from_slice(&u16b(ks.len() as u16));
-    ks_ext.extend_from_slice(&ks);
-    ext.extend_from_slice(&u16b(0x0033));
-    ext.extend_from_slice(&u16b(ks_ext.len() as u16));
-    ext.extend_from_slice(&ks_ext);
+    let mut ks_pl = Vec::new();
+    ks_pl.extend_from_slice(&u16b(0x0024)); // client_shares length
+    ks_pl.extend_from_slice(&u16b(0x001d));
+    ks_pl.extend_from_slice(&u16b(0x0020));
+    ks_pl.extend_from_slice(&[0x22u8; 32]);
+    blocks.push(block(0x0033, &ks_pl));
     // psk_key_exchange_modes
-    ext.extend_from_slice(&[0x00, 0x2d, 0x00, 0x02, 0x01, 0x01]);
-    // supported_versions
+    blocks.push(block(0x002d, &[0x01, 0x01]));
+    // supported_versions (JARM: 1.2 → {1.0,1.1,1.2}; 1.3 → {1.0,1.1,1.2,1.3})
     match p.support {
-        Support::V12 => ext.extend_from_slice(&[0x00, 0x2b, 0x00, 0x03, 0x02, 0x03, 0x03]),
-        Support::V13 => ext.extend_from_slice(&[0x00, 0x2b, 0x00, 0x05, 0x04, 0x03, 0x04, 0x03, 0x03]),
+        Support::V12 => blocks.push(block(0x002b, &[0x06, 0x03, 0x01, 0x03, 0x02, 0x03, 0x03])),
+        Support::V13 => blocks.push(block(0x002b, &[0x08, 0x03, 0x01, 0x03, 0x02, 0x03, 0x03, 0x03, 0x04])),
         Support::None => {}
     }
 
+    if p.ext_reverse {
+        blocks.reverse();
+    }
+    let ext: Vec<u8> = blocks.concat();
     body.extend_from_slice(&u16b(ext.len() as u16));
     body.extend_from_slice(&ext);
 
@@ -286,7 +295,10 @@ fn parse_reply(buf: &[u8]) -> Option<HelloReply> {
     if buf.len() < 44 || buf[0] != 0x16 || buf[5] != 0x02 {
         return None; // not a ServerHello
     }
-    let mut ver = u16::from_be_bytes([buf[9], buf[10]]);
+    // JARM codes the ServerHello's *legacy* version field (0x0303 for both
+    // 1.2 and 1.3 on modern servers) — it does NOT follow the
+    // supported_versions extension (lab bug B21).
+    let ver = u16::from_be_bytes([buf[9], buf[10]]);
     let mut i = 9 + 2 + 32;
     if i >= buf.len() {
         return None;
@@ -298,7 +310,11 @@ fn parse_reply(buf: &[u8]) -> Option<HelloReply> {
     }
     let cipher = u16::from_be_bytes([buf[i], buf[i + 1]]);
     i += 2 + 1; // cipher + compression
-    let mut material = String::new();
+
+    // Hash material, in JARM's format: the negotiated ALPN protocol string
+    // followed by the server's extension types as hyphen-joined hex.
+    let mut alpn = String::new();
+    let mut types: Vec<String> = Vec::new();
     if i + 2 <= buf.len() {
         let etot = u16::from_be_bytes([buf[i], buf[i + 1]]) as usize;
         i += 2;
@@ -306,13 +322,15 @@ fn parse_reply(buf: &[u8]) -> Option<HelloReply> {
         while i + 4 <= end {
             let etype = u16::from_be_bytes([buf[i], buf[i + 1]]);
             let elen = u16::from_be_bytes([buf[i + 2], buf[i + 3]]) as usize;
-            material.push_str(&format!("{:04x}", etype));
-            if etype == 0x002b && elen >= 2 && i + 4 + 2 <= buf.len() {
-                ver = u16::from_be_bytes([buf[i + 4], buf[i + 5]]); // real negotiated version
+            types.push(format!("{:04x}", etype));
+            if etype == 0x0010 && elen >= 3 && i + 4 + 3 + (buf[i + 6] as usize) <= buf.len() {
+                let plen = buf[i + 6] as usize; // ALPN: listlen(2) protolen(1) proto…
+                alpn = String::from_utf8_lossy(&buf[i + 7..i + 7 + plen]).into_owned();
             }
             i += 4 + elen;
         }
     }
+    let material = format!("{}{}", alpn, types.join("-"));
     Some(HelloReply { cipher: Some(cipher), version: Some(ver), ext_material: material })
 }
 
@@ -378,9 +396,11 @@ mod tests {
         assert_eq!(cipher_code(Some(0x0004)), "01"); // first in the table
         assert_eq!(cipher_code(Some(0x1305)), format!("{:02x}", CODE_TABLE.len()));
         assert_eq!(version_code(None), '0');
-        assert_eq!(version_code(Some(0x0303)), 'c'); // TLS 1.2
-        assert_eq!(version_code(Some(0x0304)), 'd'); // TLS 1.3
-        assert_eq!(version_code(Some(0x0301)), 'a'); // TLS 1.0
+        // pyjarm indexes "abcdef" by the last version nibble directly.
+        assert_eq!(version_code(Some(0x0303)), 'd'); // TLS 1.2 legacy
+        assert_eq!(version_code(Some(0x0304)), 'e'); // TLS 1.3
+        assert_eq!(version_code(Some(0x0301)), 'b'); // TLS 1.0
+        assert_eq!(version_code(Some(0x0302)), 'c'); // TLS 1.1
     }
 
     #[test]
