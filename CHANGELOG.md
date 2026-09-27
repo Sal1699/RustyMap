@@ -4,6 +4,35 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.75.0] - 2026-09-27
+
+Extends `--tls-scan` with JARM active fingerprinting and certificate
+analysis. No privileges; deterministic logic unit-tested.
+
+### Added
+- **JARM active TLS fingerprint (`jarm.rs`).** Sends the 10 canonical
+  Salesforce JARM ClientHellos (version/cipher-order/GREASE/ALPN/
+  supported_versions permutations), records each server's chosen cipher +
+  version + response extensions, and assembles the standard **62-hex-char**
+  JARM hash (30 chars cipher/version coding + 32-char SHA-256 of the
+  extension material). Clusters stacks / CDNs / C2 the same way across the
+  internet. The cipher-order transforms (FORWARD/REVERSE/TOP_HALF/
+  BOTTOM_HALF/MIDDLE_OUT), the cipher/version coding tables and the hash
+  assembly are unit-tested. Implemented from the published algorithm —
+  **cross-check the value against a reference (jarm.online) on the lab**,
+  as it isn't byte-validated here.
+- **Certificate extraction in `--tls-scan`.** Reuses the rustls + x509
+  probe to report subject / issuer / **SAN list** / validity / key size /
+  signature algorithm, and flags weaknesses: **expired**, **self-signed**,
+  **weak key** (RSA < 2048), **weak signature** (SHA-1/MD5), and **wildcard
+  SAN**.
+- Guide updated for the richer `--tls-scan`.
+
+### Notes
+- JARM runs 10 handshakes; each probe is capped so a slow host can't stall
+  the scan. Certificate facts come from the same rustls path used elsewhere
+  (self-signed accepted, since we're scanning).
+
 ## [0.74.0] - 2026-09-27
 
 Adds a dedicated **web attack-surface scanner** and **HTTPS/TLS deep scan**

@@ -26,6 +26,40 @@ pub struct TlsScanResult {
     pub versions: Vec<(String, bool)>,
     pub alpn: Vec<String>,
     pub hsts: Option<String>,
+    /// JARM active fingerprint (62 hex chars).
+    pub jarm: Option<String>,
+    /// Certificate facts (reused from `tls_probe`).
+    pub cert: Option<crate::tls_probe::TlsInfo>,
+    /// Certificate weaknesses derived from `cert`.
+    pub cert_issues: Vec<String>,
+}
+
+/// Assess certificate weaknesses from the parsed cert facts.
+pub fn cert_weaknesses(c: &crate::tls_probe::TlsInfo) -> Vec<String> {
+    let mut out = Vec::new();
+    if c.expired {
+        out.push("certificate EXPIRED".to_string());
+    }
+    if c.self_signed {
+        out.push("self-signed certificate".to_string());
+    }
+    if let Some(bits) = c.key_bits {
+        // RSA/DSA < 2048 is weak; EC keys are small by design so only flag
+        // the clearly-RSA-sized range.
+        if bits >= 512 && bits < 2048 {
+            out.push(format!("weak key: {}-bit (use >= 2048-bit RSA or ECDSA)", bits));
+        }
+    }
+    if let Some(sig) = &c.signature_alg {
+        let s = sig.to_lowercase();
+        if s.contains("sha1") || s.contains("md5") {
+            out.push(format!("weak signature algorithm: {}", sig));
+        }
+    }
+    if c.san.iter().any(|s| s.starts_with("*.")) {
+        out.push("wildcard SAN (broad blast radius if the key leaks)".to_string());
+    }
+    out
 }
 
 fn u16b(v: u16) -> [u8; 2] {
@@ -273,9 +307,19 @@ pub async fn scan_port(ip: IpAddr, port: u16, sni: Option<&str>, dur: Duration) 
 
     // HSTS (best-effort, HTTP over TLS).
     let host = sni.map(String::from).unwrap_or_else(|| ip.to_string());
-    let hsts = tokio::task::spawn_blocking(move || hsts_blocking(&host, port, dur)).await.ok().flatten();
+    let host_c = host.clone();
+    let hsts = tokio::task::spawn_blocking(move || hsts_blocking(&host_c, port, dur)).await.ok().flatten();
 
-    Some(TlsScanResult { port, versions, alpn, hsts })
+    // Certificate facts (reuse the rustls-based probe).
+    let cert = crate::tls_probe::probe(ip, port, dur, sni).await;
+    let cert_issues = cert.as_ref().map(cert_weaknesses).unwrap_or_default();
+
+    // JARM active fingerprint (10 probes; cap each so it can't run away).
+    let jarm_dur = dur.min(Duration::from_millis(1500));
+    let j = crate::jarm::fingerprint(ip, port, sni, jarm_dur).await;
+    let jarm = if j == "0".repeat(62) { None } else { Some(j) };
+
+    Some(TlsScanResult { port, versions, alpn, hsts, jarm, cert, cert_issues })
 }
 
 pub fn print_report(host: &str, results: &[TlsScanResult]) {
@@ -311,6 +355,32 @@ pub fn print_report(host: &str, results: &[TlsScanResult]) {
                 println!("    HSTS    : {}{}{}", h.green(), subs, preload);
             }
             None => println!("    HSTS    : {}", "absent — add Strict-Transport-Security".yellow()),
+        }
+        if let Some(j) = &r.jarm {
+            println!("    JARM    : {}", j);
+            println!("              {}", "(cross-check against jarm.online to identify the stack)".dimmed());
+        }
+        if let Some(c) = &r.cert {
+            if let Some(s) = &c.subject {
+                println!("    Cert    : {}", s);
+            }
+            if let Some(iss) = &c.issuer {
+                println!("      issuer  : {}", iss);
+            }
+            if !c.san.is_empty() {
+                let shown: Vec<String> = c.san.iter().take(6).cloned().collect();
+                let more = if c.san.len() > 6 { format!(" (+{} more)", c.san.len() - 6) } else { String::new() };
+                println!("      SAN     : {}{}", shown.join(", "), more);
+            }
+            if let Some(na) = &c.not_after {
+                println!("      expires : {}", na);
+            }
+            if let Some(bits) = c.key_bits {
+                println!("      key     : {} bits{}", bits, c.signature_alg.as_ref().map(|s| format!(", {}", s)).unwrap_or_default());
+            }
+            for issue in &r.cert_issues {
+                println!("      {} {}", "!".red(), issue.red());
+            }
         }
     }
 }

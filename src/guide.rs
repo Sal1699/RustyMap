@@ -85,7 +85,9 @@ pub fn print_guide() {
     line("                      rileva WAF/CDN, sonda path sensibili (.env/.git/");
     line("                      actuator/swagger/backup/metrics), flag cookie");
     line("--tls-scan            HTTPS/TLS: matrice versioni 1.0-1.3, ALPN (h2/");
-    line("                      http1.1), analisi HSTS per porta TLS");
+    line("                      http1.1), HSTS, fingerprint attivo JARM, e");
+    line("                      certificato (subject/issuer/SAN/scadenza + flag");
+    line("                      scaduto/self-signed/chiave-debole/SHA1)");
     line("--ipv6-sweep PREFIX   Sweep /64: sonda gli IID manuali comuni (::1/::53/");
     line("                      ::80/::443/vanity) → host vivi + intel indirizzo");
     line("--PY [PORT]           SCTP INIT ping (host discovery; default port 80)");

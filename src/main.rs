@@ -20,6 +20,7 @@ mod idle_scan;
 mod iflist;
 mod ip_proto_scan;
 mod ipv6_intel;
+mod jarm;
 mod json_out;
 mod kernel_guard;
 mod log;
