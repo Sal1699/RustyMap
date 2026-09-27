@@ -35,6 +35,12 @@ pub enum V6Kind {
     Privacy,
     /// Small, hand-picked IID (`::1`, `::dead:beef`, `::443`).
     LowByte,
+    /// IPv4-mapped (`::ffff:a.b.c.d`) — a v4 socket surfacing in v6.
+    Ipv4Mapped,
+    /// NAT64 / DNS64 well-known prefix (`64:ff9b::/96`).
+    Nat64,
+    /// ISATAP tunnel IID (`::0:5efe:a.b.c.d`).
+    Isatap,
     /// Global unicast, IID doesn't match a known pattern.
     GlobalManual,
 }
@@ -53,6 +59,9 @@ impl V6Kind {
             V6Kind::Eui64 => "SLAAC EUI-64 (embeds MAC)",
             V6Kind::Privacy => "privacy/temporary (RFC 4941 — MAC hidden)",
             V6Kind::LowByte => "low-byte / manually assigned",
+            V6Kind::Ipv4Mapped => "IPv4-mapped (::ffff:v4)",
+            V6Kind::Nat64 => "NAT64/DNS64 (64:ff9b::/96)",
+            V6Kind::Isatap => "ISATAP tunnel (embeds v4)",
             V6Kind::GlobalManual => "global unicast (manual/DHCPv6)",
         }
     }
@@ -103,6 +112,18 @@ pub fn analyze(addr: Ipv6Addr) -> V6Intel {
     if addr.is_loopback() {
         return simple(V6Kind::Loopback, "host");
     }
+    // IPv4-mapped ::ffff:a.b.c.d/96
+    if seg[0] == 0 && seg[1] == 0 && seg[2] == 0 && seg[3] == 0 && seg[4] == 0 && seg[5] == 0xffff {
+        let v4 = Ipv4Addr::new(o[12], o[13], o[14], o[15]);
+        notes.push(format!("IPv4-mapped — underlying IPv4 {}", v4));
+        return V6Intel { kind: V6Kind::Ipv4Mapped, scope: "mapped", embedded_mac: None, vendor: None, embedded_v4: Some(v4), notes };
+    }
+    // NAT64 / DNS64 well-known prefix 64:ff9b::/96
+    if seg[0] == 0x0064 && seg[1] == 0xff9b && seg[2] == 0 && seg[3] == 0 && seg[4] == 0 && seg[5] == 0 {
+        let v4 = Ipv4Addr::new(o[12], o[13], o[14], o[15]);
+        notes.push(format!("NAT64/DNS64 — synthesised for IPv4 {}", v4));
+        return V6Intel { kind: V6Kind::Nat64, scope: "global", embedded_mac: None, vendor: None, embedded_v4: Some(v4), notes };
+    }
     if (seg[0] & 0xffc0) == 0xfe80 {
         let mut i = analyze_iid(addr, "link-local", Some(V6Kind::LinkLocal));
         i.notes.insert(0, "link-local — only reachable on the same L2 segment".into());
@@ -110,6 +131,9 @@ pub fn analyze(addr: Ipv6Addr) -> V6Intel {
     }
     if (seg[0] & 0xff00) == 0xff00 {
         notes.push(multicast_scope_note(seg[0]));
+        if let Some(group) = multicast_group_name(addr) {
+            notes.push(format!("well-known group: {}", group));
+        }
         return V6Intel { kind: V6Kind::Multicast, scope: "multicast", embedded_mac: None, vendor: None, embedded_v4: None, notes };
     }
     if (seg[0] & 0xfe00) == 0xfc00 {
@@ -144,6 +168,13 @@ fn analyze_iid(addr: Ipv6Addr, scope: &'static str, force_kind: Option<V6Kind>) 
     let o = addr.octets();
     let iid = &o[8..16];
     let mut notes = Vec::new();
+
+    // ISATAP: IID = 0000:5EFE:v4 (private) or 0200:5EFE:v4 (global).
+    if (iid[0] == 0x00 || iid[0] == 0x02) && iid[1] == 0x00 && iid[2] == 0x5e && iid[3] == 0xfe {
+        let v4 = Ipv4Addr::new(iid[4], iid[5], iid[6], iid[7]);
+        notes.push(format!("ISATAP tunnel — embeds IPv4 {}", v4));
+        return V6Intel { kind: force_kind.unwrap_or(V6Kind::Isatap), scope, embedded_mac: None, vendor: None, embedded_v4: Some(v4), notes };
+    }
 
     // EUI-64 (embedded MAC).
     if let Some(mac) = eui64_to_mac(addr) {
@@ -184,6 +215,56 @@ fn analyze_iid(addr: Ipv6Addr, scope: &'static str, force_kind: Option<V6Kind>) 
 
 fn simple(kind: V6Kind, scope: &'static str) -> V6Intel {
     V6Intel { kind, scope, embedded_mac: None, vendor: None, embedded_v4: None, notes: Vec::new() }
+}
+
+/// Name a well-known IPv6 multicast group.
+fn multicast_group_name(addr: Ipv6Addr) -> Option<&'static str> {
+    match addr.segments() {
+        [0xff02, 0, 0, 0, 0, 0, 0, 1] => Some("all-nodes"),
+        [0xff02, 0, 0, 0, 0, 0, 0, 2] => Some("all-routers"),
+        [0xff02, 0, 0, 0, 0, 0, 0, 0xfb] => Some("mDNS (multicast DNS)"),
+        [0xff02, 0, 0, 0, 0, 0, 1, 3] => Some("LLMNR"),
+        [0xff02, 0, 0, 0, 0, 0, 0, 0xc] => Some("SSDP / UPnP"),
+        [0xff02, 0, 0, 0, 0, 0, 1, 2] => Some("all-DHCP-agents"),
+        [0xff05, 0, 0, 0, 0, 0, 1, 3] => Some("site-local all-DHCP-servers"),
+        s if s[0] == 0xff02 && s[5] == 1 && (s[6] & 0xff00) == 0xff00 => Some("solicited-node"),
+        _ => None,
+    }
+}
+
+/// Candidate host addresses to probe inside a /64 prefix — a full /64
+/// sweep is infeasible (2^64 hosts), so IPv6 recon targets the handful of
+/// **manually-assigned** IIDs admins actually use. Returns the prefix with
+/// common low-byte / vanity IIDs substituted.
+pub fn candidate_addresses(prefix: Ipv6Addr) -> Vec<Ipv6Addr> {
+    let base = prefix.octets();
+    // Common manual IIDs (last 64 bits) seen on real servers/gateways.
+    // The port-as-hex-literal convention (`::443` for HTTPS, `::80` for
+    // HTTP, `::22` for SSH) is deliberate — admins pick IIDs that *read*
+    // like the service, so the values are the hex the address prints.
+    const IIDS: &[u64] = &[
+        0x0000_0000_0000_0001, // ::1  gateway/first host
+        0x0000_0000_0000_0002, // ::2
+        0x0000_0000_0000_0003, // ::3
+        0x0000_0000_0000_0010, // ::10
+        0x0000_0000_0000_0022, // ::22  ssh
+        0x0000_0000_0000_0053, // ::53  dns
+        0x0000_0000_0000_0080, // ::80  http
+        0x0000_0000_0000_0443, // ::443 https
+        0x0000_0000_0000_00ff, // ::ff
+        0x0000_0000_0000_8080, // ::8080
+        0x0000_0000_dead_beef, // vanity
+        0x0000_0000_0000_cafe, // ::cafe
+        0x0000_0000_0000_c0ca, // ::c0ca
+        0x0000_0000_0000_babe, // ::babe
+    ];
+    IIDS.iter()
+        .map(|&iid| {
+            let mut b = base;
+            b[8..16].copy_from_slice(&iid.to_be_bytes());
+            Ipv6Addr::from(b)
+        })
+        .collect()
 }
 
 fn multicast_scope_note(first: u16) -> String {
@@ -247,6 +328,40 @@ mod tests {
         let i = analyze(a("2607:f8b0:4005:80a::443"));
         assert_eq!(i.kind, V6Kind::LowByte);
         assert!(i.notes.iter().any(|n| n.contains("manually")));
+    }
+
+    #[test]
+    fn analyze_modern_ranges() {
+        // IPv4-mapped ::ffff:192.0.2.5
+        let i = analyze(a("::ffff:192.0.2.5"));
+        assert_eq!(i.kind, V6Kind::Ipv4Mapped);
+        assert_eq!(i.embedded_v4, Some(Ipv4Addr::new(192, 0, 2, 5)));
+        // NAT64 64:ff9b::203.0.113.9
+        let i = analyze(a("64:ff9b::cb00:7109"));
+        assert_eq!(i.kind, V6Kind::Nat64);
+        assert_eq!(i.embedded_v4, Some(Ipv4Addr::new(203, 0, 113, 9)));
+        // ISATAP 2001:db8::200:5efe:192.0.2.1  (global unicast prefix)
+        let i = analyze(a("2607:f8b0::0:5efe:c000:0201"));
+        assert_eq!(i.kind, V6Kind::Isatap);
+        assert_eq!(i.embedded_v4, Some(Ipv4Addr::new(192, 0, 2, 1)));
+    }
+
+    #[test]
+    fn multicast_groups_named() {
+        assert_eq!(multicast_group_name(a("ff02::1")), Some("all-nodes"));
+        assert_eq!(multicast_group_name(a("ff02::fb")), Some("mDNS (multicast DNS)"));
+        assert_eq!(multicast_group_name(a("ff02::c")), Some("SSDP / UPnP"));
+    }
+
+    #[test]
+    fn candidate_addresses_stay_in_prefix() {
+        let cands = candidate_addresses(a("2001:db8:abcd:1234::"));
+        assert!(cands.contains(&a("2001:db8:abcd:1234::1")));
+        assert!(cands.contains(&a("2001:db8:abcd:1234::443")));
+        // All share the /64 prefix.
+        for c in &cands {
+            assert_eq!(&c.octets()[..8], &a("2001:db8:abcd:1234::").octets()[..8]);
+        }
     }
 
     #[test]

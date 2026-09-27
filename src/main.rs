@@ -133,8 +133,10 @@ mod tls_cipher_enum;
 mod tls_enum;
 mod tls_grade;
 mod tls_probe;
+mod tls_scan;
 mod topology_svg;
 mod web_crawl;
+mod web_scan;
 mod wizard;
 mod top_ports;
 mod traceroute;
@@ -696,6 +698,89 @@ async fn main() -> Result<()> {
         let timeout = std::time::Duration::from_secs(8);
         let fp = cloud_fingerprint::fingerprint(&host, timeout).await?;
         cloud_fingerprint::print_report(&fp);
+        return Ok(());
+    }
+    if let Some(prefix) = &args.ipv6_sweep {
+        use std::net::Ipv6Addr;
+        let dur = args.timeout().min(std::time::Duration::from_millis(800));
+        let base_str = prefix.split('/').next().unwrap_or(prefix);
+        match base_str.parse::<Ipv6Addr>() {
+            Ok(base) => {
+                println!("IPv6 /64 sweep of {}/64 — probing common manual IIDs", base);
+                let cands = ipv6_intel::candidate_addresses(base);
+                let probe_ports = [443u16, 80, 22, 3389];
+                let mut live = 0;
+                for c in cands {
+                    let mut open_port = None;
+                    for &p in &probe_ports {
+                        let sa = std::net::SocketAddr::new(std::net::IpAddr::V6(c), p);
+                        if tokio::time::timeout(dur, tokio::net::TcpStream::connect(sa)).await.map(|r| r.is_ok()).unwrap_or(false) {
+                            open_port = Some(p);
+                            break;
+                        }
+                    }
+                    if let Some(p) = open_port {
+                        live += 1;
+                        println!("  {} up (tcp/{} open) — {}", c, p, ipv6_intel::summary(c));
+                    }
+                }
+                if live == 0 {
+                    println!("  no candidate hosts responded (try -O -6 on a known host instead)");
+                }
+            }
+            Err(_) => println!("[ipv6-sweep] '{}' is not a valid IPv6 prefix base", base_str),
+        }
+        return Ok(());
+    }
+    if args.web_scan {
+        let dur = args.timeout();
+        let parsed = ports::parse_ports(&args.ports).unwrap_or_default();
+        let ports: Vec<u16> = if parsed.is_empty() || parsed.len() > 50 {
+            vec![80, 443, 8080, 8443]
+        } else {
+            parsed
+        };
+        let targets = target::expand_targets(&args.targets, !args.no_dns).await?;
+        for (i, t) in targets.iter().enumerate() {
+            // Use the typed hostname as SNI/Host when it isn't a bare IP.
+            let sni = args
+                .targets
+                .get(i)
+                .filter(|s| s.parse::<std::net::IpAddr>().is_err())
+                .cloned();
+            let mut results = Vec::new();
+            for &p in &ports {
+                if let Some(r) = web_scan::scan_port(t.ip, p, sni.clone(), dur).await {
+                    results.push(r);
+                }
+            }
+            web_scan::print_report(&t.display(), &results);
+        }
+        return Ok(());
+    }
+    if args.tls_scan {
+        let dur = args.timeout();
+        let parsed = ports::parse_ports(&args.ports).unwrap_or_default();
+        let ports: Vec<u16> = if parsed.is_empty() || parsed.len() > 50 {
+            vec![443, 8443, 993, 995, 465]
+        } else {
+            parsed
+        };
+        let targets = target::expand_targets(&args.targets, !args.no_dns).await?;
+        for (i, t) in targets.iter().enumerate() {
+            let sni = args
+                .targets
+                .get(i)
+                .filter(|s| s.parse::<std::net::IpAddr>().is_err())
+                .cloned();
+            let mut results = Vec::new();
+            for &p in &ports {
+                if let Some(r) = tls_scan::scan_port(t.ip, p, sni.as_deref(), dur).await {
+                    results.push(r);
+                }
+            }
+            tls_scan::print_report(&t.display(), &results);
+        }
         return Ok(());
     }
     if args.quic {

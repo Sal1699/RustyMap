@@ -122,6 +122,23 @@ pub struct Cli {
     #[arg(long = "quic")]
     pub quic: bool,
 
+    /// Web attack-surface scan: for each open HTTP(S) port, grade security
+    /// headers (A–F), detect WAF/CDN, and probe curated sensitive paths
+    /// (.env, .git, Actuator, Swagger, backups, metrics…). No privileges.
+    #[arg(long = "web-scan")]
+    pub web_scan: bool,
+
+    /// HTTPS/TLS deep scan: TLS version-support matrix (1.0–1.3), ALPN
+    /// (HTTP/2·HTTP/1.1) negotiation, and HSTS analysis per TLS port.
+    #[arg(long = "tls-scan")]
+    pub tls_scan: bool,
+
+    /// IPv6 /64 sweep: a full /64 is unscannable (2^64), so probe the
+    /// common manually-assigned IIDs (::1, ::53, ::80, ::443, vanity…) via
+    /// TCP connect and report live hosts with their address intel.
+    #[arg(long = "ipv6-sweep", value_name = "PREFIX")]
+    pub ipv6_sweep: Option<String>,
+
     /// SCTP INIT ping for host discovery — `-PY` in nmap.
     #[arg(long = "PY", value_name = "PORT", default_value = "")]
     pub ping_sctp: String,

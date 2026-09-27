@@ -81,6 +81,13 @@ pub fn print_guide() {
     line("                      rifiutano (bene)");
     line("--quic                Scan QUIC/HTTP-3 (UDP): Version-Negotiation trigger");
     line("                      → rileva server HTTP/3 ed enumera le versioni QUIC");
+    line("--web-scan            Web attack-surface: grade security-header A-F,");
+    line("                      rileva WAF/CDN, sonda path sensibili (.env/.git/");
+    line("                      actuator/swagger/backup/metrics), flag cookie");
+    line("--tls-scan            HTTPS/TLS: matrice versioni 1.0-1.3, ALPN (h2/");
+    line("                      http1.1), analisi HSTS per porta TLS");
+    line("--ipv6-sweep PREFIX   Sweep /64: sonda gli IID manuali comuni (::1/::53/");
+    line("                      ::80/::443/vanity) → host vivi + intel indirizzo");
     line("--PY [PORT]           SCTP INIT ping (host discovery; default port 80)");
     line("--PM                  ICMP Address Mask ping (type 17)");
     line("--PO PROTO            IP-protocol ping (1=ICMP, 17=UDP, 132=SCTP, 47=GRE)");

@@ -4,6 +4,48 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.74.0] - 2026-09-27
+
+Adds a dedicated **web attack-surface scanner** and **HTTPS/TLS deep scan**
+as new strengths, and extends IPv6 further. All plain TCP/UDP (no
+privileges); pure logic unit-tested.
+
+### Added
+- **Web scan (`--web-scan`, `web_scan.rs`) — new capability.** For each open
+  HTTP(S) port it produces one consolidated report:
+  - **security-header grade A–F** (HSTS, CSP, X-Frame-Options,
+    X-Content-Type-Options, Referrer-Policy, Permissions-Policy) with the
+    exact gaps;
+  - **WAF/CDN detection** (Cloudflare, Akamai, Imperva, F5, AWS, Fastly,
+    Sucuri, ModSecurity, Barracuda, Wordfence) from headers/cookies;
+  - **sensitive-path prober** — a curated high-value list (`.env`, `.git/HEAD`
+    + config, Spring `/actuator/env`, `/server-status`, `/metrics`, Swagger/
+    OpenAPI, `phpinfo`, `.DS_Store`, `backup.zip`, `.aws/credentials`) with
+    body-marker confirmation to avoid false 200s;
+  - **insecure-cookie flags** (missing HttpOnly/Secure/SameSite).
+- **HTTPS/TLS deep scan (`--tls-scan`, `tls_scan.rs`) — new capability.**
+  Self-contained ClientHello/ServerHello (rustls can't offer ≤1.1):
+  - **TLS version matrix** — negotiates 1.0/1.1/1.2/1.3 individually and
+    flags deprecated 1.0/1.1;
+  - **ALPN** — offers h2/http-1.1 and reports the negotiated protocol
+    (HTTP/2 support);
+  - **HSTS** — presence, max-age, includeSubDomains, preload.
+- **IPv6 (extended `ipv6_intel.rs`).** Now also decodes **IPv4-mapped**
+  (`::ffff:v4`), **NAT64/DNS64** (`64:ff9b::/96`, embedded v4), **ISATAP**
+  (embedded v4), and names well-known **multicast groups** (all-nodes,
+  all-routers, mDNS, LLMNR, SSDP, DHCP, solicited-node). New
+  **`--ipv6-sweep PREFIX`**: a full /64 is unscannable, so it probes the
+  common manually-assigned IIDs (`::1`, `::53`, `::80`, `::443`, vanity) via
+  TCP connect and reports live hosts with their address intel.
+- Guide synced (`--web-scan`, `--tls-scan`, `--ipv6-sweep`).
+
+### Notes
+- Web/TLS scans use `reqwest` (rustls) with self-signed certs accepted since
+  we're scanning; ALPN is read from the cleartext 1.2 ServerHello (1.3 hides
+  it in EncryptedExtensions).
+- Test suite green; graders, WAF detection, TLS ClientHello/ServerHello
+  parsing, and IPv6 range decoding are all unit-tested.
+
 ## [0.73.0] - 2026-09-27
 
 Second breadth pass over the six detection areas, led by **IPv6 as a
