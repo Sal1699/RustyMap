@@ -4,6 +4,39 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.77.0] - 2026-09-27
+
+Adds the full **nmap-os-db probabilistic matching engine** — the last
+conceptual gap. RustyMap already *emitted* nmap's fingerprint fields; now it
+*matches* them against the real ~6500-signature database with nmap's
+weighting, instead of only the 100-signature heuristic.
+
+### Added
+- **nmap-os-db probabilistic matcher (`nmap_db.rs`).** `--nmap-os-db FILE`
+  now parses the full test lines (SEQ/OPS/WIN/ECN/T1–T7/IE/U1) of every
+  fingerprint **and** the `MatchPoints` weight block. Under `-O`, the raw
+  observed fingerprint is scored against every DB entry with nmap's
+  MatchPoints weighting:
+  - `field_matches` handles nmap's value grammar — exact, hex ranges
+    (`FA00-FB00`), comparisons (`>80`/`<40`) and alternation (`Z|A|A+`);
+  - `match_fingerprint` sums matched-field weights / applicable-field
+    weights per entry and returns the best matches as **OS name + CPE +
+    confidence %**, just like `nmap -O`.
+  - When loaded, a ≥85% match takes final priority over the built-in
+    heuristic and sets the OS family/CPE; lower scores are surfaced as
+    "nmap-os-db guesses".
+  The observed fingerprint reuses the same `parse_test_line` as the DB, so
+  emitted and reference formats can't drift. The built-in 100-signature
+  heuristic remains the default when no DB is loaded.
+- Guide updated: `--nmap-os-db` now documents full matching.
+- Unit-tested: MatchPoints parsing, test-line parsing into entries, and the
+  `field_matches` grammar (ranges/alternation/comparisons/exact/empty).
+
+### Note
+- Needs the user's own `nmap-os-db` file (GPLv2 — kept on disk, parsed at
+  runtime, never bundled). The live match quality needs Kali-root validation
+  vs `nmap -O` on real hosts, since it feeds on the raw probe suite.
+
 ## [0.76.0] - 2026-09-27
 
 Closes the remaining lab-report items (B12, U1/IE quoted fields, B19, B20).

@@ -20,12 +20,18 @@
 use anyhow::{Context, Result};
 use once_cell::sync::OnceCell;
 use regex::Regex;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
 // ── nmap-os-db ─────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+/// A parsed test line's fields: field name → value expression (which may be
+/// an exact value, a `A-B` hex range, a `>H`/`<H` comparison, or a
+/// `X|Y|Z` alternation).
+pub type TestFields = HashMap<String, String>;
+
+#[derive(Debug, Clone, Default)]
 pub struct OsDbEntry {
     /// Full fingerprint name e.g. "Linux 4.15 - 5.6"
     pub name: String,
@@ -33,16 +39,22 @@ pub struct OsDbEntry {
     pub classes: Vec<String>,
     /// CPE strings from `CPE` lines
     pub cpe: Vec<String>,
+    /// The probe-response test lines (SEQ/OPS/WIN/ECN/T1..T7/IE/U1),
+    /// test name → its fields, for probabilistic matching.
+    pub tests: HashMap<String, TestFields>,
 }
 
 static OS_DB: OnceCell<Vec<OsDbEntry>> = OnceCell::new();
+/// nmap's per-field MatchPoints weights: test → field → weight.
+static MATCH_POINTS: OnceCell<HashMap<String, HashMap<String, u32>>> = OnceCell::new();
 
 pub fn load_os_db<P: AsRef<Path>>(path: P) -> Result<usize> {
     let body = fs::read_to_string(&path)
         .with_context(|| format!("read {:?}", path.as_ref()))?;
-    let entries = parse_os_db(&body);
+    let (entries, points) = parse_os_db(&body);
     let n = entries.len();
     let _ = OS_DB.set(entries);
+    let _ = MATCH_POINTS.set(points);
     Ok(n)
 }
 
@@ -50,57 +62,92 @@ pub fn os_db() -> Option<&'static [OsDbEntry]> {
     OS_DB.get().map(|v| v.as_slice())
 }
 
-fn parse_os_db(body: &str) -> Vec<OsDbEntry> {
+/// Parse a probe-response test line `NAME(k=v%k=v%...)` into its name and
+/// (field, value) pairs. Returns None for non-test lines. Shared with the
+/// live-fingerprint parser so observed and reference use the same format.
+pub(crate) fn parse_test_line(l: &str) -> Option<(String, Vec<(String, String)>)> {
+    let open = l.find('(')?;
+    if !l.ends_with(')') {
+        return None;
+    }
+    let name = &l[..open];
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()) {
+        return None;
+    }
+    let inner = &l[open + 1..l.len() - 1];
+    let mut fields = Vec::new();
+    if !inner.is_empty() {
+        for pair in inner.split('%') {
+            if let Some((k, v)) = pair.split_once('=') {
+                fields.push((k.to_string(), v.to_string()));
+            }
+        }
+    }
+    Some((name.to_string(), fields))
+}
+
+fn parse_os_db(body: &str) -> (Vec<OsDbEntry>, HashMap<String, HashMap<String, u32>>) {
     let mut out = Vec::new();
     let mut cur: Option<OsDbEntry> = None;
+    let mut points: HashMap<String, HashMap<String, u32>> = HashMap::new();
+    let mut in_matchpoints = false;
+
+    let flush = |cur: &mut Option<OsDbEntry>, out: &mut Vec<OsDbEntry>| {
+        if let Some(e) = cur.take() {
+            if !e.name.is_empty() {
+                out.push(e);
+            }
+        }
+    };
+
     for line in body.lines() {
         let l = line.trim_end();
-        // Blank line = end of current entry
         if l.is_empty() {
-            if let Some(e) = cur.take() {
-                if !e.name.is_empty() {
-                    out.push(e);
-                }
-            }
+            flush(&mut cur, &mut out);
+            in_matchpoints = false;
             continue;
         }
         if l.starts_with('#') {
             continue;
         }
+        if l == "MatchPoints" {
+            flush(&mut cur, &mut out);
+            in_matchpoints = true;
+            continue;
+        }
         if let Some(rest) = l.strip_prefix("Fingerprint ") {
-            if let Some(prev) = cur.take() {
-                if !prev.name.is_empty() {
-                    out.push(prev);
-                }
-            }
-            cur = Some(OsDbEntry {
-                name: rest.trim().to_string(),
-                classes: Vec::new(),
-                cpe: Vec::new(),
-            });
+            flush(&mut cur, &mut out);
+            in_matchpoints = false;
+            cur = Some(OsDbEntry { name: rest.trim().to_string(), ..Default::default() });
         } else if let Some(rest) = l.strip_prefix("Class ") {
             if let Some(e) = cur.as_mut() {
                 e.classes.push(rest.trim().to_string());
             }
         } else if let Some(rest) = l.strip_prefix("CPE ") {
             if let Some(e) = cur.as_mut() {
-                // strip the trailing " auto" marker if present
                 let cleaned = rest.split_whitespace().next().unwrap_or("").to_string();
                 if !cleaned.is_empty() {
                     e.cpe.push(cleaned);
                 }
             }
+        } else if let Some((test, fields)) = parse_test_line(l) {
+            if in_matchpoints {
+                let entry = points.entry(test).or_default();
+                for (k, v) in fields {
+                    if let Ok(w) = v.parse::<u32>() {
+                        entry.insert(k, w);
+                    }
+                }
+            } else if let Some(e) = cur.as_mut() {
+                e.tests
+                    .entry(test)
+                    .or_default()
+                    .extend(fields);
+            }
         }
-        // Skip everything else (SEQ/OPS/WIN/T1..T7/IE/U1 — the binary
-        // probe-response data we can't use without implementing nmap's
-        // probe engine).
     }
-    if let Some(e) = cur.take() {
-        if !e.name.is_empty() {
-            out.push(e);
-        }
-    }
-    out
+    flush(&mut cur, &mut out);
+    (out, points)
 }
 
 /// Best-effort: find an OS DB entry whose name overlaps with `banner`.
@@ -121,6 +168,77 @@ pub fn match_banner_to_os(banner: &str) -> Option<&'static OsDbEntry> {
         }
         false
     })
+}
+
+// ── nmap-os-db probabilistic matching ─────────────────────
+
+/// Parse a hex token (nmap fingerprint numbers are hex).
+fn hexval(s: &str) -> Option<u64> {
+    u64::from_str_radix(s.trim(), 16).ok()
+}
+
+/// Does one alternative of a reference expression match the observed value?
+fn alt_matches(observed: &str, alt: &str) -> bool {
+    if alt.is_empty() {
+        return observed.is_empty();
+    }
+    if let Some(rest) = alt.strip_prefix('>') {
+        return matches!((hexval(observed), hexval(rest)), (Some(o), Some(b)) if o > b);
+    }
+    if let Some(rest) = alt.strip_prefix('<') {
+        return matches!((hexval(observed), hexval(rest)), (Some(o), Some(b)) if o < b);
+    }
+    if let Some((lo, hi)) = alt.split_once('-') {
+        if let (Some(o), Some(a), Some(b)) = (hexval(observed), hexval(lo), hexval(hi)) {
+            return o >= a && o <= b;
+        }
+        // not a numeric range → fall through to an exact compare
+    }
+    observed.eq_ignore_ascii_case(alt)
+}
+
+/// Match an observed field value against a reference expression, which may
+/// alternate with `|` (e.g. `Z|A|A+`, `FA00-FB00`, `>80`).
+pub fn field_matches(observed: &str, expr: &str) -> bool {
+    expr.split('|').any(|alt| alt_matches(observed, alt))
+}
+
+/// Score an observed fingerprint (test → fields) against every loaded
+/// nmap-os-db entry using nmap's MatchPoints weights, returning the best
+/// matches as (name, cpe, confidence%). Empty if no DB is loaded.
+pub fn match_fingerprint(observed: &HashMap<String, TestFields>) -> Vec<(&'static str, &'static [String], u8)> {
+    let db = match os_db() {
+        Some(d) => d,
+        None => return Vec::new(),
+    };
+    let mp = MATCH_POINTS.get();
+    let mut scored: Vec<(&'static str, &'static [String], u8)> = Vec::new();
+    for e in db {
+        let mut matched: u32 = 0;
+        let mut total: u32 = 0;
+        for (test, obs_fields) in observed {
+            let Some(ref_fields) = e.tests.get(test) else { continue };
+            for (field, obs_val) in obs_fields {
+                let Some(ref_expr) = ref_fields.get(field) else { continue };
+                let w = mp
+                    .and_then(|m| m.get(test))
+                    .and_then(|t| t.get(field))
+                    .copied()
+                    .unwrap_or(1);
+                total += w;
+                if field_matches(obs_val, ref_expr) {
+                    matched += w;
+                }
+            }
+        }
+        if total > 0 {
+            let pct = (matched as u64 * 100 / total as u64) as u8;
+            scored.push((e.name.as_str(), e.cpe.as_slice(), pct));
+        }
+    }
+    scored.sort_by(|a, b| b.2.cmp(&a.2));
+    scored.truncate(5);
+    scored
 }
 
 // ── nmap-service-probes ────────────────────────────────────
@@ -318,12 +436,36 @@ Fingerprint FreeBSD 13.0-RELEASE
 Class FreeBSD | FreeBSD | 13.X | general purpose
 CPE cpe:/o:freebsd:freebsd:13.0
 ";
-        let entries = parse_os_db(body);
+        let (entries, _points) = parse_os_db(body);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "Linux 4.15 - 5.6");
         assert_eq!(entries[0].classes.len(), 2);
         assert_eq!(entries[0].cpe.len(), 2);
+        // Test lines parsed into the entry's tests map.
+        assert_eq!(entries[0].tests.get("SEQ").and_then(|t| t.get("GCD")).map(|s| s.as_str()), Some("1-6"));
         assert_eq!(entries[1].name, "FreeBSD 13.0-RELEASE");
+    }
+
+    #[test]
+    fn matchpoints_and_field_matching() {
+        let body = "\
+MatchPoints
+SEQ(SP=25%GCD=75%TS=100)
+
+Fingerprint Test OS
+Class T | T | 1.X | general purpose
+SEQ(SP=100-110%GCD=1-6%TS=A)
+";
+        let (_entries, points) = parse_os_db(body);
+        assert_eq!(points.get("SEQ").and_then(|t| t.get("GCD")).copied(), Some(75));
+        // field_matches: ranges, alternation, comparisons, exact.
+        assert!(field_matches("105", "100-110")); // in hex range
+        assert!(!field_matches("120", "100-110"));
+        assert!(field_matches("A", "Z|A|A+")); // alternation
+        assert!(field_matches("FA00", ">80")); // hex comparison
+        assert!(field_matches("S+", "S+")); // exact non-hex
+        assert!(field_matches("", "")); // empty matches empty
+        assert!(!field_matches("AR", "R"));
     }
 
     #[test]

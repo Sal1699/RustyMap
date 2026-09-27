@@ -507,5 +507,49 @@ fn refine_from_tcp_fp(host: &HostResult, guess: &mut OsGuess, timeout: Duration)
                     .push("heuristic: TTL 255 + DF clear + predictable ISN + W=0xFFFF → Slirp/QEMU NAT".into());
             }
         }
+
+        // 4) Full nmap-os-db probabilistic match — takes final priority when
+        // the user loaded the real DB (`--nmap-os-db`) and we have the raw
+        // fingerprint. Parses our own emitted fingerprint into the observed
+        // field map and scores it against every DB entry with nmap's
+        // MatchPoints weights.
+        if crate::nmap_db::os_db().is_some() {
+            if let Some(s) = &suite {
+                let mut observed: std::collections::HashMap<String, std::collections::HashMap<String, String>> =
+                    std::collections::HashMap::new();
+                for line in s.fingerprint().lines() {
+                    if let Some((test, fields)) = crate::nmap_db::parse_test_line(line) {
+                        observed.insert(test, fields.into_iter().collect());
+                    }
+                }
+                let hits = crate::nmap_db::match_fingerprint(&observed);
+                if let Some((name, cpe, pct)) = hits.first() {
+                    if *pct >= 85 {
+                        guess.family = name.to_string();
+                        guess.confidence = *pct;
+                        if let Some(c) = cpe.first() {
+                            guess.hints.push(format!("nmap-os-db cpe: {}", c));
+                        }
+                        let others: Vec<String> = hits
+                            .iter()
+                            .skip(1)
+                            .take(2)
+                            .map(|(n, _, p)| format!("{} ({}%)", n, p))
+                            .collect();
+                        if !others.is_empty() {
+                            guess.hints.push(format!("nmap-os-db also: {}", others.join(", ")));
+                        }
+                    } else if !hits.is_empty() {
+                        // Below the confident threshold → surface as aggressive guesses.
+                        let g: Vec<String> = hits
+                            .iter()
+                            .take(3)
+                            .map(|(n, _, p)| format!("{} ({}%)", n, p))
+                            .collect();
+                        guess.hints.push(format!("nmap-os-db guesses: {}", g.join(", ")));
+                    }
+                }
+            }
+        }
     }
 }
