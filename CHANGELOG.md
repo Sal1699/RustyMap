@@ -4,6 +4,32 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.75.3] - 2026-09-27
+
+Closes the SEQ-line gaps (B14/B15/B16) so `-O -v`'s SEQ matches `nmap -O -d`.
+Algorithm taken from the nmap OS-detection reference, not guessed.
+
+### Fixed
+- **SP (B14).** Was computed from the raw ISN diffs; nmap computes the
+  standard deviation of the **rate** values (diff ÷ elapsed time), dividing
+  by GCD only when GCD > 9. Switched to that (rates array, GCD>9 guard,
+  sample variance) — the previous ~30-too-low SP was exactly this
+  diff-vs-rate error (rates are ~10× the diffs → +~26 to SP).
+- **SP/ISR/GCD output (B14).** Now printed in **uppercase hex** like nmap
+  (ISR 269 → `10D`, in nmap's observed 104–10D range) instead of decimal.
+- **TS (B16).** Now `round(log2(freq))` in hex (≈2 Hz→`1`, ≈100→`7`,
+  ≈200→`8`, ≈1000→`A`), the nmap formula, instead of ad-hoc classes.
+- **II (B15).** Added: RustyMap now sends **two** ICMP echo (IE) probes and
+  classifies their IP-IDs (Z/I/RI/BI/RD) into the II field, which was
+  previously missing from the SEQ line.
+- SEQ line now omits empty fields (TI/CI/II) like nmap, and renders
+  `SEQ(SP=..%GCD=..%ISR=..%TI=..%CI=..%II=..%TS=..)`.
+
+### Note
+- SP/ISR are inherently sample-dependent (nmap itself reports them as a
+  range across runs), so exact run-to-run equality isn't expected — the
+  formula and base now match, putting values in nmap's range.
+
 ## [0.75.2] - 2026-09-27
 
 **JARM now byte-identical to Salesforce `pyjarm`.** Finishes B21 by porting

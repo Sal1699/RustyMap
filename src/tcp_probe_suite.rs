@@ -160,6 +160,8 @@ pub struct IeResult {
     pub responded: bool,
     pub ttl: u8,
     pub df: bool,
+    /// IP identification of the echo reply (feeds the II class).
+    pub ip_id: u16,
 }
 
 /// SEQ line: ISN predictability numbers + IP-ID / timestamp generation.
@@ -168,8 +170,10 @@ pub struct SeqInfo {
     pub seq: Option<crate::nmap_fp::SeqResult>,
     /// TI — IP-ID class from the SEQ (open-port SYN) probes.
     pub ti: &'static str,
-    /// TS — timestamp-option rate class.
-    pub ts: &'static str,
+    /// II — IP-ID class from the two ICMP echo (IE) probes.
+    pub ii: &'static str,
+    /// TS — timestamp-option rate class (nmap `round(log2(freq))` in hex).
+    pub ts: String,
 }
 
 /// Everything the secondary suite gathered.
@@ -307,12 +311,16 @@ impl SuiteResult {
     pub fn fingerprint(&self) -> String {
         let mut lines: Vec<String> = Vec::new();
 
-        // SEQ line.
-        let (sp, gcd, isr) = self
-            .seq
-            .seq
-            .map(|r| (r.sp, format!("{:X}", r.gcd), r.isr))
-            .unwrap_or((0, String::new(), 0));
+        // SEQ line — SP/GCD/ISR in hex like nmap; fields omitted when empty.
+        let mut seq_parts: Vec<String> = Vec::new();
+        if let Some(r) = self.seq.seq {
+            seq_parts.push(format!("SP={:X}", r.sp));
+            seq_parts.push(format!("GCD={:X}", r.gcd));
+            seq_parts.push(format!("ISR={:X}", r.isr));
+        }
+        if !self.seq.ti.is_empty() {
+            seq_parts.push(format!("TI={}", self.seq.ti));
+        }
         // CI = IP-ID class across the closed-port responses (T5–T7).
         let ci_ids: Vec<u16> = self
             .t
@@ -321,10 +329,16 @@ impl SuiteResult {
             .map(|r| r.ip_id)
             .collect();
         let ci = crate::nmap_fp::ip_id_class(&ci_ids);
-        lines.push(format!(
-            "SEQ(SP={}%GCD={}%ISR={}%TI={}%CI={}%TS={})",
-            sp, gcd, isr, self.seq.ti, ci, self.seq.ts
-        ));
+        if !ci.is_empty() {
+            seq_parts.push(format!("CI={}", ci));
+        }
+        if !self.seq.ii.is_empty() {
+            seq_parts.push(format!("II={}", self.seq.ii));
+        }
+        if !self.seq.ts.is_empty() {
+            seq_parts.push(format!("TS={}", self.seq.ts));
+        }
+        lines.push(format!("SEQ({})", seq_parts.join("%")));
 
         // T2–T7 coded lines.
         for r in &self.t {
@@ -679,6 +693,7 @@ fn send_ie(src: Ipv4Addr, dst: Ipv4Addr, timeout: Duration) -> IeResult {
                             responded: true,
                             ttl: pkt.get_ttl(),
                             df: df_set,
+                            ip_id: pkt.get_identification(),
                         });
                         return;
                     }
@@ -826,7 +841,7 @@ fn run_seq(src: Ipv4Addr, dst: Ipv4Addr, open_port: u16, timeout: Duration) -> S
 
     // TS rate from the first/last TSval samples.
     let ts = if !ts_supported {
-        "U"
+        "U".to_string()
     } else if tsvals.len() >= 2 {
         let (v0, t0) = tsvals[0];
         let (v1, t1) = *tsvals.last().unwrap();
@@ -838,7 +853,8 @@ fn run_seq(src: Ipv4Addr, dst: Ipv4Addr, open_port: u16, timeout: Duration) -> S
         crate::nmap_fp::ts_field(true, tsvals.iter().all(|(v, _)| *v == 0), None)
     };
 
-    SeqInfo { seq, ti, ts }
+    // II is filled by the caller from the two IE probes.
+    SeqInfo { seq, ti, ii: "", ts }
 }
 
 /// Run the full secondary suite. `open_port` must be an open TCP port;
@@ -915,9 +931,16 @@ pub fn run_suite(
     result.ecn = Some(ecn);
 
     result.u1 = send_u1(src, dst, closed_udp_port, per_probe_timeout);
-    result.ie = send_ie(src, dst, per_probe_timeout);
+    // nmap sends TWO ICMP echoes for the IE test; the pair's IP-IDs give
+    // the II class.
+    let ie1 = send_ie(src, dst, per_probe_timeout);
+    let ie2 = send_ie(src, dst, per_probe_timeout);
+    result.ie = ie1.clone();
     // SEQ line (6 open-port SYNs) — ISN math + IP-ID/timestamp classes.
     result.seq = run_seq(src, dst, open_port, per_probe_timeout);
+    if ie1.responded && ie2.responded {
+        result.seq.ii = crate::nmap_fp::ip_id_class(&[ie1.ip_id, ie2.ip_id]);
+    }
 
     Some(result)
 }
@@ -990,7 +1013,7 @@ mod tests {
         s.t.push(TResult { name: "T2", responded: false, df: false, ttl: 0, window: 0, flags: 0, ..Default::default() });
         s.ecn = Some(TResult { name: "ECN", responded: true, df: false, ttl: 64, window: 3, flags: TcpFlags::SYN | TcpFlags::ACK | TcpFlags::ECE, ..Default::default() });
         s.u1 = U1Result { responded: true, ttl: 64 };
-        s.ie = IeResult { responded: true, ttl: 64, df: true };
+        s.ie = IeResult { responded: true, ttl: 64, df: true, ip_id: 0 };
         let d = s.diagnostic();
         assert!(d.contains("T2(R=N)"), "{}", d);
         assert!(d.contains("ECN(R=Y"), "{}", d);

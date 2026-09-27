@@ -76,14 +76,20 @@ pub fn seq_analysis(isns: &[u32], times_us: &[u64]) -> Option<SeqResult> {
         (8.0 * avg_rate.log2()).round() as u32
     };
 
-    // SP: std-dev of the GCD-normalized diffs, log-scaled. nmap only
-    // reports SP when it has ≥4 samples; with fewer it stays 0.
-    let sp = if isns.len() >= 4 {
-        let norm: Vec<f64> = diffs.iter().map(|&d| d as f64 / g as f64).collect();
-        let mean = norm.iter().sum::<f64>() / norm.len() as f64;
-        let var = norm.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / norm.len() as f64;
+    // SP: standard deviation of the **rate** values (not the raw diffs),
+    // divided by GCD only when GCD > 9 — exactly as nmap. nmap reports SP
+    // only with ≥4 responses; sample variance (n-1); SP=0 if stddev ≤ 1.
+    let sp = if isns.len() >= 4 && rates.len() >= 2 {
+        let sp_vals: Vec<f64> = if g > 9 {
+            rates.iter().map(|r| r / g as f64).collect()
+        } else {
+            rates.clone()
+        };
+        let mean = sp_vals.iter().sum::<f64>() / sp_vals.len() as f64;
+        let var = sp_vals.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
+            / (sp_vals.len() as f64 - 1.0);
         let sd = var.sqrt();
-        if sd < 1.0 {
+        if sd <= 1.0 {
             0
         } else {
             (8.0 * sd.log2()).round() as u32
@@ -185,22 +191,19 @@ pub fn ip_id_class(ids: &[u16]) -> &'static str {
     }
 }
 
-/// nmap TS field: timestamp-option rate class.
-///   U = option not supported, 0 = present but always zero,
-///   1/7/8 = ~2/100/200 Hz clocks, A = other.
-pub fn ts_field(supported: bool, always_zero: bool, hz: Option<f64>) -> &'static str {
+/// nmap TS field: timestamp-option rate class = `round(log2(freq))` in
+/// uppercase hex (so ~2 Hz → "1", ~100 Hz → "7", ~200 Hz → "8", ~1000 Hz
+/// → "A"). `U` = option not supported, `0` = present but always zero.
+pub fn ts_field(supported: bool, always_zero: bool, hz: Option<f64>) -> String {
     if !supported {
-        return "U";
+        return "U".to_string();
     }
     if always_zero {
-        return "0";
+        return "0".to_string();
     }
     match hz {
-        Some(h) if h < 5.66 => "1",  // ~2 Hz
-        Some(h) if h < 70.0 => "7",  // ~100 Hz (BSD-ish)
-        Some(h) if h < 150.0 => "8", // ~200 Hz
-        Some(_) => "A",
-        None => "U",
+        Some(h) if h >= 1.0 => format!("{:X}", h.log2().round() as u32),
+        _ => "U".to_string(),
     }
 }
 
@@ -326,9 +329,10 @@ mod tests {
     fn ts_classes() {
         assert_eq!(ts_field(false, false, None), "U");
         assert_eq!(ts_field(true, true, None), "0");
-        assert_eq!(ts_field(true, false, Some(2.0)), "1");
-        assert_eq!(ts_field(true, false, Some(100.0)), "8");
-        assert_eq!(ts_field(true, false, Some(250.0)), "A");
+        assert_eq!(ts_field(true, false, Some(2.0)), "1");   // log2(2)=1
+        assert_eq!(ts_field(true, false, Some(100.0)), "7"); // round(log2 100)=7
+        assert_eq!(ts_field(true, false, Some(250.0)), "8"); // round(log2 250)=8
+        assert_eq!(ts_field(true, false, Some(1000.0)), "A"); // round(log2 1000)=10=A
     }
 
     #[test]
