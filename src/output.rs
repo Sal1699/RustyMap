@@ -147,6 +147,19 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
     };
     println!("Host is up ({}s latency).", lat_str);
 
+    // IPv6 address-structure intelligence — a RustyMap strength (#6):
+    // the v6 IID leaks how the host got its address (and often its MAC).
+    if let std::net::IpAddr::V6(v6) = host.target.ip {
+        if !v6.is_loopback() {
+            println!("IPv6 address intel: {}", crate::ipv6_intel::summary(v6));
+            if verbose > 0 {
+                for n in crate::ipv6_intel::analyze(v6).notes {
+                    println!("  {}", n);
+                }
+            }
+        }
+    }
+
     if let Some(os) = &host.os {
         let ttl_s = os.ttl.map(|t| format!(" TTL={}", t)).unwrap_or_default();
         println!("OS guess: {} (confidence {}%{})", os.family, os.confidence, ttl_s);

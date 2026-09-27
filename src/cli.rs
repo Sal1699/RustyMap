@@ -116,6 +116,12 @@ pub struct Cli {
     #[arg(short = 'b', long = "ftp-bounce", value_name = "RELAY")]
     pub ftp_bounce: Option<String>,
 
+    /// QUIC / HTTP-3 detection scan: probe the target's UDP port(s) with a
+    /// QUIC Version-Negotiation trigger and enumerate supported QUIC
+    /// versions. Uses `-p` (default 443 when only TCP ports were given).
+    #[arg(long = "quic")]
+    pub quic: bool,
+
     /// SCTP INIT ping for host discovery — `-PY` in nmap.
     #[arg(long = "PY", value_name = "PORT", default_value = "")]
     pub ping_sctp: String,

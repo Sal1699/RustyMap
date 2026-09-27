@@ -19,6 +19,7 @@ mod icmp_ping;
 mod idle_scan;
 mod iflist;
 mod ip_proto_scan;
+mod ipv6_intel;
 mod json_out;
 mod kernel_guard;
 mod log;
@@ -34,6 +35,7 @@ mod ports;
 mod profile;
 mod privilege;
 mod proxy;
+mod quic_probe;
 mod rate;
 mod raw_scan;
 mod report;
@@ -694,6 +696,28 @@ async fn main() -> Result<()> {
         let timeout = std::time::Duration::from_secs(8);
         let fp = cloud_fingerprint::fingerprint(&host, timeout).await?;
         cloud_fingerprint::print_report(&fp);
+        return Ok(());
+    }
+    if args.quic {
+        let dur = args.timeout();
+        let parsed = ports::parse_ports(&args.ports).unwrap_or_default();
+        // A huge default port set (-p 1-1000) makes no sense for QUIC; fall
+        // back to 443 unless the user gave a small explicit list.
+        let udp_ports: Vec<u16> = if parsed.is_empty() || parsed.len() > 50 {
+            vec![443]
+        } else {
+            parsed
+        };
+        let targets = target::expand_targets(&args.targets, !args.no_dns).await?;
+        for t in &targets {
+            let mut hits = Vec::new();
+            for &p in &udp_ports {
+                if let Some(info) = quic_probe::probe(t.ip, p, dur).await {
+                    hits.push(info);
+                }
+            }
+            quic_probe::print_report(&t.display(), &hits);
+        }
         return Ok(());
     }
     if let Some(relay_spec) = &args.ftp_bounce {

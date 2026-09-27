@@ -38,8 +38,16 @@ impl RstGuard {
     }
 }
 
-/// `iptables`/`nft` argument vectors for adding/removing the RST-drop rule
-/// scoped to `dst`. Pure (no execution) so it can be unit-tested.
+/// Source-port range our raw probes use (`send_tcp_probe` /
+/// `capture_seq_sample` / `tcp_fp::probe` all draw from 40000..60000).
+/// Scoping the RST drop to this range means we suppress **only our own**
+/// probe RSTs, never the kernel's legitimate RSTs for real connections.
+const PROBE_SPORT_LO: u16 = 40000;
+const PROBE_SPORT_HI: u16 = 60000;
+
+/// `iptables`/`ip6tables` argument vectors for adding/removing the
+/// RST-drop rule, scoped to `dst` **and** our probe source-port range.
+/// Pure (no execution) so it can be unit-tested.
 pub fn iptables_args(dst: &str, add: bool) -> Vec<String> {
     // -I inserts (add), -D deletes; same match otherwise.
     let op = if add { "-I" } else { "-D" };
@@ -50,6 +58,8 @@ pub fn iptables_args(dst: &str, add: bool) -> Vec<String> {
         "tcp".to_string(),
         "-d".to_string(),
         dst.to_string(),
+        "--sport".to_string(),
+        format!("{}:{}", PROBE_SPORT_LO, PROBE_SPORT_HI),
         "--tcp-flags".to_string(),
         "RST".to_string(),
         "RST".to_string(),
@@ -58,10 +68,18 @@ pub fn iptables_args(dst: &str, add: bool) -> Vec<String> {
     ]
 }
 
-/// `nft add rule` fragment (inet filter output …) scoped to `dst`.
+/// Name of the dedicated nftables table we create so cleanup is a single
+/// atomic `delete table` (deleting an individual nft rule needs its
+/// runtime handle, which the old `delete rule <spec>` form couldn't do).
+const NFT_TABLE: &str = "rustymap_guard";
+
+/// The nft `rule` body scoped to `dst` + our probe source-port range.
 pub fn nft_rule(dst: &str) -> String {
     let proto = if dst.contains(':') { "ip6" } else { "ip" };
-    format!("{} daddr {} tcp flags rst drop", proto, dst)
+    format!(
+        "{} daddr {} tcp sport {}-{} tcp flags rst drop",
+        proto, dst, PROBE_SPORT_LO, PROBE_SPORT_HI
+    )
 }
 
 /// Install the guard for `dst`. Returns an inert guard on any platform
@@ -84,17 +102,39 @@ pub fn guard_for(dst: IpAddr) -> RstGuard {
         }
     }
 
-    // Fall back to nftables.
+    // Fall back to nftables with a DEDICATED table so cleanup is one
+    // atomic `delete table` (no per-rule handle bookkeeping).
     let rule = nft_rule(&dst_s);
-    let add_nft = format!("add rule inet filter output {}", rule);
-    if let Ok(out) = Command::new("nft").args(add_nft.split_whitespace()).output() {
-        if out.status.success() {
-            let del = format!("delete rule inet filter output {}", rule);
-            let mut remove = vec!["nft".to_string()];
-            remove.extend(del.split_whitespace().map(String::from));
+    // A single `nft -f -` script: create table + hooked chain + rule.
+    let script = format!(
+        "add table inet {t}\n\
+         add chain inet {t} output {{ type filter hook output priority 0; }}\n\
+         add rule inet {t} output {rule}\n",
+        t = NFT_TABLE,
+        rule = rule
+    );
+    use std::io::Write as _;
+    if let Ok(mut child) = std::process::Command::new("nft")
+        .args(["-f", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(script.as_bytes());
+        }
+        if matches!(child.wait(), Ok(s) if s.success()) {
+            let remove = vec![
+                "nft".to_string(),
+                "delete".to_string(),
+                "table".to_string(),
+                "inet".to_string(),
+                NFT_TABLE.to_string(),
+            ];
             return RstGuard {
                 remove: Some(remove),
-                note: format!("kernel-RST guard active (nft rule on {})", dst_s),
+                note: format!("kernel-RST guard active (nft table {} on {})", NFT_TABLE, dst_s),
             };
         }
     }

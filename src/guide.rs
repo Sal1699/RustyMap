@@ -79,12 +79,17 @@ pub fn print_guide() {
     line("                      un relay FTP ([user:pass@]host[:port]). Rileva");
     line("                      relay bounce-capable (misconfig); i server moderni");
     line("                      rifiutano (bene)");
+    line("--quic                Scan QUIC/HTTP-3 (UDP): Version-Negotiation trigger");
+    line("                      → rileva server HTTP/3 ed enumera le versioni QUIC");
     line("--PY [PORT]           SCTP INIT ping (host discovery; default port 80)");
     line("--PM                  ICMP Address Mask ping (type 17)");
     line("--PO PROTO            IP-protocol ping (1=ICMP, 17=UDP, 132=SCTP, 47=GRE)");
     line("--ttl N               IP TTL custom (alias di --ip-ttl)");
     line("fe80::1%eth0          IPv6 link-local con zone-ID — supportato come target");
-    line("--os-fp-v6 HOST       IPv6 OS fingerprint best-effort (Linux/Windows/BSD/network)");
+    line("--os-fp-v6 HOST       IPv6 OS fingerprint (probe SYN/ACK raw → classifier");
+    line("                      stack window-scale/TS/SACK + hop-limit). Ogni target");
+    line("                      IPv6 mostra anche 'IPv6 address intel': EUI-64→MAC→");
+    line("                      vendor, privacy RFC4941, Teredo/6to4, low-byte manuale");
     line("--os-fp-v6-port N     Probe port per --os-fp-v6 (default 80)");
     line("--checkpoint F.state  Salva progress dello scan in F.state per resume");
     line("--resume-from F.state Riprende uno scan da un checkpoint file");

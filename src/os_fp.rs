@@ -417,6 +417,9 @@ fn refine_from_tcp_fp(host: &HostResult, guess: &mut OsGuess, timeout: Duration)
     let mut ttl = guess.ttl.unwrap_or(0);
     if let Some(fp) = crate::tcp_fp::probe(src, v4, port, probe_to) {
         guess.hints.push(format!("tcp-fp: {}", fp.summary()));
+        if !fp.modern.is_empty() {
+            guess.hints.push(format!("modern TCP: {}", fp.modern.join(", ")));
+        }
 
         // Secondary probe suite (T2–T7 / ECN / ICMP-IE / UDP-U1). Only
         // runs when raw sockets are available (run_suite returns None

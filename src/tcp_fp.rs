@@ -56,6 +56,9 @@ pub struct TcpFingerprint {
     /// Initial sequence number from the SYN/ACK — sampled across several
     /// probes for ISN-predictability analysis.
     pub isn: u32,
+    /// Modern TCP options present in the SYN/ACK (TFO / MPTCP / TCP-AO /
+    /// User Timeout) — 2020s-stack signals nmap's classic engine ignores.
+    pub modern: Vec<&'static str>,
 }
 
 impl TcpFingerprint {
@@ -260,6 +263,45 @@ pub fn probe_isn_class(
     }
 }
 
+/// Detect modern TCP options that nmap's classic fingerprint ignores but
+/// that strongly characterise a 2020s stack (#1 — modern fields):
+///   - kind 34 → TCP Fast Open (RFC 7413)
+///   - kind 30 → Multipath TCP (RFC 8684)
+///   - kind 29 → TCP Authentication Option (RFC 5925)
+///   - kind 28 → User Timeout (RFC 5482)
+/// Returns the human names present, in wire order.
+pub fn modern_tcp_features(buf: &[u8]) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < buf.len() {
+        match buf[i] {
+            0 => break, // EOL
+            1 => {
+                i += 1;
+                continue;
+            } // NOP
+            k => {
+                if i + 1 >= buf.len() {
+                    break;
+                }
+                let len = buf[i + 1] as usize;
+                if len < 2 || i + len > buf.len() {
+                    break;
+                }
+                match k {
+                    34 => out.push("TCP Fast Open"),
+                    30 => out.push("Multipath TCP"),
+                    29 => out.push("TCP-AO (auth)"),
+                    28 => out.push("User Timeout"),
+                    _ => {}
+                }
+                i += len;
+            }
+        }
+    }
+    out
+}
+
 /// Encode the captured options into the compact nmap-style notation.
 pub(crate) fn encode_options(buf: &[u8]) -> String {
     let mut out = String::new();
@@ -432,6 +474,7 @@ pub fn probe(
                     df: false,
                     round_trip_us: probe_t0.elapsed().as_micros() as u64,
                     isn: reply.get_sequence(),
+                    modern: modern_tcp_features(opts_slice),
                 };
                 return Some(fp);
             }
@@ -503,6 +546,7 @@ mod tests {
             df: true,
             round_trip_us: 0,
             isn: 0,
+            modern: vec![],
         };
         assert_eq!(fp.summary(), "T1 W=0xffff O=M5B4NW7L TTL=64 DF=true");
     }
@@ -526,8 +570,18 @@ mod tests {
         assert_eq!(parse_wscale("M5B4NW7"), Some(7));
     }
 
+    #[test]
+    fn modern_options_detected() {
+        // TFO cookie request: kind 34, len 2.
+        assert_eq!(modern_tcp_features(&[34u8, 2]), vec!["TCP Fast Open"]);
+        // NOP then MPTCP (kind 30, len 4).
+        assert_eq!(modern_tcp_features(&[1u8, 30, 4, 0, 0]), vec!["Multipath TCP"]);
+        // Plain MSS → nothing modern.
+        assert!(modern_tcp_features(&[2u8, 4, 0x05, 0xB4]).is_empty());
+    }
+
     fn fp(win: u16, opts: &str) -> TcpFingerprint {
-        TcpFingerprint { src_port: 0, window: win, options: opts.into(), ttl: 0, df: true, round_trip_us: 0, isn: 0 }
+        TcpFingerprint { src_port: 0, window: win, options: opts.into(), ttl: 0, df: true, round_trip_us: 0, isn: 0, modern: vec![] }
     }
 
     #[test]

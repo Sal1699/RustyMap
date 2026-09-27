@@ -4,6 +4,60 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.73.0] - 2026-09-27
+
+Second breadth pass over the six detection areas, led by **IPv6 as a
+first-class strength**. Pure logic is unit-tested; raw-socket paths stay
+experimental until Kali-root validated.
+
+### Added / improved
+- **#6 (headline) — IPv6 address intelligence (`ipv6_intel.rs`).** A v6 IID
+  is not opaque: RustyMap now decodes it on *every* IPv6 target and prints an
+  `IPv6 address intel:` line —
+  - **EUI-64 → embedded MAC → NIC vendor** (via `device_fp::vendor_from_mac`):
+    leaks the real hardware through a firewall;
+  - **privacy/temporary** (RFC 4941/8981) — random IID, MAC hidden;
+  - **low-byte / manually configured** (`::1`, `::443`) — hand-assigned server;
+  - **Teredo** (decodes server + client IPv4) and **6to4** (site IPv4);
+  - scope/class: loopback, link-local, ULA, multicast, documentation.
+  Plus the raw IPv6 SYN/ACK stack classifier from 0.72 stays. nmap has no
+  equivalent address-structure analysis.
+- **#1 — modern fingerprint fields.** `tcp_fp::modern_tcp_features` detects
+  **TCP Fast Open** (kind 34), **Multipath TCP** (30), **TCP-AO** (29) and
+  **User Timeout** (28) in the SYN/ACK — 2020s-stack signals nmap's classic
+  engine ignores; surfaced on `-O` as `modern TCP: …`.
+- **#2 — service detection for 2020–2026 software (+30 signatures).** LLM
+  servers (Ollama, vLLM, TGI, LocalAI), vector DBs (Qdrant, Weaviate,
+  Meilisearch, Typesense), modern Redis forks (DragonflyDB, KeyDB, Valkey),
+  Redpanda, PocketBase/Supabase/Appwrite, Immich/Jellyfin/Uptime-Kuma/n8n,
+  SeaweedFS/Garage, oauth2-proxy/Pomerium, SigNoz/OpenObserve/Quickwit/Alloy,
+  Coolify/Dokploy/CapRover.
+- **#3 — new scan: QUIC/HTTP-3 detection (`--quic`, `quic_probe.rs`).** Sends
+  a QUIC Version-Negotiation trigger over UDP and enumerates the QUIC versions
+  a server speaks — HTTP/3 endpoints are invisible to every TCP scan. No
+  privileges required.
+- **#4 — built-in Rhai script library 63 → 101 (+38).** Modern-service
+  exposure checks (Ollama/Qdrant/Weaviate/Meilisearch/Typesense/PocketBase/
+  Supabase/Jellyfin/Immich/n8n/Uptime-Kuma/MinIO/SeaweedFS/Redpanda/Coolify/
+  Traefik/OpenObserve/SigNoz/Jaeger/Loki/VictoriaMetrics/node-exporter/
+  cAdvisor/Alloy/DragonflyDB·KeyDB·Valkey) and high-value web exposures
+  (`.env`, open dir listing, Swagger/OpenAPI, Spring Actuator, Apache
+  server-status, Laravel debug, `.DS_Store`, phpMyAdmin/Adminer, WordPress
+  detect + REST user-enum, Next.js, exposed Vite dev server). All pass the
+  `all_builtin_scripts_parse` gate.
+- **#5 — hardened `kernel_guard.rs`.** The RST-drop rule is now scoped to our
+  probe **source-port range (40000–60000)** as well as the target, so only
+  our own probe RSTs are suppressed (not the host's legitimate ones); the
+  nftables path uses a **dedicated table** deleted atomically on drop (the old
+  `nft delete rule` form couldn't clean up without a handle).
+- Guide synced (`--quic`, IPv6 intel, modern TCP fields).
+
+### Notes / validation
+- `--quic`, FTP bounce, RDP `-sV` and the 38 scripts are plain TCP/UDP — no
+  privileges. The IPv6 raw SYN/ACK probe and the OS suite need `sudo`.
+- Test suite green (pure logic for every new module unit-tested; the
+  builtin-script parser gate covers all 101 scripts).
+
 ## [0.72.0] - 2026-09-27
 
 A broad detection-parity release taking all six items from the nmap

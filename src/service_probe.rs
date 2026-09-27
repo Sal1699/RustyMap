@@ -523,6 +523,136 @@ static SIGS: Lazy<Vec<Signature>> = Lazy::new(|| {
             regex: Regex::new(r"(?i)Server:\s*restic|restic-server").unwrap(),
             product: Some("restic-server"), product_group: None, version_group: None, extra_group: None,
         },
+        // ── LLM / AI inference servers (2023–2026) ──
+        Signature {
+            regex: Regex::new(r"(?i)Ollama is running|Server:\s*ollama").unwrap(),
+            product: Some("Ollama (LLM server)"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r#"(?i)"object"\s*:\s*"list".*"owned_by".*vllm|Server:\s*vllm"#).unwrap(),
+            product: Some("vLLM (OpenAI-compatible LLM)"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)text-generation-inference/([\d.]+)?").unwrap(),
+            product: Some("HF Text Generation Inference"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)localai").unwrap(),
+            product: Some("LocalAI"), product_group: None, version_group: None, extra_group: None,
+        },
+        // ── Vector / search databases (2020–2026) ──
+        Signature {
+            regex: Regex::new(r#"(?i)"title"\s*:\s*"qdrant[^"]*".*"version"\s*:\s*"([\d.]+)"|Server:\s*qdrant"#).unwrap(),
+            product: Some("Qdrant (vector DB)"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*Meilisearch/?([\d.]+)?|X-Meili").unwrap(),
+            product: Some("Meilisearch"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r#"(?i)weaviate.*"version"\s*:\s*"([\d.]+)"|Server:\s*weaviate"#).unwrap(),
+            product: Some("Weaviate (vector DB)"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*typesense|X-Typesense").unwrap(),
+            product: Some("Typesense"), product_group: None, version_group: None, extra_group: None,
+        },
+        // ── Modern Redis-compatible caches ──
+        Signature {
+            regex: Regex::new(r"(?i)dragonfly_version|df_version|DragonflyDB").unwrap(),
+            product: Some("DragonflyDB"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)keydb_version|KeyDB").unwrap(),
+            product: Some("KeyDB"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)valkey_version|Valkey").unwrap(),
+            product: Some("Valkey"), product_group: None, version_group: None, extra_group: None,
+        },
+        // ── Streaming / messaging ──
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*Redpanda|redpanda").unwrap(),
+            product: Some("Redpanda (Kafka-compatible)"), product_group: None, version_group: None, extra_group: None,
+        },
+        // ── Backends / BaaS (2021–2026) ──
+        Signature {
+            regex: Regex::new(r"(?i)PocketBase|Server:\s*pocketbase").unwrap(),
+            product: Some("PocketBase"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*supabase|X-Supabase|supabase-js").unwrap(),
+            product: Some("Supabase"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)X-Appwrite|appwrite").unwrap(),
+            product: Some("Appwrite"), product_group: None, version_group: None, extra_group: None,
+        },
+        // ── Self-hosted media / dashboards (2020–2026) ──
+        Signature {
+            regex: Regex::new(r"(?i)Immich|X-Immich").unwrap(),
+            product: Some("Immich (photo server)"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Jellyfin/?([\d.]+)?|X-Jellyfin").unwrap(),
+            product: Some("Jellyfin"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Uptime Kuma").unwrap(),
+            product: Some("Uptime Kuma"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*n8n|X-N8n").unwrap(),
+            product: Some("n8n (workflow automation)"), product_group: None, version_group: None, extra_group: None,
+        },
+        // ── Object storage / edge ──
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*SeaweedFS/?([\d.]+)?").unwrap(),
+            product: Some("SeaweedFS"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*Garage/?([\d.]+)?").unwrap(),
+            product: Some("Garage (S3-compat store)"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        // ── Identity-aware proxies (zero-trust, 2020–2026) ──
+        Signature {
+            regex: Regex::new(r"(?i)oauth2[_-]proxy").unwrap(),
+            product: Some("oauth2-proxy"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)X-Pomerium|Server:\s*pomerium").unwrap(),
+            product: Some("Pomerium (zero-trust proxy)"), product_group: None, version_group: None, extra_group: None,
+        },
+        // ── Observability (next-gen) ──
+        Signature {
+            regex: Regex::new(r"(?i)SigNoz").unwrap(),
+            product: Some("SigNoz (observability)"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)OpenObserve|Server:\s*openobserve").unwrap(),
+            product: Some("OpenObserve"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)quickwit").unwrap(),
+            product: Some("Quickwit (log search)"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Grafana Alloy|Server:\s*alloy").unwrap(),
+            product: Some("Grafana Alloy (OTel collector)"), product_group: None, version_group: None, extra_group: None,
+        },
+        // ── PaaS control planes (2022–2026) ──
+        Signature {
+            regex: Regex::new(r"(?i)Coolify").unwrap(),
+            product: Some("Coolify (self-hosted PaaS)"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Dokploy").unwrap(),
+            product: Some("Dokploy"), product_group: None, version_group: None, extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)CapRover").unwrap(),
+            product: Some("CapRover"), product_group: None, version_group: None, extra_group: None,
+        },
     ]
 });
 
