@@ -449,17 +449,26 @@ impl SuiteResult {
             lines.push(r.fields(None).line());
         }
 
-        // ECN with the CC field.
+        // ECN line — canonical nmap fields only: R/DF/T/W/O/CC/Q (no S/A/F/RD,
+        // which belong to T1–T7, not ECN — lab bug B24).
         if let Some(e) = &self.ecn {
-            let cc = if e.responded {
-                Some(crate::nmap_fp::ecn_cc(
+            lines.push(if e.responded {
+                let cc = crate::nmap_fp::ecn_cc(
                     e.flags & TcpFlags::ECE != 0,
                     e.flags & TcpFlags::CWR != 0,
-                ))
+                );
+                format!(
+                    "ECN(R=Y%DF={}%T={:X}%W={:X}%O={}%CC={}%Q={})",
+                    if e.df { "Y" } else { "N" },
+                    e.ttl,
+                    e.window,
+                    e.opts,
+                    cc,
+                    e.quirks,
+                )
             } else {
-                None
-            };
-            lines.push(e.fields(cc).line());
+                "ECN(R=N)".to_string()
+            });
         }
 
         // IE (ICMP echo) — R / DFI / CD / T, like nmap.
@@ -1024,42 +1033,44 @@ fn capture_seq_sample(
 /// Six SYN probes to the open port → SEQ line (GCD/ISR/SP), TI (IP-ID
 /// class) and TS (timestamp rate class). nmap's Probe #1–#6.
 fn run_seq(src: Ipv4Addr, dst: Ipv4Addr, open_port: u16, timeout: Duration) -> SeqInfo {
+    // Use a single monotonic clock and record each sample's *global* capture
+    // time (µs from start) — the per-probe RTT used before gave an inaccurate
+    // dt and skewed the TS rate (lab bug B23).
+    let start = std::time::Instant::now();
     let mut isns = Vec::new();
     let mut ids = Vec::new();
+    let mut gtimes = Vec::new();
     let mut tsvals = Vec::new();
-    let mut times = Vec::new();
     let mut ts_supported = false;
     for _ in 0..6 {
-        if let Some((isn, id, tsval, t)) = capture_seq_sample(src, dst, open_port, timeout) {
+        if let Some((isn, id, tsval, _rtt)) = capture_seq_sample(src, dst, open_port, timeout) {
+            let now = start.elapsed().as_micros() as u64;
             isns.push(isn);
             ids.push(id);
-            times.push(t);
+            gtimes.push(now);
             if let Some(v) = tsval {
                 ts_supported = true;
-                tsvals.push((v, t));
+                tsvals.push((v, now));
             }
         }
         std::thread::sleep(Duration::from_millis(110));
     }
-    // Times are per-probe elapsed; make them a monotonic timeline.
-    let mut clock = 0u64;
-    let mut timeline = Vec::with_capacity(times.len());
-    for (i, _t) in times.iter().enumerate() {
-        clock += 110_000 + times[i];
-        timeline.push(clock);
-    }
-    let seq = crate::nmap_fp::seq_analysis(&isns, &timeline);
+    let seq = crate::nmap_fp::seq_analysis(&isns, &gtimes);
     let ti = crate::nmap_fp::ip_id_class(&ids);
 
-    // TS rate from the first/last TSval samples.
+    // TS rate from the first/last TSval samples over the accurate elapsed time.
     let ts = if !ts_supported {
         "U".to_string()
     } else if tsvals.len() >= 2 {
         let (v0, t0) = tsvals[0];
         let (v1, t1) = *tsvals.last().unwrap();
-        let dt = (t1.saturating_sub(t0)) as f64 / 1_000_000.0 + 0.11 * (tsvals.len() - 1) as f64;
+        let dt = (t1.saturating_sub(t0)) as f64 / 1_000_000.0;
         let always_zero = tsvals.iter().all(|(v, _)| *v == 0);
-        let hz = if dt > 0.0 { Some((v1.wrapping_sub(v0) as f64) / dt) } else { None };
+        let hz = if dt > 0.0 {
+            Some((v1.wrapping_sub(v0) as f64) / dt)
+        } else {
+            None
+        };
         crate::nmap_fp::ts_field(true, always_zero, hz)
     } else {
         crate::nmap_fp::ts_field(true, tsvals.iter().all(|(v, _)| *v == 0), None)

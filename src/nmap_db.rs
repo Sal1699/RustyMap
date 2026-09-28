@@ -217,17 +217,27 @@ pub fn match_fingerprint(observed: &HashMap<String, TestFields>) -> Vec<(&'stati
         let mut matched: u32 = 0;
         let mut total: u32 = 0;
         for (test, obs_fields) in observed {
-            let Some(ref_fields) = e.tests.get(test) else { continue };
             for (field, obs_val) in obs_fields {
-                let Some(ref_expr) = ref_fields.get(field) else { continue };
-                let w = mp
-                    .and_then(|m| m.get(test))
-                    .and_then(|t| t.get(field))
-                    .copied()
-                    .unwrap_or(1);
+                // Denominator = every observed field's weight (nmap uses the
+                // SUBJECT's total points, not just the overlap). A reference
+                // that doesn't constrain a field we observed therefore scores
+                // *lower*, so dense real-OS entries beat sparse embedded ones
+                // (lab bug B25). Skip fields with no MatchPoints weight when a
+                // weight table is loaded.
+                let w = match mp.and_then(|m| m.get(test)).and_then(|t| t.get(field)) {
+                    Some(&w) => w,
+                    None => {
+                        if mp.is_some() {
+                            continue;
+                        }
+                        1
+                    }
+                };
                 total += w;
-                if field_matches(obs_val, ref_expr) {
-                    matched += w;
+                if let Some(ref_expr) = e.tests.get(test).and_then(|rf| rf.get(field)) {
+                    if field_matches(obs_val, ref_expr) {
+                        matched += w;
+                    }
                 }
             }
         }

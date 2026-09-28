@@ -161,10 +161,15 @@ pub fn ecn_cc(ece: bool, cwr: bool) -> char {
     }
 }
 
-/// nmap TI/CI/II field: IP-ID generation algorithm from a sample series.
-///   Z = all zero, I = sequential (small increments),
-///   BI = broken big-endian increment, RI = random positive increment,
-///   RD = fully random.
+/// nmap TI/CI/II field: IP-ID generation algorithm from a sample series,
+/// following nmap's exact classification order:
+///   Z  = all zero
+///   RD = any increment ≥ 20000 (fully randomized) — checked *before* RI
+///   C  = all identical (constant, non-zero)
+///   RI = all increments > 1000 (random positive increments)
+///   BI = all increments divisible by 256 and ≤ 5120 (broken byte order)
+///   I  = all increments < 10 (sequential)
+///   "" = otherwise (omitted)
 pub fn ip_id_class(ids: &[u16]) -> &'static str {
     if ids.len() < 2 {
         return "";
@@ -176,19 +181,24 @@ pub fn ip_id_class(ids: &[u16]) -> &'static str {
         .windows(2)
         .map(|w| (w[1] as i32 - w[0] as i32).rem_euclid(65536) as u32)
         .collect();
+    // A single large jump means the IP-ID is randomized (nmap checks this
+    // ahead of the incremental cases — lab bug B22: Slirp was mis-flagged RI).
+    if diffs.iter().any(|&d| d >= 20000) {
+        return "RD";
+    }
     if diffs.iter().all(|&d| d == 0) {
-        return "C"; // constant (non-zero) — nmap folds this into "C"
+        return "C";
     }
-    let max = *diffs.iter().max().unwrap();
-    if diffs.iter().all(|&d| d <= 9) {
-        "I" // incremental
-    } else if diffs.iter().all(|&d| d % 256 == 0) {
-        "BI" // broken (byte-swapped) incremental
-    } else if max > 1000 {
-        "RI" // random positive increments
-    } else {
-        "RD" // random / difficult
+    if diffs.iter().all(|&d| d > 1000) {
+        return "RI";
     }
+    if diffs.iter().all(|&d| d != 0 && d % 256 == 0) && diffs.iter().all(|&d| d <= 5120) {
+        return "BI";
+    }
+    if diffs.iter().all(|&d| d < 10) {
+        return "I";
+    }
+    ""
 }
 
 /// nmap TS field: timestamp-option rate class = `round(log2(freq))` in
@@ -320,7 +330,10 @@ mod tests {
     fn ip_id_classification() {
         assert_eq!(ip_id_class(&[0, 0, 0]), "Z");
         assert_eq!(ip_id_class(&[10, 11, 12, 13]), "I"); // +1 increments
-        assert_eq!(ip_id_class(&[100, 40000, 5000, 61000]), "RI"); // large random
+        // A ≥20000 jump → RD (randomized), checked before RI (B22 fix).
+        assert_eq!(ip_id_class(&[100, 40000, 5000, 61000]), "RD");
+        // All increments > 1000 but < 20000 → RI.
+        assert_eq!(ip_id_class(&[100, 2000, 4500, 7200]), "RI");
         assert_eq!(ip_id_class(&[256, 512, 768]), "BI"); // multiples of 256
         assert_eq!(ip_id_class(&[42]), "");
     }

@@ -4,6 +4,37 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.77.1] - 2026-09-28
+
+Fixes from the v0.77.0 lab validation. The report confirmed the U1 quoted
+fields (10/10) and IE DFI/CD (4/4) are **byte-identical** to `nmap -O -d`, and
+SP/ISR land in nmap's range — the four fixes below close the residual deltas.
+
+### Fixed
+- **B25 (os-db ranking, MEDIUM).** The matcher denominator only counted
+  fields present in *both* the observed and reference fingerprints, so a
+  sparse embedded signature could score 95% by matching its few fields
+  (localhost ranked "Adtran 424RG 95%" over "Linux 6.X"). It now uses the
+  **subject's full field weight as the denominator** (nmap's method): a
+  reference that doesn't constrain a field we observed scores *lower*, so
+  dense real-OS entries win.
+- **B22 (SEQ TI/CI/II, MEDIUM).** `ip_id_class` now checks nmap's order —
+  **a ≥20000 IP-ID jump is `RD` (randomized), tested before `RI`** — fixing
+  the Slirp NAT `RI` vs nmap `RD` mismatch. RI/BI/I thresholds aligned to the
+  nmap reference.
+- **B24 (ECN format, LOW).** The ECN line emitted `S/A/F/RD` (which belong to
+  T1–T7, not ECN). It now emits nmap's canonical ECN fields only:
+  `R/DF/T/W/O/CC/Q`.
+- **B23 (SEQ TS, LOW).** The timestamp rate used inaccurate per-probe RTTs for
+  its time delta; it now uses accurate global capture timestamps, tightening
+  TS toward nmap (still sampling-dependent, like SP/ISR).
+
+### Confirmed working (from the report)
+- U1 IPL/UN/RIPL/RID/RIPCK/RUCK/RUD and IE DFI/CD byte-identical to nmap on
+  localhost and the Slirp gateway; T2–T7 byte-identical; SP/ISR in range;
+  GCD/CI/II match. On 10.0.2.2 both RustyMap+DB and nmap top-match "AT&T
+  BGW210" and RustyMap's heuristic separately flags the Slirp NAT.
+
 ## [0.77.0] - 2026-09-27
 
 Adds the full **nmap-os-db probabilistic matching engine** — the last
