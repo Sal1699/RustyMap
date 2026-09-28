@@ -274,6 +274,12 @@ pub struct SeqInfo {
     pub ii: &'static str,
     /// TS — timestamp-option rate class (nmap `round(log2(freq))` in hex).
     pub ts: String,
+    /// OPS line body: `O1=..%O2=..%…%O6=..` (server SYN/ACK options per probe).
+    pub ops: String,
+    /// WIN line body: `W1=..%…%W6=..` (server SYN/ACK window per probe, hex).
+    pub win: String,
+    /// T1 line body (probe #1's response: R/DF/T/W/S/A/F/O/RD/Q).
+    pub t1: String,
 }
 
 /// Everything the secondary suite gathered.
@@ -444,7 +450,19 @@ impl SuiteResult {
         }
         lines.push(format!("SEQ({})", seq_parts.join("%")));
 
-        // T2–T7 coded lines.
+        // OPS / WIN (the 6 SEQ probes' response options and windows) — the
+        // most discriminating fields for os-db matching.
+        if !self.seq.ops.is_empty() {
+            lines.push(format!("OPS({})", self.seq.ops));
+        }
+        if !self.seq.win.is_empty() {
+            lines.push(format!("WIN({})", self.seq.win));
+        }
+
+        // T1 (probe #1's response), then T2–T7 coded lines.
+        if !self.seq.t1.is_empty() {
+            lines.push(format!("T1({})", self.seq.t1));
+        }
         for r in &self.t {
             lines.push(r.fields(None).line());
         }
@@ -962,26 +980,58 @@ fn parse_tsval(opts: &[u8]) -> Option<u32> {
     None
 }
 
-/// One SEQ sample from an open-port SYN: (ISN, IP-ID, TSval, capture µs).
+/// One captured SEQ-probe SYN/ACK, with everything OPS/WIN/T1 need.
+#[derive(Clone, Default)]
+struct SeqSample {
+    isn: u32,
+    ip_id: u16,
+    tsval: Option<u32>,
+    window: u16,
+    opts: String,
+    seq_code: &'static str,
+    ack_code: &'static str,
+    flags: u8,
+    quirks: String,
+    rd: u32,
+    df: bool,
+    ttl: u8,
+}
+
+/// nmap's six SEQ probe specs: (options in wire order, encoded byte length,
+/// TCP window). Probe #6 deliberately omits window-scale, which is what makes
+/// its response's OPS (O6) differ from O1–O5.
+fn seq_probe_spec(idx: usize) -> (Vec<TcpOption>, usize, u16) {
+    let ts = || TcpOption::timestamp(0xFFFF_FFFF, 0);
+    match idx {
+        0 => (vec![TcpOption::wscale(10), TcpOption::nop(), TcpOption::mss(1460), ts(), TcpOption::sack_perm()], 20, 1),
+        1 => (vec![TcpOption::mss(1400), TcpOption::wscale(0), TcpOption::sack_perm(), ts()], 19, 63),
+        2 => (vec![ts(), TcpOption::nop(), TcpOption::nop(), TcpOption::wscale(5), TcpOption::nop(), TcpOption::mss(640)], 20, 4),
+        3 => (vec![TcpOption::sack_perm(), ts(), TcpOption::wscale(10)], 15, 4),
+        4 => (vec![TcpOption::mss(536), TcpOption::sack_perm(), ts(), TcpOption::wscale(10)], 19, 16),
+        _ => (vec![TcpOption::mss(265), TcpOption::sack_perm(), ts()], 16, 512),
+    }
+}
+
+/// Send SEQ probe `idx` and capture its SYN/ACK response fields.
 fn capture_seq_sample(
     src: Ipv4Addr,
     dst: Ipv4Addr,
     open_port: u16,
+    idx: usize,
     timeout: Duration,
-) -> Option<(u32, u16, Option<u32>, u64)> {
+) -> Option<SeqSample> {
     let (mut tx, mut rx) = transport_channel(4096, Layer3(IpNextHeaderProtocols::Tcp)).ok()?;
     let mut rng = rand::thread_rng();
     let src_port: u16 = rng.gen_range(40000..60000);
     let seq: u32 = rng.gen();
-    let opts = t_series_options();
-    let buf = build_ipv4_tcp(src, dst, src_port, open_port, seq, 0, TcpFlags::SYN, 1, 0, &opts, T_OPTS_LEN, false);
+    let (opts, opts_len, window) = seq_probe_spec(idx);
+    let buf = build_ipv4_tcp(src, dst, src_port, open_port, seq, 0, TcpFlags::SYN, window, 0, &opts, opts_len, false);
     let ip_pkt = Ipv4Packet::new(&buf)?;
-    let t0 = std::time::Instant::now();
     if tx.send_to(ip_pkt, IpAddr::V4(dst)).is_err() {
         return None;
     }
 
-    let (chan_tx, chan_rx) = mpsc::channel::<(u32, u16, Option<u32>, u64)>();
+    let (chan_tx, chan_rx) = mpsc::channel::<Option<SeqSample>>();
     thread::spawn(move || {
         let mut iter = ipv4_packet_iter(&mut rx);
         loop {
@@ -996,88 +1046,117 @@ fn capture_seq_sample(
                     if tcp.get_source() != open_port || tcp.get_destination() != src_port {
                         continue;
                     }
-                    // Only a SYN/ACK carries a usable ISN.
                     if tcp.get_flags() & TcpFlags::SYN == 0 {
-                        let _ = chan_tx.send((0, 0, None, 0));
+                        let _ = chan_tx.send(None); // RST = closed, no SYN/ACK
                         return;
                     }
                     let raw = tcp.packet();
                     let ol = (tcp.get_data_offset() as usize * 4).saturating_sub(20);
-                    let tsval = if raw.len() >= 20 + ol {
-                        parse_tsval(&raw[20..20 + ol])
-                    } else {
-                        None
-                    };
-                    let _ = chan_tx.send((
-                        tcp.get_sequence(),
-                        pkt.get_identification(),
-                        tsval,
-                        t0.elapsed().as_micros() as u64,
-                    ));
+                    let opt_bytes = if raw.len() >= 20 + ol { &raw[20..20 + ol] } else { &[][..] };
+                    let rflags = tcp.get_flags();
+                    let _ = chan_tx.send(Some(SeqSample {
+                        isn: tcp.get_sequence(),
+                        ip_id: pkt.get_identification(),
+                        tsval: parse_tsval(opt_bytes),
+                        window: tcp.get_window(),
+                        opts: crate::tcp_fp::encode_options(opt_bytes),
+                        // We sent ack=0, seq=`seq` in the SYN.
+                        seq_code: crate::nmap_fp::seq_field(tcp.get_sequence(), 0),
+                        ack_code: crate::nmap_fp::ack_field(tcp.get_acknowledgement(), seq),
+                        flags: rflags,
+                        quirks: crate::nmap_fp::quirks(tcp.get_reserved() != 0, tcp.get_urgent_ptr(), rflags & TcpFlags::URG != 0),
+                        rd: crate::nmap_fp::rst_data(tcp.payload()),
+                        df: pkt.get_flags() & Ipv4Flags::DontFragment != 0,
+                        ttl: pkt.get_ttl(),
+                    }));
                     return;
                 }
                 Err(_) => {
-                    let _ = chan_tx.send((0, 0, None, 0));
+                    let _ = chan_tx.send(None);
                     return;
                 }
             }
         }
     });
     match chan_rx.recv_timeout(timeout) {
-        Ok((isn, _, _, _)) if isn == 0 => None,
-        Ok(sample) => Some(sample),
+        Ok(s) => s,
         Err(_) => None,
     }
 }
 
-/// Six SYN probes to the open port → SEQ line (GCD/ISR/SP), TI (IP-ID
-/// class) and TS (timestamp rate class). nmap's Probe #1–#6.
+/// nmap's six SEQ probes (#1–#6, each with its own window + option set) →
+/// the SEQ line (GCD/ISR/SP, TI, TS), the OPS line (O1–O6 response options),
+/// the WIN line (W1–W6 response windows) and the T1 line (probe #1 fields).
 fn run_seq(src: Ipv4Addr, dst: Ipv4Addr, open_port: u16, timeout: Duration) -> SeqInfo {
-    // Use a single monotonic clock and record each sample's *global* capture
-    // time (µs from start) — the per-probe RTT used before gave an inaccurate
-    // dt and skewed the TS rate (lab bug B23).
+    // Single monotonic clock; record each responded sample's global capture
+    // time (µs) for an accurate ISR/TS rate (lab bug B23).
     let start = std::time::Instant::now();
-    let mut isns = Vec::new();
-    let mut ids = Vec::new();
-    let mut gtimes = Vec::new();
-    let mut tsvals = Vec::new();
-    let mut ts_supported = false;
-    for _ in 0..6 {
-        if let Some((isn, id, tsval, _rtt)) = capture_seq_sample(src, dst, open_port, timeout) {
-            let now = start.elapsed().as_micros() as u64;
-            isns.push(isn);
-            ids.push(id);
-            gtimes.push(now);
-            if let Some(v) = tsval {
-                ts_supported = true;
-                tsvals.push((v, now));
-            }
+    let mut samples: Vec<Option<SeqSample>> = Vec::with_capacity(6);
+    let mut gtimes: Vec<u64> = Vec::new();
+    for idx in 0..6 {
+        let s = capture_seq_sample(src, dst, open_port, idx, timeout);
+        if s.is_some() {
+            gtimes.push(start.elapsed().as_micros() as u64);
         }
+        samples.push(s);
         std::thread::sleep(Duration::from_millis(110));
     }
+
+    let responded: Vec<&SeqSample> = samples.iter().flatten().collect();
+    let isns: Vec<u32> = responded.iter().map(|s| s.isn).collect();
+    let ids: Vec<u16> = responded.iter().map(|s| s.ip_id).collect();
     let seq = crate::nmap_fp::seq_analysis(&isns, &gtimes);
     let ti = crate::nmap_fp::ip_id_class(&ids);
 
     // TS rate from the first/last TSval samples over the accurate elapsed time.
-    let ts = if !ts_supported {
+    let tsvals: Vec<(u32, u64)> = responded
+        .iter()
+        .zip(gtimes.iter())
+        .filter_map(|(s, &t)| s.tsval.map(|v| (v, t)))
+        .collect();
+    let ts = if tsvals.is_empty() {
         "U".to_string()
     } else if tsvals.len() >= 2 {
         let (v0, t0) = tsvals[0];
         let (v1, t1) = *tsvals.last().unwrap();
         let dt = (t1.saturating_sub(t0)) as f64 / 1_000_000.0;
         let always_zero = tsvals.iter().all(|(v, _)| *v == 0);
-        let hz = if dt > 0.0 {
-            Some((v1.wrapping_sub(v0) as f64) / dt)
-        } else {
-            None
-        };
+        let hz = if dt > 0.0 { Some((v1.wrapping_sub(v0) as f64) / dt) } else { None };
         crate::nmap_fp::ts_field(true, always_zero, hz)
     } else {
         crate::nmap_fp::ts_field(true, tsvals.iter().all(|(v, _)| *v == 0), None)
     };
 
-    // II is filled by the caller from the two IE probes.
-    SeqInfo { seq, ti, ii: "", ts }
+    // OPS (O1–O6) and WIN (W1–W6) from each probe's SYN/ACK.
+    let mut ops_parts = Vec::new();
+    let mut win_parts = Vec::new();
+    for (i, s) in samples.iter().enumerate() {
+        if let Some(s) = s {
+            ops_parts.push(format!("O{}={}", i + 1, s.opts));
+            win_parts.push(format!("W{}={:X}", i + 1, s.window));
+        }
+    }
+    let ops = ops_parts.join("%");
+    let win = win_parts.join("%");
+
+    // T1 reuses probe #1's response (full coded fields).
+    let t1 = match samples.first() {
+        Some(Some(s)) => format!(
+            "R=Y%DF={}%T={:X}%W={:X}%S={}%A={}%F={}%O={}%RD={}%Q={}",
+            if s.df { "Y" } else { "N" },
+            s.ttl,
+            s.window,
+            s.seq_code,
+            s.ack_code,
+            flags_str(s.flags),
+            s.opts,
+            s.rd,
+            s.quirks,
+        ),
+        _ => String::new(),
+    };
+
+    SeqInfo { seq, ti, ii: "", ts, ops, win, t1 }
 }
 
 /// Run the full secondary suite. `open_port` must be an open TCP port;

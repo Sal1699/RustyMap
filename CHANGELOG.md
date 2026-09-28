@@ -4,6 +4,39 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.78.0] - 2026-09-28
+
+Emits the **OPS / WIN / T1** fingerprint lines — the last missing (and most
+discriminating) part of the nmap OS-detection field set. RustyMap now sends
+nmap's six distinct SEQ probes and reports the full block.
+
+### Added
+- **Six distinct SEQ probes (nmap's Packet #1–#6).** `capture_seq_sample`
+  now sends each SEQ probe with its exact nmap window + TCP-option set
+  (probe #6 deliberately omits window-scale, which is what makes its response
+  differ), taken from the nmap OS-detection reference:
+  | # | window | options |
+  |---|--------|---------|
+  | 1 | 1   | WScale(10),NOP,MSS(1460),TS,SACK |
+  | 2 | 63  | MSS(1400),WScale(0),SACK,TS |
+  | 3 | 4   | TS,NOP,NOP,WScale(5),NOP,MSS(640) |
+  | 4 | 4   | SACK,TS,WScale(10) |
+  | 5 | 16  | MSS(536),SACK,TS,WScale(10) |
+  | 6 | 512 | MSS(265),SACK,TS |
+- **OPS line (O1–O6)** — each probe's SYN/ACK **TCP options** in M/N/W/S/T/L
+  notation, and **WIN line (W1–W6)** — each probe's SYN/ACK **window** in hex.
+  These are the fields nmap weights most heavily for OS matching, so loading
+  `--nmap-os-db` now discriminates far better (closes the residual gap behind
+  the B25 denominator fix).
+- **T1 line** — probe #1's full coded response (R/DF/T/W/S/A/F/O/RD/Q), which
+  the fingerprint block previously omitted.
+- The `-O -v` `nmap-fp:` block and the os-db observed fingerprint now include
+  SEQ + **OPS + WIN + T1** + T2–T7 + ECN + IE + U1 — the complete nmap set.
+
+### Note
+- Raw-socket; needs Kali-root validation of OPS/WIN/T1 vs `nmap -O -d` and of
+  the improved os-db match ranking. Tests green.
+
 ## [0.77.1] - 2026-09-28
 
 Fixes from the v0.77.0 lab validation. The report confirmed the U1 quoted
