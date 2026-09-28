@@ -181,9 +181,12 @@ pub fn ip_id_class(ids: &[u16]) -> &'static str {
         .windows(2)
         .map(|w| (w[1] as i32 - w[0] as i32).rem_euclid(65536) as u32)
         .collect();
-    // A single large jump means the IP-ID is randomized (nmap checks this
-    // ahead of the incremental cases — lab bug B22: Slirp was mis-flagged RI).
-    if diffs.iter().any(|&d| d >= 20000) {
+    // A large jump means the IP-ID is randomized (RD), checked ahead of the
+    // incremental cases (lab bug B22). BUT RD needs enough evidence: nmap
+    // never assigns RD to II (2 samples) and, with only a couple of diffs,
+    // treats a big jump as RI rather than RD — so require ≥3 diffs (≥4
+    // samples). This keeps TI=RD while CI/II (few samples) read RI (B26).
+    if diffs.len() >= 3 && diffs.iter().any(|&d| d >= 20000) {
         return "RD";
     }
     if diffs.iter().all(|&d| d == 0) {
@@ -330,8 +333,11 @@ mod tests {
     fn ip_id_classification() {
         assert_eq!(ip_id_class(&[0, 0, 0]), "Z");
         assert_eq!(ip_id_class(&[10, 11, 12, 13]), "I"); // +1 increments
-        // A ≥20000 jump → RD (randomized), checked before RI (B22 fix).
+        // ≥3 diffs (≥4 samples) with a ≥20000 jump → RD (B22, TI flow).
         assert_eq!(ip_id_class(&[100, 40000, 5000, 61000]), "RD");
+        // Few samples (CI/II) with a big jump must NOT be RD → RI (B26).
+        assert_eq!(ip_id_class(&[100, 40000]), "RI"); // II: 1 diff
+        assert_eq!(ip_id_class(&[100, 40000, 5000]), "RI"); // CI: 2 diffs
         // All increments > 1000 but < 20000 → RI.
         assert_eq!(ip_id_class(&[100, 2000, 4500, 7200]), "RI");
         assert_eq!(ip_id_class(&[256, 512, 768]), "BI"); // multiples of 256

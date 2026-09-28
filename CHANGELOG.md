@@ -4,6 +4,23 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.78.1] - 2026-09-28
+
+### Fixed
+- **B26 (SEQ CI/II, MEDIUM).** The B22 RD threshold was applied to all IP-ID
+  flows, so CI (closed-port) and II (ICMP-echo) — which have only 2–3 samples
+  — were over-flagged **RD** where nmap reports **RI**. `ip_id_class` now
+  requires **≥3 diffs (≥4 samples)** for RD, matching nmap's rule that RD is
+  "not possible for II" and needs enough evidence; with fewer samples a large
+  jump reads as RI. TI (6 SEQ samples) stays RD; CI/II now read RI.
+
+### Confirmed by the v0.78.0 lab run
+- **OPS O1–O6, WIN W1–W6 and T1 byte-identical** to `nmap -O -d`; T2–T7, ECN
+  (canonical), U1 (10/10) and IE (4/4) byte-identical; SEQ SP/GCD/ISR/TI/TS
+  match (ISR ±1 sampling). **os-db ranking fixed (B25)**: localhost now
+  top-matches Linux (90%), the Slirp gateway top-matches AT&T BGW210 with the
+  VirtualBox Slirp NAT in the runner-ups — matching nmap.
+
 ## [0.78.0] - 2026-09-28
 
 Emits the **OPS / WIN / T1** fingerprint lines — the last missing (and most
