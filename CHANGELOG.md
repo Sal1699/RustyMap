@@ -4,6 +4,39 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.79.0] - 2026-10-01
+
+Polish pass before the next Kali OS-detection run: the three sampling-dependent
+SEQ fields now carry a measured range, and the built-in Rhai library grows from
+101 to 117 scripts.
+
+### Added
+- **SP/ISR/TS sampling band.** SP, ISR and TS are the only SEQ fields nmap
+  records as *ranges* (it aggregates them over many hosts); a single live scan
+  can't reproduce that cross-host spread, so RustyMap now reports this run's own
+  sampling band. `seq_analysis` computes **jackknife (leave-one-out) min/max**
+  for SP and ISR from the rate samples, and `run_seq` derives the TS band from
+  the per-adjacent-pair timestamp frequency min/max. Under `-O -v` a new
+  `SEQ sampling band: SP=lo-hi%ISR=lo-hi%TS=lo-hi` line sits next to the coded
+  `nmap-fp:` block, so the `nmap -O` comparison reads as "inside nmap's range".
+  The `fingerprint()` SEQ line keeps the single **point** values — that is what
+  the os-db matcher compares against nmap's reference ranges, so matching is
+  unchanged.
+- **16 new built-in Rhai scripts (101 → 117).** Text/HTTP-protocol checks, no
+  fragile binary framing: `clamav-clamd`, `zookeeper-ruok`, `nats-info`,
+  `telnet-exposed`, `rtsp-options`, `http-trace-enabled`, `sonarqube-exposed`,
+  `mongo-express-exposed`, `arangodb-exposed`, `couchbase-exposed`,
+  `jupyter-no-auth`, `smtp-starttls-check`, `http-xmlrpc-exposed`,
+  `http-phpinfo`, `docker-registry-exposed`, `nacos-exposed`. All pass the
+  `all_builtin_scripts_parse` gate and are auto-listed by `--script-list` /
+  `--script-catalog`.
+
+### Notes
+- The SP/ISR/TS bands are self-contained unit math (two new tests assert the
+  point estimate sits inside its own jackknife band and that a perfectly linear
+  ISN yields a zero-width band); no raw-socket behaviour changed, so the live
+  `SEQ sampling band` line still wants a Kali `-O -v` cross-check vs `nmap -O`.
+
 ## [0.78.1] - 2026-09-28
 
 ### Fixed

@@ -280,6 +280,12 @@ pub struct SeqInfo {
     pub win: String,
     /// T1 line body (probe #1's response: R/DF/T/W/S/A/F/O/RD/Q).
     pub t1: String,
+    /// Human-facing sampling band for the three sample-dependent SEQ
+    /// fields: `SP=lo-hi%ISR=lo-hi%TS=lo-hi`. Empty when no SEQ data.
+    /// The `fingerprint()` SEQ line keeps the single point values (that is
+    /// what os-db matching compares against nmap's reference ranges); this
+    /// string is the range shown alongside for the `nmap -O` comparison.
+    pub seq_band: String,
 }
 
 /// Everything the secondary suite gathered.
@@ -1114,17 +1120,44 @@ fn run_seq(src: Ipv4Addr, dst: Ipv4Addr, open_port: u16, timeout: Duration) -> S
         .zip(gtimes.iter())
         .filter_map(|(s, &t)| s.tsval.map(|v| (v, t)))
         .collect();
+    let always_zero_ts = !tsvals.is_empty() && tsvals.iter().all(|(v, _)| *v == 0);
     let ts = if tsvals.is_empty() {
         "U".to_string()
     } else if tsvals.len() >= 2 {
         let (v0, t0) = tsvals[0];
         let (v1, t1) = *tsvals.last().unwrap();
         let dt = (t1.saturating_sub(t0)) as f64 / 1_000_000.0;
-        let always_zero = tsvals.iter().all(|(v, _)| *v == 0);
         let hz = if dt > 0.0 { Some((v1.wrapping_sub(v0) as f64) / dt) } else { None };
-        crate::nmap_fp::ts_field(true, always_zero, hz)
+        crate::nmap_fp::ts_field(true, always_zero_ts, hz)
     } else {
-        crate::nmap_fp::ts_field(true, tsvals.iter().all(|(v, _)| *v == 0), None)
+        crate::nmap_fp::ts_field(true, always_zero_ts, None)
+    };
+
+    // TS sampling band: the timestamp class from the *per-adjacent-pair*
+    // frequency min/max (rather than only first→last), the TS analogue of
+    // the SP/ISR jackknife bands above.
+    let (ts_lo, ts_hi) = if tsvals.len() >= 2 && !always_zero_ts {
+        let mut freqs: Vec<f64> = Vec::new();
+        for w in tsvals.windows(2) {
+            let (v0, t0) = w[0];
+            let (v1, t1) = w[1];
+            let dt = (t1.saturating_sub(t0)) as f64 / 1_000_000.0;
+            if dt > 0.0 {
+                freqs.push(v1.wrapping_sub(v0) as f64 / dt);
+            }
+        }
+        if freqs.is_empty() {
+            (ts.clone(), ts.clone())
+        } else {
+            let fmin = freqs.iter().cloned().fold(f64::INFINITY, f64::min);
+            let fmax = freqs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            (
+                crate::nmap_fp::ts_field(true, false, Some(fmin)),
+                crate::nmap_fp::ts_field(true, false, Some(fmax)),
+            )
+        }
+    } else {
+        (ts.clone(), ts.clone())
     };
 
     // OPS (O1–O6) and WIN (W1–W6) from each probe's SYN/ACK.
@@ -1156,7 +1189,31 @@ fn run_seq(src: Ipv4Addr, dst: Ipv4Addr, open_port: u16, timeout: Duration) -> S
         _ => String::new(),
     };
 
-    SeqInfo { seq, ti, ii: "", ts, ops, win, t1 }
+    // Assemble the sampling-band string shown next to the point SEQ line.
+    let seq_band = {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(r) = seq {
+            let band = |lo: u32, hi: u32| {
+                if lo == hi {
+                    format!("{:X}", lo)
+                } else {
+                    format!("{:X}-{:X}", lo.min(hi), lo.max(hi))
+                }
+            };
+            parts.push(format!("SP={}", band(r.sp_lo, r.sp_hi)));
+            parts.push(format!("ISR={}", band(r.isr_lo, r.isr_hi)));
+        }
+        if !ts.is_empty() {
+            if ts_lo == ts_hi {
+                parts.push(format!("TS={}", ts));
+            } else {
+                parts.push(format!("TS={}-{}", ts_lo, ts_hi));
+            }
+        }
+        parts.join("%")
+    };
+
+    SeqInfo { seq, ti, ii: "", ts, ops, win, t1, seq_band }
 }
 
 /// Run the full secondary suite. `open_port` must be an open TCP port;

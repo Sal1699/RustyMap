@@ -37,6 +37,17 @@ pub struct SeqResult {
     pub isr: u32,
     /// Sequence Predictability: `round(8 * log2(stddev_of_normalized_diffs))`.
     pub sp: u32,
+    /// Jackknife (leave-one-out) min/max of ISR across the rate samples.
+    /// SP and ISR are the only sampling-dependent SEQ fields, which is why
+    /// nmap records them as *ranges* in its DB (aggregated over many hosts).
+    /// A single live scan can't reproduce that cross-host spread, but the
+    /// jackknife band quantifies this run's own sensitivity to each sample
+    /// so the `nmap -O` comparison can show "falls inside nmap's range".
+    pub isr_lo: u32,
+    pub isr_hi: u32,
+    /// Jackknife (leave-one-out) min/max of SP across the rate samples.
+    pub sp_lo: u32,
+    pub sp_hi: u32,
 }
 
 /// nmap's SEQ GCD/ISR/SP from a set of ISNs and their capture times (µs).
@@ -65,40 +76,81 @@ pub fn seq_analysis(isns: &[u32], times_us: &[u64]) -> Option<SeqResult> {
             rates.push(diffs[i] as f64 / dt);
         }
     }
-    let avg_rate = if rates.is_empty() {
-        0.0
-    } else {
-        rates.iter().sum::<f64>() / rates.len() as f64
-    };
-    let isr = if avg_rate < 1.0 {
-        0
-    } else {
-        (8.0 * avg_rate.log2()).round() as u32
-    };
-
-    // SP: standard deviation of the **rate** values (not the raw diffs),
-    // divided by GCD only when GCD > 9 — exactly as nmap. nmap reports SP
-    // only with ≥4 responses; sample variance (n-1); SP=0 if stddev ≤ 1.
-    let sp = if isns.len() >= 4 && rates.len() >= 2 {
-        let sp_vals: Vec<f64> = if g > 9 {
-            rates.iter().map(|r| r / g as f64).collect()
+    // ISR from a set of rate samples: round(8 * log2(mean_rate)).
+    let isr_of = |rs: &[f64]| -> u32 {
+        if rs.is_empty() {
+            return 0;
+        }
+        let m = rs.iter().sum::<f64>() / rs.len() as f64;
+        if m < 1.0 {
+            0
         } else {
-            rates.clone()
-        };
-        let mean = sp_vals.iter().sum::<f64>() / sp_vals.len() as f64;
-        let var = sp_vals.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
-            / (sp_vals.len() as f64 - 1.0);
+            (8.0 * m.log2()).round() as u32
+        }
+    };
+    // SP statistic from a set of (already GCD-normalized) rate samples:
+    // round(8 * log2(stddev)), sample variance (n-1), 0 when stddev ≤ 1.
+    let sp_of = |rs: &[f64]| -> u32 {
+        if rs.len() < 2 {
+            return 0;
+        }
+        let mean = rs.iter().sum::<f64>() / rs.len() as f64;
+        let var = rs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (rs.len() as f64 - 1.0);
         let sd = var.sqrt();
         if sd <= 1.0 {
             0
         } else {
             (8.0 * sd.log2()).round() as u32
         }
+    };
+
+    let isr = isr_of(&rates);
+
+    // SP: standard deviation of the **rate** values (not the raw diffs),
+    // divided by GCD only when GCD > 9 — exactly as nmap. nmap reports SP
+    // only with ≥4 responses; sample variance (n-1); SP=0 if stddev ≤ 1.
+    let sp_vals: Vec<f64> = if g > 9 {
+        rates.iter().map(|r| r / g as f64).collect()
+    } else {
+        rates.clone()
+    };
+    let sp = if isns.len() >= 4 && rates.len() >= 2 {
+        sp_of(&sp_vals)
     } else {
         0
     };
 
-    Some(SeqResult { gcd: g, isr, sp })
+    // Jackknife (leave-one-out) bands: recompute ISR/SP with each rate
+    // sample dropped in turn and take the min/max. This is the run's own
+    // sampling spread, the live analogue of nmap's DB SP/ISR ranges.
+    let mut isr_band = vec![isr];
+    let mut sp_band = vec![sp];
+    if rates.len() >= 3 {
+        for skip in 0..rates.len() {
+            let r_kept: Vec<f64> = rates
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != skip)
+                .map(|(_, x)| *x)
+                .collect();
+            isr_band.push(isr_of(&r_kept));
+            if isns.len() >= 4 {
+                let s_kept: Vec<f64> = sp_vals
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i != skip)
+                    .map(|(_, x)| *x)
+                    .collect();
+                sp_band.push(sp_of(&s_kept));
+            }
+        }
+    }
+    let isr_lo = *isr_band.iter().min().unwrap_or(&isr);
+    let isr_hi = *isr_band.iter().max().unwrap_or(&isr);
+    let sp_lo = *sp_band.iter().min().unwrap_or(&sp);
+    let sp_hi = *sp_band.iter().max().unwrap_or(&sp);
+
+    Some(SeqResult { gcd: g, isr, sp, isr_lo, isr_hi, sp_lo, sp_hi })
 }
 
 /// nmap S field — response SEQ vs the probe's ACK number.
@@ -368,6 +420,35 @@ mod tests {
     #[test]
     fn seq_analysis_needs_three() {
         assert!(seq_analysis(&[1, 2], &[0, 1]).is_none());
+    }
+
+    #[test]
+    fn seq_analysis_bands_bracket_point() {
+        // Noisy-but-incrementing ISNs → non-trivial SP/ISR with a band.
+        let isns = [
+            1_000_000u32,
+            1_070_000,
+            1_131_000,
+            1_205_000,
+            1_259_000,
+            1_338_000,
+        ];
+        let times = [0u64, 100_000, 205_000, 300_000, 405_000, 500_000];
+        let r = seq_analysis(&isns, &times).unwrap();
+        // The point estimate must sit inside its own jackknife band.
+        assert!(r.isr_lo <= r.isr && r.isr <= r.isr_hi, "ISR point inside band");
+        assert!(r.sp_lo <= r.sp && r.sp <= r.sp_hi, "SP point inside band");
+    }
+
+    #[test]
+    fn seq_analysis_linear_band_is_tight() {
+        // Perfectly linear ISN → SP=0 with a degenerate (0-width) band.
+        let isns = [1_000_000u32, 1_064_000, 1_128_000, 1_192_000, 1_256_000];
+        let times = [0u64, 100_000, 200_000, 300_000, 400_000];
+        let r = seq_analysis(&isns, &times).unwrap();
+        assert_eq!(r.sp_lo, 0);
+        assert_eq!(r.sp_hi, 0);
+        assert_eq!(r.isr_lo, r.isr_hi, "constant rate → single-point ISR band");
     }
 
     #[test]

@@ -274,6 +274,22 @@ pub fn builtin_scripts() -> Vec<(&'static str, &'static str)> {
         ("http-wp-user-enum", include_str!("../scripts/http-wp-user-enum.rhai")),
         ("http-nextjs-detect", include_str!("../scripts/http-nextjs-detect.rhai")),
         ("http-vite-dev", include_str!("../scripts/http-vite-dev.rhai")),
+        ("clamav-clamd", include_str!("../scripts/clamav-clamd.rhai")),
+        ("zookeeper-ruok", include_str!("../scripts/zookeeper-ruok.rhai")),
+        ("nats-info", include_str!("../scripts/nats-info.rhai")),
+        ("telnet-exposed", include_str!("../scripts/telnet-exposed.rhai")),
+        ("rtsp-options", include_str!("../scripts/rtsp-options.rhai")),
+        ("http-trace-enabled", include_str!("../scripts/http-trace-enabled.rhai")),
+        ("sonarqube-exposed", include_str!("../scripts/sonarqube-exposed.rhai")),
+        ("mongo-express-exposed", include_str!("../scripts/mongo-express-exposed.rhai")),
+        ("arangodb-exposed", include_str!("../scripts/arangodb-exposed.rhai")),
+        ("couchbase-exposed", include_str!("../scripts/couchbase-exposed.rhai")),
+        ("jupyter-no-auth", include_str!("../scripts/jupyter-no-auth.rhai")),
+        ("smtp-starttls-check", include_str!("../scripts/smtp-starttls-check.rhai")),
+        ("http-xmlrpc-exposed", include_str!("../scripts/http-xmlrpc-exposed.rhai")),
+        ("http-phpinfo", include_str!("../scripts/http-phpinfo.rhai")),
+        ("docker-registry-exposed", include_str!("../scripts/docker-registry-exposed.rhai")),
+        ("nacos-exposed", include_str!("../scripts/nacos-exposed.rhai")),
     ]
 }
 

@@ -92,7 +92,7 @@ rustymap --examples
 - **Scan resume**: `--resume <ID|last>` picks up an interrupted scan from the DB
 - **Tags**: label hosts and ports for categorization
 - **CVE correlation**: built-in 25-entry CVE regex DB baked into the binary; use `--cve-db` for custom; `--no-builtin-cves` to disable
-- **Rhai scripting**: six built-in scripts (cleartext-protocols, default-cred-likely, old-openssh, smb-exposed, tls-cert-issues, tls-deprecated); `--script` for custom, `--script-arg K=V` for args
+- **Rhai scripting**: 117 built-in NSE-equivalent scripts baked into the binary (service exposure, no-auth checks, web misconfig, cleartext protocols, modern-stack fingerprinting); browse with `--script-list`/`--script-catalog`, add your own with `--script`, pass args with `--script-arg K=V`
 - **DNS tools**: enumeration with wildcard detection (`--dns-enum`), reverse sweep (`--dns-reverse`), sniffing (`--dns-sniff`), spoofing (`--dns-spoof`)
 - **IPv6**: connect-scan, service probe, and TLS probe all work over v6. `--ipv4-only` / `--ipv6-only` filter after DNS resolution.
 - **Traceroute + topology**: `--traceroute` wraps system tracert/traceroute; `--topology FILE` renders all paths as a Graphviz DOT graph

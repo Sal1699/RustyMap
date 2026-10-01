@@ -443,6 +443,14 @@ fn refine_from_tcp_fp(host: &HostResult, guess: &mut OsGuess, timeout: Duration)
             guess
                 .hints
                 .push(format!("nmap-fp: {}", s.fingerprint().replace('\n', " ")));
+            // SP/ISR/TS are the only sampling-dependent SEQ fields; nmap
+            // records them as ranges. Show this run's own sampling band so
+            // the `nmap -O` comparison reads as "inside nmap's range".
+            if !s.seq.seq_band.is_empty() {
+                guess
+                    .hints
+                    .push(format!("SEQ sampling band: {}", s.seq.seq_band));
+            }
             for n in s.notes() {
                 guess.hints.push(format!("probe signal: {}", n));
             }
