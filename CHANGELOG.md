@@ -4,6 +4,37 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.80.0] - 2026-10-05
+
+Closes **Fase 27** (performance): the two deliverables that were still TODO —
+a Criterion bench harness for the scan-scenario hot paths, and a reproducible
+performance methodology. No CLI or scan-behaviour change; dev-tooling + docs
+only. Tests unchanged (579/579).
+
+### Added
+- **`benches/lab_compare.rs`** — five Criterion microbenchmarks covering the
+  deterministic, CPU-bound work on the critical path of the four lab scan
+  scenarios (a regression here is taxed on every host):
+  - `target_cidr` (/24, /22) and `port_expand` (1-65535, top-ish) → SYN /24
+    and full-TCP enumeration;
+  - `service_regex` (banner vs probe table) → service detect (`-sV`);
+  - `osdb_score` (observed fp vs 1000 and ~6500 entries) and `seq_analysis`
+    (GCD/ISR/SP + jackknife band over nmap's six SEQ probes) → OS detect.
+  Like `benches/parsers.rs`, the bin-only crate means each bench re-implements
+  its hot loop inline, mirroring the in-tree source it names (`src/target.rs`,
+  `src/ports.rs`, `src/nmap_db.rs`, `src/nmap_fp.rs`) 1:1.
+- **`PERFORMANCE.md`** — two-layer methodology: (1) reproducible Criterion
+  microbenchmarks with a `--save-baseline`/`--baseline` workflow and the
+  roadmap's **>10% regression gate**; (2) a documented end-to-end wall-clock
+  comparison vs nmap on real lab targets via `hyperfine` (scenarios A–E with
+  matched command pairs, a per-release results table, and the previously
+  observed figures kept as re-measurable context). Network I/O is explicitly
+  out of the microbench harness because it is not reproducible there.
+
+### Notes
+- Per the roadmap, concrete perf wins are chosen **after** the bench numbers
+  point at them, not assumed — `PERFORMANCE.md` documents that workflow.
+
 ## [0.79.1] - 2026-10-05
 
 Single fix from the v0.79.0 Kali validation run (17/17 PASS, no functional

@@ -1,6 +1,6 @@
 [package]
 name = "rustymap"
-version = "0.79.1"
+version = "0.80.0"
 edition = "2021"
 description = "A Rust port of nmap for network exploration and security auditing"
 license = "MIT"
@@ -76,6 +76,10 @@ criterion = { version = "0.5", default-features = false }
 
 [[bench]]
 name = "parsers"
+harness = false
+
+[[bench]]
+name = "lab_compare"
 harness = false
 
 [profile.release]
