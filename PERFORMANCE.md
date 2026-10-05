@@ -71,6 +71,23 @@ the CHANGELOG entry.
   `--measurement-time` for noisy machines.
 - Record the machine: CPU model, core count, OS, `rustc --version`.
 
+### Recorded baseline — v0.80.0 (VirtualBox VM, noisy)
+
+Stable anchors (the rest are dominated by VM jitter — 10–20% outliers, wide CIs,
+so run-to-run "regressed"/"improved" flags here are noise, not code changes):
+
+| Bench | Mean | Reads as |
+|-------|------|----------|
+| `osdb_score 6500` (~full DB scan) | ~26 ms | OS-detect scoring cost per host |
+| `port_expand 1-65535` (all ports) | ~8.4 ms | full-TCP port-set build |
+| `target_cidr /24` | ~0.1 µs | negligible |
+| `seq_analysis 6 ISNs` | ~0.4 µs | negligible |
+| `service_regex` (per banner) | ~0.1–0.7 µs | negligible |
+
+Takeaway: the microbench hot paths are **not** where scan wall-clock goes — the
+real cost is network I/O and the scan engine (see Layer 2). Re-run on bare metal
+for numbers worth gating on.
+
 ---
 
 ## Layer 2 — End-to-end comparison vs nmap (lab)
@@ -147,35 +164,57 @@ sudo hyperfine -w 1 -r 3 \
 Fill this in from the hyperfine `mean ± σ` on your machine. Ratio = nmap /
 RustyMap (>1 means RustyMap is faster).
 
-| Release | Scenario | RustyMap (mean) | nmap (mean) | Ratio | Correctness |
-|---------|----------|-----------------|-------------|-------|-------------|
-| v0.79.1 | A SYN /24 | _TBD_ | _TBD_ | _TBD_ | _vs matrix_ |
-| v0.79.1 | B full-TCP host | _TBD_ | _TBD_ | _TBD_ | |
-| v0.79.1 | C service detect | _TBD_ | _TBD_ | _TBD_ | |
-| v0.79.1 | D OS detect | _TBD_ | _TBD_ | _TBD_ | |
-| v0.79.1 | E aggressive | _TBD_ | _TBD_ | _TBD_ | |
+| Release | Scenario | RustyMap (mean) | nmap (mean) | Ratio | Notes |
+|---------|----------|-----------------|-------------|-------|-------|
+| v0.80.0 | A SYN /24 | — | — | — | not run (no /24 behind VBox NAT) |
+| v0.80.0 | B SYN -p 1-65535 (localhost) | 4.70 s | 0.79 s | **0.17×** | **nmap ~6× faster** — raw port-scan engine |
+| v0.80.0 | Connect -p 1-1000 (NAT) | 9.54 s | 5.42 s | **0.57×** | nmap ~1.8× faster |
+| v0.80.0 | C -sV -p 80,443 (localhost) | 4.31 s | 12.41 s | 2.88× | RustyMap (parallel probes) |
+| v0.80.0 | D -O (localhost) | 3.71 s | 12.29 s | 3.31× | RustyMap |
+| v0.80.0 | E -A (localhost) | 6.67 s | 105.37 s | **15.8×** | RustyMap (parallelism compounds) |
+
+_Measured on Kali 6.19 in a VirtualBox VM, localhost/NAT targets. Ratio = nmap /
+RustyMap (>1 = RustyMap faster). Correctness: `-O`/`-sV` cross-checked in
+`VALIDATION_0.79.md`; SYN/connect port sets match Tier 0. **Honest headline:
+RustyMap LOSES on raw port scanning (SYN ~6×, connect ~1.8×) and WINS on the
+higher-level phases (-sV/-O/-A) via parallelism.** The large `-A` gap is
+dominated by the parallel service/script phase, not port-scan speed._
 
 ### Previously observed (earlier lab runs — re-measure, don't trust blindly)
 
 Point-in-time figures from prior validation runs, kept for context. They are
 machine- and lab-specific; re-measure each release before claiming them.
 
-| Scenario | Observed | Where |
-|----------|----------|-------|
-| `-A` single host (LAN) | ~26× faster than nmap (5.72 s vs 149.94 s) | v0.71 lab run |
-| `-A` single host (LAN) | ~22× faster than nmap | v0.75 lab run |
-| SYN scan | ~1.4–7× faster than nmap | v0.69.1 lab run (57-test wave) |
+| Scenario | Observed | Where | Status vs v0.80.0 |
+|----------|----------|-------|-------------------|
+| `-A` single host | ~26× faster (5.72 s vs 149.94 s) | v0.71 | Consistent (v0.80.0: 15.8× on localhost VM) |
+| `-A` single host | ~22× faster | v0.75 | Consistent |
+| SYN scan | ~1.4–7× faster | v0.69.1 | **CONTRADICTED for deep single-host.** v0.80.0 measured nmap **~6× faster** on `-p 1-65535`. The old figure was almost certainly a **/24 sweep** (many hosts, few ports — host-parallel, where RustyMap wins) — a different workload shape than port-depth. The /24 case was NOT re-measured (no /24 in the NAT lab); treat it as unverified until it is. |
 
-The `-A` gap is large mainly because RustyMap parallelises the service/script
-phase aggressively; raw `--sS` is the honest apples-to-apples number and is the
-one to watch for regressions.
+**Honest correction:** raw `--sS` is NOT a RustyMap strength on deep single-host
+scans — nmap's pcap-based bulk SYN engine (congestion control + send batching)
+is ~6× faster on localhost, where there is no network latency to hide behind.
+RustyMap's wins are in the **parallel higher-level phases** (`-sV`/`-O`/`-A`).
+The honest split: *nmap for port-discovery throughput, RustyMap for the
+detect/script pipeline.*
 
 ---
 
 ## Choosing optimisations
 
 Per the roadmap: pick **2–3 perf wins only after** the bench numbers point at
-them — do not optimise on assumption. Workflow:
+them — do not optimise on assumption.
+
+**What the v0.80.0 data points at (ranked):**
+1. **Raw SYN scan engine** — the clear #1. ~6× behind nmap on `-p 1-65535`
+   localhost (14k vs 83k ports/s with no network latency), so it is an engine
+   gap, not a network one. Likely levers: batch packet sends instead of
+   per-port, a less conservative adaptive limiter on low-loss links, and
+   tighter receive-loop/timeout handling. Profile with `perf` before changing.
+2. **Connect-scan timeout handling** — ~1.8× behind on NAT; secondary.
+3. Everything else (detect/script phases) already beats nmap — don't touch.
+
+Workflow:
 
 1. `cargo bench -- --save-baseline pre` and run Layer-2 scenarios, record.
 2. Profile the worst offender (`perf record` / `cargo flamegraph` on a hot
