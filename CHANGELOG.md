@@ -4,6 +4,24 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.79.1] - 2026-10-05
+
+Single fix from the v0.79.0 Kali validation run (17/17 PASS, no functional
+regressions — full report in `VALIDATION_0.79.md`).
+
+### Fixed
+- **B27 (OS fingerprint T1 line, display).** The emitted `T1(...)` line carried
+  `W=` (window) and `O=` (options) fields, but nmap's canonical T1 **omits**
+  them — they are already reported in `OPS(O1)` and `WIN(W1)` for the same
+  probe #1. RustyMap now drops W and O from T1, so the `-O -v` T1 line is
+  byte-identical to `nmap -O -d` (the one remaining divergence the v0.79.0 run
+  flagged). The surviving `R/DF/T/S/A/F/RD/Q` fields were already byte-matching.
+  **No scoring change:** with `--nmap-os-db` loaded the matcher already skips any
+  observed field that has no MatchPoints weight (nmap weights no `T1.W`/`T1.O`),
+  so these fields never entered the denominator; this fix also removes the
+  latent deflation in the no-MatchPoints edge case. The data is unchanged — the
+  probe #1 window and options are still reported, via OPS/WIN.
+
 ## [0.79.0] - 2026-10-01
 
 Polish pass before the next Kali OS-detection run: the three sampling-dependent

@@ -278,7 +278,8 @@ pub struct SeqInfo {
     pub ops: String,
     /// WIN line body: `W1=..%…%W6=..` (server SYN/ACK window per probe, hex).
     pub win: String,
-    /// T1 line body (probe #1's response: R/DF/T/W/S/A/F/O/RD/Q).
+    /// T1 line body (probe #1's response: R/DF/T/S/A/F/RD/Q). W and O are
+    /// omitted to match nmap's canonical T1 — they live in OPS(O1)/WIN(W1).
     pub t1: String,
     /// Human-facing sampling band for the three sample-dependent SEQ
     /// fields: `SP=lo-hi%ISR=lo-hi%TS=lo-hi`. Empty when no SEQ data.
@@ -1172,17 +1173,18 @@ fn run_seq(src: Ipv4Addr, dst: Ipv4Addr, open_port: u16, timeout: Duration) -> S
     let ops = ops_parts.join("%");
     let win = win_parts.join("%");
 
-    // T1 reuses probe #1's response (full coded fields).
+    // T1 reuses probe #1's response. nmap's canonical T1 OMITS the window (W)
+    // and options (O) tests — they are already reported in WIN(W1) and OPS(O1)
+    // for the same probe — so RustyMap omits them too for byte-parity with
+    // `nmap -O -d` (B27). The surviving fields R/DF/T/S/A/F/RD/Q already match.
     let t1 = match samples.first() {
         Some(Some(s)) => format!(
-            "R=Y%DF={}%T={:X}%W={:X}%S={}%A={}%F={}%O={}%RD={}%Q={}",
+            "R=Y%DF={}%T={:X}%S={}%A={}%F={}%RD={}%Q={}",
             if s.df { "Y" } else { "N" },
             s.ttl,
-            s.window,
             s.seq_code,
             s.ack_code,
             flags_str(s.flags),
-            s.opts,
             s.rd,
             s.quirks,
         ),
