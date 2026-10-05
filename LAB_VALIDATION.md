@@ -35,6 +35,9 @@ To promote a feature from one tier to the next:
 |---|---|---|---|---|---|---|
 | _yyyy-mm-dd_ | _e.g. `--brute-protocol ssh`_ | _e.g. ubuntu-22 sshd on 10.0.0.5_ | _hydra ssh://_ | _e.g. ✓ same 3/5 hits_ | _free-form_ | _Beta → Prod_ |
 | 2026-05-22 | `[KEV]` badge | OpenSSH banner (`--cve-for "OpenSSH 7.4p1"`) | live CISA KEV feed | ✓ pipeline correct — badge absent is right | **Not a bug.** CVE-2024-6387 (regreSSHion) is NOT in CISA KEV (verified: 1721 entries, zero OpenSSH). No confirmed in-the-wild exploitation → never entered KEV. v0.67.3–0.67.5 chased a badge that was correctly absent. | n/a |
+| 2026-10-05 | `-O` OPS/WIN/T1 + SEQ band (v0.79.0) | 127.0.0.1 (Kali 6.19), 10.0.2.2 (VBox Slirp) | `nmap -O -d` 7.99 | ✓ OPS O1-O6/WIN W1-W6/T2-T7/ECN/U1/IE byte-identical; SP/ISR/TS point inside band & band overlaps nmap | Full report: `VALIDATION_0.79.md`. B26 confirmed (gateway TI=RD,CI=RI,II=RI). **B27 found:** T1 line carries redundant W=/O= nmap omits — display-only, scoring safe. | Beta → Prod |
+| 2026-10-05 | `--nmap-os-db` match (v0.79.0) | 127.0.0.1, 10.0.2.2 | `nmap -O` | ✓ localhost→Linux 90% (was wrongly "Adtran 95%" pre-B25); gateway→AT&T BGW210 top-1 like nmap, Slirp/QEMU in runner-ups | OPS/WIN/T1 fields + B25 denominator fix pay off. % slightly below nmap (expected, conservative). | Beta → Prod |
+| 2026-10-05 | JARM + cert flags (v0.79.0) | cloudflare/google/microsoft/apache, badssl | pyjarm 0.0.5, openssl | ✓ JARM 4/4 byte-identical; self-signed + expired flags correct | B21 stays resolved. | Prod (holds) |
 
 ## Targets in current lab
 
