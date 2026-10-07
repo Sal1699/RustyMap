@@ -90,6 +90,11 @@ pub struct RawTcpScanner {
     pending: PendingMap,
     evasion: EvasionConfig,
     _rx_thread: thread::JoinHandle<()>,
+    /// Persistent RTT EWMA (µs) + sample count, feeding the adaptive
+    /// per-probe timeout so a filtered port on a fast LAN stops costing the
+    /// full `--timeout` (the SYN slow-ramp fix).
+    ewma_rtt_us: std::sync::atomic::AtomicU64,
+    rtt_samples: std::sync::atomic::AtomicU64,
 }
 
 impl RawTcpScanner {
@@ -127,7 +132,27 @@ impl RawTcpScanner {
             pending,
             evasion,
             _rx_thread: rx_thread,
+            ewma_rtt_us: std::sync::atomic::AtomicU64::new(0),
+            rtt_samples: std::sync::atomic::AtomicU64::new(0),
         })
+    }
+
+    /// Mean observed RTT once a few replies have arrived; `None` while warming
+    /// up so early probes keep the full timeout.
+    fn mean_rtt(&self) -> Option<Duration> {
+        if self.rtt_samples.load(Ordering::Relaxed) < 3 {
+            return None;
+        }
+        let us = self.ewma_rtt_us.load(Ordering::Relaxed);
+        (us != 0).then(|| Duration::from_micros(us))
+    }
+
+    fn record_rtt(&self, rtt: Duration) {
+        let sample = rtt.as_micros().min(u64::MAX as u128) as u64;
+        let prev = self.ewma_rtt_us.load(Ordering::Relaxed);
+        let next = if prev == 0 { sample } else { (prev * 3 + sample) / 4 };
+        self.ewma_rtt_us.store(next, Ordering::Relaxed);
+        self.rtt_samples.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn probe(
@@ -204,7 +229,21 @@ impl RawTcpScanner {
         let state = if !send_ok {
             PortState::Filtered
         } else {
-            match receiver.recv_timeout(timeout) {
+            // Shrink the recv wait toward the observed RTT once we have a few
+            // samples; early probes keep the full `timeout`. This is what
+            // collapses the small-scan slow-ramp vs nmap (a filtered port no
+            // longer blocks the whole base timeout on a fast LAN).
+            let eff = crate::rate::adaptive_timeout(
+                timeout,
+                self.mean_rtt(),
+                crate::rate::timeout_floor(timeout),
+            );
+            let t0 = Instant::now();
+            let recvd = receiver.recv_timeout(eff);
+            if recvd.is_ok() {
+                self.record_rtt(t0.elapsed());
+            }
+            match recvd {
                 Ok(Response::SynAck) => PortState::Open,
                 Ok(Response::Rst { window }) => match kind {
                     RawTcpKind::Syn => PortState::Closed,

@@ -4,6 +4,55 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.81.0] - 2026-10-07
+
+Addresses every point from the full RustyMap-vs-nmap lab comparison, hardest
+first. 592/592 tests (+13). The raw-socket timing/SCTP changes compile + unit-
+test on Windows but want Kali validation; the service/script/DB changes are
+exercised by unit tests.
+
+### Changed / Fixed
+- **SYN & connect slow-ramp on small scans (the #1 gap — nmap was 10–35× faster
+  on 1-1000 ports).** Root cause: a flat `--timeout` (1500 ms) × retries was
+  paid in full on every filtered port, and RTT was never measured. Added
+  nmap-style **adaptive per-probe timeout** (`rate::adaptive_timeout`): once a
+  few real RTTs are seen, the wait shrinks toward `~10×RTT`, clamped to
+  `[floor, --timeout]` where `floor = (--timeout/10)` bounded to 50–300 ms. On a
+  LAN (RTT < 1 ms) a filtered port now waits ~150 ms instead of 1500 ms, while a
+  slow WAN host keeps a long timeout (the product rises with RTT). Wired into
+  both the connect scan (via the adaptive limiter's new persistent RTT EWMA) and
+  the raw scan (`RawTcpScanner` now tracks RTT and shrinks its `recv_timeout`).
+  The full `--timeout` is still used while warming up and as the hard cap.
+- **SCTP scan hung instead of timing out (B28).** `sctp_scan::await_response`
+  computed a deadline then **discarded it** while `ipv4_packet_iter().next()`
+  blocked with no timeout — so a host with no SCTP stack never returned. The
+  blocking read now runs on a dedicated thread bounded by `recv_timeout`, so a
+  silent target yields `filtered` after the timeout as intended.
+- **`-sV` version detection (was "ssh/domain/https", no versions).**
+  - **SSH** identification is normalised to nmap-style product + version:
+    `SSH-2.0-dropbear_2017.75` → *Dropbear sshd 2017.75 (protocol 2.0)*,
+    `OpenSSH_8.9p1` → *OpenSSH 8.9p1*; unknown software keeps its raw token.
+  - **DNS (53)** now sends a CHAOS TXT `version.bind` query and names the
+    resolver (dnsmasq / ISC BIND / Unbound / PowerDNS / Knot / CoreDNS) with its
+    version — previously it was a bare "domain".
+  - Added signatures: gSOAP (ONVIF/IP-camera), mini_httpd, thttpd, Boa, dnsmasq.
+- **Built-in scripts no longer auto-run on multi-host sweeps.** Firing all ~117
+  Rhai scripts against every host of a /24 made discovery take minutes. They now
+  auto-run only for focused scans (≤ 8 hosts); on a larger sweep they are
+  skipped with a one-line notice (nmap keeps scripts opt-in at scale). New
+  `--force-scripts` runs them on every host regardless.
+- **`-O` auto-loads a system `nmap-os-db`.** With `-O` and no `--nmap-os-db`,
+  RustyMap now probes the standard paths (`/usr/share/nmap/nmap-os-db`,
+  `/usr/local/share/...`, `~/nmap-os-db`, the Windows Nmap dir) and loads the
+  first found, so OS detection gets full probabilistic matching by default
+  instead of silently falling back to the coarse heuristic (the "server 55%"
+  surprise). An explicit `--nmap-os-db` still wins.
+
+### Notes
+- Raw-socket behaviour (adaptive SYN/connect timeout wall-clock, SCTP timeout)
+  needs a Kali run to confirm the speedup and the SCTP `filtered` result; the
+  pure timing math and the service/DNS parsing are unit-tested (+13 tests).
+
 ## [0.80.0] - 2026-10-05
 
 Closes **Fase 27** (performance): the two deliverables that were still TODO —

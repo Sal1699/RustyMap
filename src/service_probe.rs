@@ -348,6 +348,30 @@ static SIGS: Lazy<Vec<Signature>> = Lazy::new(|| {
             regex: Regex::new(r"(?i)Lua-CGI|GoAhead|uhttpd|micro_httpd").unwrap(),
             product: Some("embedded HTTP daemon"), product_group: None, version_group: None, extra_group: None,
         },
+        // gSOAP — common on IP cameras / ONVIF devices; emits a Server header.
+        Signature {
+            regex: Regex::new(r"(?i)gSOAP/([\d.]+)").unwrap(),
+            product: Some("gSOAP"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        // Classic small/embedded HTTP servers that DO carry a version.
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*mini_httpd/?([\d.]+)?").unwrap(),
+            product: Some("mini_httpd"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*thttpd/?([\d.]+)?").unwrap(),
+            product: Some("thttpd"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        Signature {
+            regex: Regex::new(r"(?i)Server:\s*Boa/?([\d.]+)?").unwrap(),
+            product: Some("Boa httpd"), product_group: None, version_group: Some(1), extra_group: None,
+        },
+        // dnsmasq occasionally fronts an HTTP/DHCP status page; the DNS
+        // version.bind probe (port 53) is the primary path, this is a backstop.
+        Signature {
+            regex: Regex::new(r"(?i)dnsmasq[- ]?([\d.]+)?").unwrap(),
+            product: Some("dnsmasq"), product_group: None, version_group: Some(1), extra_group: None,
+        },
         // ── NewSQL / modern DBs ──
         Signature {
             regex: Regex::new(r"(?i)CockroachDB[\s/-]+v?([\d.]+)").unwrap(),
@@ -656,8 +680,47 @@ static SIGS: Lazy<Vec<Signature>> = Lazy::new(|| {
     ]
 });
 
+/// Extract a leading dotted version (optionally with an OpenSSH-style `pN`
+/// suffix) from a token, e.g. "2017.75" or "8.9p1".
+fn extract_ver(s: &str) -> Option<String> {
+    static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(\d[\d.]*(?:p\d+)?)").unwrap());
+    RE.captures(s).and_then(|c| c.get(1)).map(|m| m.as_str().trim_end_matches('.').to_string())
+}
+
+/// Turn an SSH identification string into nmap-style product + version.
+/// `SSH-2.0-OpenSSH_8.9p1` → ("OpenSSH", "8.9p1", "protocol 2.0");
+/// `SSH-2.0-dropbear_2017.75` → ("Dropbear sshd", "2017.75", "protocol 2.0").
+/// Unknown software keeps the raw token as the product so nothing is lost.
+fn match_ssh(text: &str) -> Option<ServiceInfo> {
+    static RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"^SSH-(\d+\.\d+)-([^\r\n]+)").unwrap());
+    let c = RE.captures(text)?;
+    let proto = c.get(1).map(|m| m.as_str().to_string());
+    let sw = c.get(2).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+    let name = sw.split(['_', '-', ' ']).next().unwrap_or(&sw);
+    let (product, version) = match name.to_ascii_lowercase().as_str() {
+        "openssh" => ("OpenSSH".to_string(), extract_ver(&sw)),
+        "dropbear" => ("Dropbear sshd".to_string(), extract_ver(&sw)),
+        "libssh" => ("libssh".to_string(), extract_ver(&sw)),
+        "mikrotik" | "rosssh" => ("MikroTik RouterOS sshd".to_string(), extract_ver(&sw)),
+        _ => (sw.clone(), None), // unknown: keep the whole token, no version guess
+    };
+    Some(ServiceInfo {
+        product: Some(product),
+        version,
+        extra: proto.map(|p| format!("protocol {}", p)),
+        banner: Some(format!("SSH-{}", c.get(1).map(|m| m.as_str()).unwrap_or(""))),
+        tls: None,
+    })
+}
+
 fn match_signatures(data: &[u8]) -> Option<ServiceInfo> {
     let text = String::from_utf8_lossy(data);
+    // SSH is handled first with a dedicated normaliser (dropbear/OpenSSH/… →
+    // clean product+version) instead of the generic raw-token capture.
+    if let Some(info) = match_ssh(&text) {
+        return Some(info);
+    }
     for s in SIGS.iter() {
         if let Some(c) = s.regex.captures(&text) {
             let product = s.product.map(String::from).or_else(|| {
@@ -690,6 +753,112 @@ fn first_line(s: &str) -> Option<String> {
     if line.trim().is_empty() { None } else { Some(line) }
 }
 
+/// Build a TCP DNS query for `version.bind` CHAOS TXT (RFC-style version
+/// disclosure nmap uses to fingerprint resolvers). Includes the 2-byte TCP
+/// length prefix.
+fn build_dns_version_query() -> Vec<u8> {
+    let mut msg: Vec<u8> = Vec::with_capacity(32);
+    msg.extend_from_slice(&0x1a2bu16.to_be_bytes()); // transaction id
+    msg.extend_from_slice(&0x0100u16.to_be_bytes()); // flags: standard query, RD
+    msg.extend_from_slice(&1u16.to_be_bytes());       // qdcount
+    msg.extend_from_slice(&[0, 0, 0, 0, 0, 0]);       // an/ns/ar counts = 0
+    for label in ["version", "bind"] {
+        msg.push(label.len() as u8);
+        msg.extend_from_slice(label.as_bytes());
+    }
+    msg.push(0);                                      // root label
+    msg.extend_from_slice(&16u16.to_be_bytes());      // qtype TXT
+    msg.extend_from_slice(&3u16.to_be_bytes());       // qclass CHAOS
+    let mut out = (msg.len() as u16).to_be_bytes().to_vec();
+    out.extend_from_slice(&msg);
+    out
+}
+
+/// Pull the TXT character-string out of a `version.bind` answer. `resp`
+/// includes the 2-byte TCP length prefix. Locates the TXT/CHAOS answer RR
+/// (TYPE=0x0010, CLASS=0x0003) and reads its single character-string. No full
+/// DNS parse — version.bind replies are tiny and unambiguous.
+fn parse_dns_version(resp: &[u8]) -> Option<String> {
+    // Need header + at least a question; search for the answer RR signature.
+    let marker = [0x00u8, 0x10, 0x00, 0x03]; // TYPE TXT, CLASS CHAOS
+    // Skip the 2-byte TCP length prefix and 12-byte DNS header before scanning
+    // so the question's qtype/qclass (same bytes) isn't mistaken for the answer.
+    let start = 2 + 12;
+    if resp.len() <= start {
+        return None;
+    }
+    // The question section ends with its own qtype/qclass; find the SECOND
+    // occurrence of the marker (first is the question) when present, else the
+    // first after a plausible answer offset.
+    let mut positions = Vec::new();
+    let mut i = start;
+    while i + 4 <= resp.len() {
+        if resp[i..i + 4] == marker {
+            positions.push(i);
+        }
+        i += 1;
+    }
+    // The answer marker is the last one (question comes first in the stream).
+    let m = *positions.last()?;
+    // After TYPE(2)+CLASS(2) at m..m+4: TTL(4), RDLENGTH(2), then RDATA.
+    let rdata = m + 4 + 4 + 2;
+    let txt_len_pos = rdata; // first RDATA byte = character-string length
+    let l = *resp.get(txt_len_pos)? as usize;
+    let sstart = txt_len_pos + 1;
+    let send = sstart.checked_add(l)?;
+    let bytes = resp.get(sstart..send)?;
+    let s = String::from_utf8_lossy(bytes).trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
+/// Map a version.bind string to a product + version (dnsmasq, BIND, …).
+fn classify_dns_version(txt: &str) -> ServiceInfo {
+    let lower = txt.to_lowercase();
+    let product = if lower.contains("dnsmasq") {
+        "dnsmasq"
+    } else if lower.contains("unbound") {
+        "Unbound"
+    } else if lower.contains("powerdns") || lower.contains("pdns") {
+        "PowerDNS"
+    } else if lower.contains("knot") {
+        "Knot DNS"
+    } else if lower.contains("coredns") {
+        "CoreDNS"
+    } else if lower.contains("bind") || lower.contains("named") {
+        "ISC BIND"
+    } else if txt.trim_start().starts_with(|c: char| c.is_ascii_digit()) {
+        // `version.bind` CHAOS is BIND's native disclosure; a bare version
+        // number (e.g. "9.16.1-Ubuntu") with no other keyword is almost
+        // certainly BIND (or a BIND-compatible responder).
+        "ISC BIND"
+    } else {
+        "DNS server"
+    };
+    let version = if product == "DNS server" { None } else { extract_ver(txt) };
+    ServiceInfo {
+        product: Some(product.to_string()),
+        version,
+        extra: Some("version.bind".to_string()),
+        banner: Some(txt.to_string()),
+        tls: None,
+    }
+}
+
+/// TCP `version.bind` probe for port 53. Returns a populated `ServiceInfo` on
+/// a TXT reply, else `None` (fall back to generic probing).
+async fn dns_version_probe(addr: SocketAddr, dur: Duration) -> Option<ServiceInfo> {
+    let mut stream = timeout(dur, TcpStream::connect(addr)).await.ok()?.ok()?;
+    let q = build_dns_version_query();
+    timeout(dur, stream.write_all(&q)).await.ok()?.ok()?;
+    let mut buf = vec![0u8; 1024];
+    let n = match timeout(dur, stream.read(&mut buf)).await {
+        Ok(Ok(n)) if n > 0 => n,
+        _ => return None,
+    };
+    let txt = parse_dns_version(&buf[..n])?;
+    Some(classify_dns_version(&txt))
+}
+
 pub async fn probe(
     ip: IpAddr,
     port: u16,
@@ -697,6 +866,17 @@ pub async fn probe(
     sni: Option<&str>,
     intensity: u8,
 ) -> Option<ServiceInfo> {
+    let addr = SocketAddr::new(ip, port);
+
+    // DNS (53) discloses its software via a CHAOS TXT `version.bind` query,
+    // not a connect banner — this is how nmap names dnsmasq/BIND/etc. The
+    // generic HTTP/null probes would otherwise leave it as a bare "domain".
+    if port == 53 {
+        if let Some(info) = dns_version_probe(addr, timeout_dur).await {
+            return Some(info);
+        }
+    }
+
     // Binary-only protocols (SMB / MSRPC) never emit a printable banner,
     // so hand them to the dedicated binary probe first (lab bug B2).
     if let Some(info) = crate::binary_probe::probe(ip, port, timeout_dur).await {
@@ -704,8 +884,6 @@ pub async fn probe(
             return Some(info);
         }
     }
-
-    let addr = SocketAddr::new(ip, port);
     let mut best: Option<ServiceInfo> = None;
     for p in probes_for_port(port) {
         if let Some(info) = probe_once(addr, p, timeout_dur).await {
@@ -766,4 +944,75 @@ async fn probe_once(addr: SocketAddr, p: &Probe, dur: Duration) -> Option<Servic
         banner: first_line(&String::from_utf8_lossy(&data)),
         ..Default::default()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ssh_openssh_normalised() {
+        let info = match_ssh("SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.4\r\n").unwrap();
+        assert_eq!(info.product.as_deref(), Some("OpenSSH"));
+        assert_eq!(info.version.as_deref(), Some("8.9p1"));
+        assert_eq!(info.extra.as_deref(), Some("protocol 2.0"));
+    }
+
+    #[test]
+    fn ssh_dropbear_normalised() {
+        let info = match_ssh("SSH-2.0-dropbear_2017.75\r\n").unwrap();
+        assert_eq!(info.product.as_deref(), Some("Dropbear sshd"));
+        assert_eq!(info.version.as_deref(), Some("2017.75"));
+    }
+
+    #[test]
+    fn ssh_unknown_keeps_raw_token() {
+        let info = match_ssh("SSH-2.0-WeirdSSH_1.0\r\n").unwrap();
+        assert_eq!(info.product.as_deref(), Some("WeirdSSH_1.0"));
+        assert!(info.version.is_none());
+    }
+
+    #[test]
+    fn non_ssh_is_none() {
+        assert!(match_ssh("220 ProFTPD\r\n").is_none());
+    }
+
+    #[test]
+    fn dns_query_layout() {
+        let q = build_dns_version_query();
+        // 2-byte TCP length prefix matches the message length.
+        let plen = u16::from_be_bytes([q[0], q[1]]) as usize;
+        assert_eq!(plen, q.len() - 2);
+        // qname version.bind present, qtype TXT (16), qclass CHAOS (3) at the tail.
+        assert_eq!(&q[q.len() - 4..], &[0x00, 0x10, 0x00, 0x03]);
+        assert!(q.windows(7).any(|w| w == b"version"));
+        assert!(q.windows(4).any(|w| w == b"bind"));
+    }
+
+    #[test]
+    fn dns_parse_and_classify_dnsmasq() {
+        let mut r: Vec<u8> = vec![0x00, 0x3c]; // TCP length prefix (value unused by parser)
+        r.extend_from_slice(&[0x1a, 0x2b, 0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0]); // header: qd=1 an=1
+        // question: version.bind TXT CHAOS
+        r.extend_from_slice(&[7]);
+        r.extend_from_slice(b"version");
+        r.extend_from_slice(&[4]);
+        r.extend_from_slice(b"bind");
+        r.extend_from_slice(&[0, 0x00, 0x10, 0x00, 0x03]);
+        // answer: ptr, TXT, CHAOS, ttl, rdlength, char-string "dnsmasq-2.73"
+        r.extend_from_slice(&[0xc0, 0x0c, 0x00, 0x10, 0x00, 0x03, 0, 0, 0, 0, 0x00, 0x0d, 0x0c]);
+        r.extend_from_slice(b"dnsmasq-2.73");
+        let txt = parse_dns_version(&r).expect("should extract TXT");
+        assert_eq!(txt, "dnsmasq-2.73");
+        let info = classify_dns_version(&txt);
+        assert_eq!(info.product.as_deref(), Some("dnsmasq"));
+        assert_eq!(info.version.as_deref(), Some("2.73"));
+    }
+
+    #[test]
+    fn classify_bind() {
+        let info = classify_dns_version("9.16.1-Ubuntu");
+        assert_eq!(info.product.as_deref(), Some("ISC BIND"));
+        assert_eq!(info.version.as_deref(), Some("9.16.1"));
+    }
 }

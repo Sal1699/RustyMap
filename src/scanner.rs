@@ -107,6 +107,10 @@ pub async fn tcp_connect_scan(
     let start = Instant::now();
     let ip = target.ip;
 
+    // nmap-style adaptive per-probe timeout floor (point: SYN/connect
+    // slow-ramp). Once the limiter has seen real RTTs, a filtered port no
+    // longer costs the full `--timeout`; see `rate::adaptive_timeout`.
+    let timeout_floor = crate::rate::timeout_floor(timeout_dur);
     let results: Vec<PortResult> = if let Some(lim) = limiter.as_ref() {
         let sem = lim.semaphore();
         let mut handles = Vec::with_capacity(ports.len());
@@ -136,8 +140,12 @@ pub async fn tcp_connect_scan(
                 let max_retries = MAX_RETRIES.load(Ordering::Relaxed);
                 let mut attempt = 0u8;
                 let (mut state, mut timed_out);
+                // Shrink the wait toward the observed RTT once the limiter has
+                // samples; the full `timeout_dur` is still used while warming up.
+                let eff_timeout =
+                    crate::rate::adaptive_timeout(timeout_dur, lim_task.mean_rtt(), timeout_floor);
                 loop {
-                    let res = dial(addr, timeout_dur).await;
+                    let res = dial(addr, eff_timeout).await;
                     let (s, to) = match res {
                         Ok(_s) => (PortState::Open, false),
                         Err(e) => match e.kind() {

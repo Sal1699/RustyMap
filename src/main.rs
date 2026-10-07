@@ -389,6 +389,34 @@ async fn main() -> Result<()> {
             Ok(n) => eprintln!("[nmap-os-db] loaded {} fingerprints from {}", n, path),
             Err(e) => eprintln!("[!] --nmap-os-db {}: {}", path, e),
         }
+    } else if args.os_fingerprint {
+        // Auto-detect a system nmap-os-db so `-O` gets full probabilistic
+        // matching out of the box. Without it, OS detection silently falls back
+        // to the coarse built-in heuristic (the "server 55%" surprise). An
+        // explicit --nmap-os-db always wins (handled above); this only fills
+        // the gap. CPU-cheap: a few `exists()` stats, load only on a hit.
+        let mut candidates: Vec<std::path::PathBuf> = vec![
+            "/usr/share/nmap/nmap-os-db".into(),
+            "/usr/local/share/nmap/nmap-os-db".into(),
+            "/opt/homebrew/share/nmap/nmap-os-db".into(),
+            r"C:\Program Files (x86)\Nmap\nmap-os-db".into(),
+            r"C:\Program Files\Nmap\nmap-os-db".into(),
+        ];
+        if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+            let mut p = std::path::PathBuf::from(home);
+            p.push("nmap-os-db");
+            candidates.push(p);
+        }
+        if let Some(found) = candidates.into_iter().find(|p| p.exists()) {
+            match nmap_db::load_os_db(&found) {
+                Ok(n) => eprintln!(
+                    "[nmap-os-db] auto-loaded {} fingerprints from {} (use --nmap-os-db to override)",
+                    n,
+                    found.display()
+                ),
+                Err(e) => eprintln!("[!] auto nmap-os-db {}: {}", found.display(), e),
+            }
+        }
     }
     if let Some(path) = &args.nmap_service_probes {
         match nmap_db::load_service_probes(path) {
@@ -3001,7 +3029,14 @@ async fn main() -> Result<()> {
     // because HTTP scripts finally had a live web port to probe. Offload
     // to a blocking thread, the canonical fix for blocking reqwest in
     // async code.
-    if !args.no_builtin_scripts && args.script_path.is_none() {
+    // Built-in scripts auto-run for focused scans, but a broad sweep that
+    // fired all ~117 against every host was slow and noisy (a /24 of 17 hosts
+    // took minutes). nmap keeps scripts opt-in at scale; mirror that — skip
+    // the auto-run above a small host threshold unless --force-scripts.
+    const SCRIPT_SWEEP_LIMIT: usize = 8;
+    let script_host_count = sorted.len();
+    let script_sweep = script_host_count > SCRIPT_SWEEP_LIMIT && !args.force_scripts;
+    if !args.no_builtin_scripts && args.script_path.is_none() && !script_sweep {
         let scripts = scripting::builtin_scripts();
         let sorted_for_scripts = sorted.clone();
         let args_for_scripts = parsed_args.clone();
@@ -3014,6 +3049,13 @@ async fn main() -> Result<()> {
         if !f.is_empty() {
             audit.event("scripts_builtin_run", json!({ "count": f.len() }));
         }
+    } else if !args.no_builtin_scripts && args.script_path.is_none() && script_sweep {
+        println!(
+            "[scripts] {} hosts up — built-in scripts skipped on sweeps (opt-in at scale). \
+             Re-run against a single host, or pass --force-scripts.",
+            script_host_count
+        );
+        audit.event("scripts_builtin_skipped_sweep", json!({ "hosts": script_host_count }));
     }
     if let Some(sp) = &args.script_path {
         let sp = sp.clone();

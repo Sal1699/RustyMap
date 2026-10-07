@@ -17,7 +17,40 @@ pub struct AdaptiveLimiter {
     successes: AtomicU64,
     timeouts: AtomicU64,
     total_rtt_ms: AtomicU64,
+    /// Persistent EWMA of observed RTT in microseconds (NOT reset by
+    /// `adjust()`, unlike `total_rtt_ms`). Drives `adaptive_timeout` so a
+    /// filtered port on a fast LAN stops costing the full `--timeout`.
+    ewma_rtt_us: AtomicU64,
+    rtt_samples: AtomicU64,
     verbose: bool,
+}
+
+/// How much headroom over the mean RTT to allow before calling a probe lost.
+/// nmap uses `srtt + 4·rttvar`; a flat 10× mean is a stable, slightly
+/// conservative proxy that still collapses a 1500 ms LAN wait to the floor.
+pub const RTT_TIMEOUT_MULT: u32 = 10;
+
+/// nmap-style adaptive per-probe timeout. Until we have observed real RTTs
+/// the full `base` (the user's `--timeout`) is used; once we have a mean,
+/// the wait shrinks toward `RTT_TIMEOUT_MULT × rtt`, clamped to
+/// `[floor, base]`. On a LAN (RTT < 1 ms) this collapses the dominant cost
+/// of small SYN/connect scans — a filtered port waited the full 1.5 s × retries
+/// before — while a slow WAN host (high RTT) keeps a long timeout because the
+/// product rises with the measured RTT. Self-scaling, never below `floor`.
+pub fn adaptive_timeout(base: Duration, mean_rtt: Option<Duration>, floor: Duration) -> Duration {
+    match mean_rtt {
+        Some(rtt) if !rtt.is_zero() => rtt
+            .saturating_mul(RTT_TIMEOUT_MULT)
+            .clamp(floor.min(base), base),
+        _ => base,
+    }
+}
+
+/// The per-probe timeout floor derived from the user's base timeout: one
+/// tenth of it, bounded to a sane LAN range so `adaptive_timeout` never waits
+/// absurdly little (missing a slow reply) nor as long as the full base.
+pub fn timeout_floor(base: Duration) -> Duration {
+    (base / 10).clamp(Duration::from_millis(50), Duration::from_millis(300))
 }
 
 impl AdaptiveLimiter {
@@ -31,8 +64,25 @@ impl AdaptiveLimiter {
             successes: AtomicU64::new(0),
             timeouts: AtomicU64::new(0),
             total_rtt_ms: AtomicU64::new(0),
+            ewma_rtt_us: AtomicU64::new(0),
+            rtt_samples: AtomicU64::new(0),
             verbose,
         })
+    }
+
+    /// Mean observed RTT, once at least a few replies have been seen.
+    /// `None` until then so the scan uses the full base timeout while warming
+    /// up. Reads the persistent EWMA, not the per-interval `total_rtt_ms`.
+    pub fn mean_rtt(&self) -> Option<Duration> {
+        if self.rtt_samples.load(Ordering::Relaxed) < 3 {
+            return None;
+        }
+        let us = self.ewma_rtt_us.load(Ordering::Relaxed);
+        if us == 0 {
+            None
+        } else {
+            Some(Duration::from_micros(us))
+        }
     }
 
     pub fn semaphore(&self) -> Arc<Semaphore> {
@@ -50,6 +100,17 @@ impl AdaptiveLimiter {
         } else {
             self.successes.fetch_add(1, Ordering::Relaxed);
             self.total_rtt_ms.fetch_add(rtt.as_millis() as u64, Ordering::Relaxed);
+            // Persistent RTT EWMA (α=0.25) in microseconds, surviving
+            // `adjust()`. A racy load/store is fine for a timing heuristic.
+            let sample = rtt.as_micros().min(u64::MAX as u128) as u64;
+            let prev = self.ewma_rtt_us.load(Ordering::Relaxed);
+            let next = if prev == 0 {
+                sample
+            } else {
+                (prev * 3 + sample) / 4
+            };
+            self.ewma_rtt_us.store(next, Ordering::Relaxed);
+            self.rtt_samples.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -115,5 +176,63 @@ impl AdaptiveLimiter {
                 me.adjust();
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adaptive_timeout_uses_base_without_samples() {
+        let base = Duration::from_millis(1500);
+        assert_eq!(adaptive_timeout(base, None, timeout_floor(base)), base);
+    }
+
+    #[test]
+    fn adaptive_timeout_collapses_on_fast_lan() {
+        let base = Duration::from_millis(1500);
+        let floor = timeout_floor(base); // 150ms
+        // 0.3ms LAN RTT → 10× = 3ms, clamped up to the 150ms floor (not 1500).
+        let eff = adaptive_timeout(base, Some(Duration::from_micros(300)), floor);
+        assert_eq!(eff, floor);
+        assert!(eff < base);
+    }
+
+    #[test]
+    fn adaptive_timeout_rises_for_slow_wan() {
+        let base = Duration::from_millis(1500);
+        let floor = timeout_floor(base);
+        // 80ms WAN RTT → 10× = 800ms, between floor and base.
+        let eff = adaptive_timeout(base, Some(Duration::from_millis(80)), floor);
+        assert_eq!(eff, Duration::from_millis(800));
+    }
+
+    #[test]
+    fn adaptive_timeout_never_exceeds_base() {
+        let base = Duration::from_millis(1500);
+        let floor = timeout_floor(base);
+        // 500ms RTT → 10× = 5s, capped at base.
+        let eff = adaptive_timeout(base, Some(Duration::from_millis(500)), floor);
+        assert_eq!(eff, base);
+    }
+
+    #[test]
+    fn timeout_floor_is_tenth_bounded() {
+        assert_eq!(timeout_floor(Duration::from_millis(1500)), Duration::from_millis(150));
+        // Tiny base → floored at 50ms.
+        assert_eq!(timeout_floor(Duration::from_millis(200)), Duration::from_millis(50));
+        // Huge base → capped at 300ms.
+        assert_eq!(timeout_floor(Duration::from_millis(9000)), Duration::from_millis(300));
+    }
+
+    #[test]
+    fn mean_rtt_none_until_three_samples() {
+        let lim = AdaptiveLimiter::new(100, 4, 500, false);
+        lim.record(false, Duration::from_millis(10));
+        lim.record(false, Duration::from_millis(10));
+        assert!(lim.mean_rtt().is_none());
+        lim.record(false, Duration::from_millis(10));
+        assert_eq!(lim.mean_rtt(), Some(Duration::from_millis(10)));
     }
 }

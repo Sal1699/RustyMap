@@ -115,33 +115,45 @@ fn first_chunk_type(packet: &[u8]) -> Option<u8> {
     Some(packet[12])
 }
 
-/// Wait up to `timeout` for an SCTP packet from `dst` and decode the
-/// first chunk type. None on timeout.
-fn await_response(rx: &mut pnet::transport::TransportReceiver, dst: Ipv4Addr, timeout: Duration) -> Option<u8> {
+/// Wait up to `timeout` for an SCTP packet from `dst` and decode the first
+/// chunk type. `None` on timeout.
+///
+/// **Bug fix (B28):** the previous version computed a `remaining` deadline and
+/// then *discarded* it (`let _ = remaining;`) while `iter.next()` blocked with
+/// no timeout. On a host with no SCTP stack no packet ever comes back, so the
+/// call blocked forever — the "SCTP TIMEOUT" seen in the lab. We now run the
+/// blocking read on a dedicated thread and bound the wait with
+/// `recv_timeout`, so a silent target returns `None` after `timeout` as
+/// intended. (On timeout the reader thread is left parked on the socket until
+/// the process exits — fine for SCTP's tiny port lists, same pattern as the
+/// TCP raw scanner's receiver loop.)
+fn await_response(mut rx: pnet::transport::TransportReceiver, dst: Ipv4Addr, timeout: Duration) -> Option<u8> {
     use pnet::transport::ipv4_packet_iter;
-    let deadline = Instant::now() + timeout;
-    let mut iter = ipv4_packet_iter(rx);
-    loop {
-        let remaining = deadline.checked_duration_since(Instant::now())?;
-        let _ = remaining;
-        match iter.next() {
-            Ok((packet, src)) => {
-                if src != IpAddr::V4(dst) {
-                    continue;
+    use std::sync::mpsc;
+    let (tx, chan) = mpsc::sync_channel::<u8>(1);
+    std::thread::spawn(move || {
+        let mut iter = ipv4_packet_iter(&mut rx);
+        loop {
+            match iter.next() {
+                Ok((packet, src)) => {
+                    if src != IpAddr::V4(dst) {
+                        continue;
+                    }
+                    if let Some(t) = first_chunk_type(packet.payload()) {
+                        let _ = tx.send(t);
+                        return;
+                    }
                 }
-                let payload = packet.payload();
-                if let Some(t) = first_chunk_type(payload) {
-                    return Some(t);
-                }
+                Err(_) => return,
             }
-            Err(_) => return None,
         }
-    }
+    });
+    chan.recv_timeout(timeout).ok()
 }
 
 /// Probe one port. Returns `PortState` based on chunk-type response.
 pub fn probe_one(dst: Ipv4Addr, port: u16, kind: SctpScanKind, timeout: Duration) -> Result<PortState> {
-    let (mut tx, mut rx) = transport_channel(
+    let (mut tx, rx) = transport_channel(
         4096,
         Layer4(Ipv4(IpNextHeaderProtocols::Sctp)),
     )
@@ -170,7 +182,7 @@ pub fn probe_one(dst: Ipv4Addr, port: u16, kind: SctpScanKind, timeout: Duration
         .send_to(Raw(&pkt), IpAddr::V4(dst))
         .map_err(|e| anyhow!("SCTP send: {}", e))?;
 
-    let chunk = await_response(&mut rx, dst, timeout);
+    let chunk = await_response(rx, dst, timeout);
 
     Ok(classify(kind, chunk))
 }

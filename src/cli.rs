@@ -901,6 +901,13 @@ pub struct Cli {
     #[arg(long = "no-builtin-scripts")]
     pub no_builtin_scripts: bool,
 
+    /// Force built-in scripts to run even on multi-host sweeps. By default
+    /// they auto-run only for focused scans (≤8 hosts); on a larger sweep
+    /// they are skipped to stay quiet and fast (nmap keeps scripts opt-in at
+    /// scale). This flag overrides that and runs them on every host.
+    #[arg(long = "force-scripts")]
+    pub force_scripts: bool,
+
     /// Print common usage recipes and exit
     #[arg(long = "examples")]
     pub examples: bool,
