@@ -4,6 +4,59 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.82.0] - 2026-10-08
+
+A broad release off the v0.81.0 lab validation: fixes all six bugs found,
+makes bare port scans fast (the real speed win), expands `--web-scan`, and
+activates the dormant Metasploit module-suggestion path. 595/595 tests (+3).
+Raw-socket/live-service parts want Kali validation as usual.
+
+### Fixed (the six v0.81.0 bugs)
+- **Built-in scripts no longer auto-run on bare port scans (bug #1, #4, and the
+  A1 residual).** They now auto-run only in a *triage* context — a bare
+  `rustymap <host>` (no scan-type flag) or `-sV`/`-A` — never on an explicit
+  raw port scan (`--sS`/`--sT -F`/…). Firing ~117 Rhai scripts against every
+  open port was what made small scans look 25–64× slower than nmap and
+  surfaced ports *outside* `-p` (the scripts probed their own ports). A
+  `--sS -F` is now a plain, fast port scan; `--force-scripts` overrides, and
+  `-sV`/`-A` keep the rich output. (`Cli::explicit_scan_type`.)
+- **SCTP ports mislabelled `/tcp` (bug #2)** → interactive output now prints
+  `/sctp` for `--sY`/`--sZ`.
+- **SCTP host discovery failed without `--Pn` (bug #3)** → SCTP scans now imply
+  `-Pn` (like ACK/Window/Maimon); our TCP/ICMP discovery doesn't speak SCTP and
+  was wrongly marking responsive hosts down.
+- **ARP discovery found fewer hosts than nmap (bug #5)** → ARP requests are now
+  retransmitted (up to 2 extra rounds) to still-missing targets within the
+  deadline, so slow/sleeping devices (phones) are caught.
+- **`--web-scan` false positives on catch-all servers (bug #6)** → a soft-404
+  baseline (random path) detects servers that answer `200` to everything;
+  marker-less path hits are then suppressed, and the two previously
+  marker-less paths (`backup.zip`, `config.json`) gained content markers.
+
+### Speed
+- The script opt-in above is the headline win: on hosts with open ports a
+  `--sS -F` drops from ~19 s (117 scripts) to the scan itself. Combined with
+  v0.81's RTT-adaptive timeout, bare scans are now competitive with / faster
+  than nmap in the cases the lab flagged. **Honest note:** nmap's pcap engine
+  can still edge raw SYN throughput on some very responsive hosts — "faster in
+  every case" is not claimed; the big, reproducible regressions are closed.
+
+### Added — `--web-scan` depth
+- **HTTP method probe** (OPTIONS) flags dangerous verbs (PUT/DELETE/TRACE/…).
+- **CORS misconfiguration check** — reflects an arbitrary `Origin`, flags
+  `ACAO: *`, origin reflection, and the account-takeover-class
+  reflection-with-credentials case.
+- **+12 sensitive paths** (`.env.local/.production`, `.svn/entries`,
+  `.ssh/id_rsa`, `docker-compose.yml`, `actuator/heapdump`, `debug/pprof`,
+  Symfony `_profiler`, Laravel `telescope`, `graphql` introspection,
+  `wp-config.php.bak`, …) with content markers.
+
+### Added — Metasploit
+- **`--msf-suggest`** — after the scan, searches msfrpcd (`module.search`) for
+  modules matching *every* correlated CVE and prints pre-filled RHOSTS fire
+  lines. Read-only; never fires. Activates the previously-dead
+  `suggest_for_findings` path. Needs `--msf-url` + auth.
+
 ## [0.81.0] - 2026-10-07
 
 Addresses every point from the full RustyMap-vs-nmap lab comparison, hardest

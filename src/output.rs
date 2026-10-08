@@ -295,8 +295,16 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
     header.push("VERSION".bold().to_string());
     println!("{}", header.join(" "));
 
-    // UDP scans must label ports /udp, not /tcp (lab bug 1.A presentation).
-    let proto = if scan_type.eq_ignore_ascii_case("udp") { "udp" } else { "tcp" };
+    // Label ports with the right transport: /udp for UDP, /sctp for the SCTP
+    // INIT/COOKIE scans (v0.82 bug #2 — was mislabelled /tcp), else /tcp.
+    let st = scan_type.to_ascii_lowercase();
+    let proto = if st == "udp" {
+        "udp"
+    } else if st.starts_with("sctp") {
+        "sctp"
+    } else {
+        "tcp"
+    };
     for p in shown.iter().copied() {
         let port_s = format!("{}/{}", p.port, proto);
         // Pad the plain text to width FIRST, then colorize, so the ANSI

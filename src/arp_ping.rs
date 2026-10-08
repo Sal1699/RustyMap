@@ -99,9 +99,8 @@ pub fn arp_discover_timed(
     let send_at: HashMap<Ipv4Addr, Instant> = targets.iter().map(|&t| (t, Instant::now())).collect();
     let _ = &send_at;
 
-    // ── Send all ARP requests up front ──
-    let started = Instant::now();
-    for &t in targets {
+    // Build + broadcast a single ARP request for one target.
+    let send_req = |tx: &mut Box<dyn datalink::DataLinkSender>, t: Ipv4Addr| {
         let mut buf = [0u8; 42];
         {
             let mut eth = MutableEthernetPacket::new(&mut buf).unwrap();
@@ -120,11 +119,33 @@ pub fn arp_discover_timed(
             arp.set_target_proto_addr(t);
         }
         let _ = tx.send_to(&buf, Some(iface.clone()));
+    };
+
+    // ── Round 1: request every target up front ──
+    let started = Instant::now();
+    for &t in targets {
+        send_req(&mut tx, t);
     }
 
-    // ── Listen for replies up to deadline ──
+    // ── Listen, retransmitting to still-missing targets (v0.82 bug #5) ──
+    // A single up-front request missed slow/sleeping devices (phones), so
+    // RustyMap found fewer hosts than nmap — which retransmits. Re-ask the
+    // unanswered targets a couple of times within the deadline.
+    const MAX_RETX: u32 = 2;
     let deadline = Instant::now() + timeout;
+    let retx_interval = (timeout / (MAX_RETX + 1)).max(Duration::from_millis(150));
+    let mut last_retx = Instant::now();
+    let mut retx_rounds = 0u32;
     while Instant::now() < deadline && found.len() < targets.len() {
+        if retx_rounds < MAX_RETX && last_retx.elapsed() >= retx_interval {
+            for &t in targets {
+                if !found.contains_key(&t) {
+                    send_req(&mut tx, t);
+                }
+            }
+            retx_rounds += 1;
+            last_retx = Instant::now();
+        }
         match rx.next() {
             Ok(packet) => {
                 if let Some(eth) = EthernetPacket::new(packet) {

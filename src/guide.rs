@@ -83,7 +83,10 @@ pub fn print_guide() {
     line("                      → rileva server HTTP/3 ed enumera le versioni QUIC");
     line("--web-scan            Web attack-surface: grade security-header A-F,");
     line("                      rileva WAF/CDN, sonda path sensibili (.env/.git/");
-    line("                      actuator/swagger/backup/metrics), flag cookie");
+    line("                      actuator-heapdump/swagger/graphql/backup/ssh-key),");
+    line("                      metodi HTTP pericolosi (PUT/DELETE/TRACE), CORS");
+    line("                      reflection, flag cookie. Soft-404 baseline per");
+    line("                      sopprimere i falsi positivi sui server catch-all");
     line("--tls-scan            HTTPS/TLS: matrice versioni 1.0-1.3, ALPN (h2/");
     line("                      http1.1), HSTS, fingerprint attivo JARM, e");
     line("                      certificato (subject/issuer/SAN/scadenza + flag");
@@ -148,6 +151,9 @@ pub fn print_guide() {
     line("--msf-ping            Test connessione (chiama core.version)");
     line("--msf-import WS       Importa l'ultimo scan in workspace WS");
     line("--msf-suggest-cve C   Cerca moduli MSF che matchano CVE-XXXX-NNNN");
+    line("--msf-suggest         Dopo lo scan, cerca moduli MSF per OGNI CVE");
+    line("                      correlato sui target + stampa righe RHOSTS pronte");
+    line("                      (read-only module.search; serve --msf-url + auth)");
     line("--msf-fire MODULE     Esegui modulo MSF (richiede --msf-fire-confirm + prompt)");
     line("--msf-fire-exploits   Promuove --msf-fire ad esecuzione exploit-class");
     line("--msf-fire-allow-low  Consente moduli rank=manual/low");
@@ -472,9 +478,10 @@ pub fn print_guide() {
     line("--script PATH         Esegui script Rhai (file o directory *.rhai)");
     line("--cve-db FILE         Correla servizi a CVE (usa con --sV)");
     line("--no-builtin-scripts  Disabilita gli script Rhai baked nel binario");
-    line("--force-scripts       Esegui i built-in anche sugli sweep (>8 host): di");
-    line("                      default sono saltati sulle scansioni multi-host per");
-    line("                      restare veloci/silenziosi (gli script sono opt-in su scala)");
+    line("--force-scripts       Forza i built-in. Di default auto-partono SOLO su");
+    line("                      scan di default/`-sV`/`-A`, non sui port-scan raw");
+    line("                      espliciti (--sS/--sT -F) né sugli sweep >8 host —");
+    line("                      così un port-scan resta veloce come nmap");
     line("--no-builtin-cves     Disabilita il DB CVE baked nel binario");
     line("--nmap-os-db FILE     Carica nmap-os-db (GPLv2, runtime): con -O attiva il");
     line("                      matching probabilistico completo (MatchPoints, ~6500");

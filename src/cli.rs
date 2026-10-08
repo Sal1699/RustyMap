@@ -389,6 +389,12 @@ pub struct Cli {
     #[arg(long = "msf-suggest-cve", value_name = "CVE")]
     pub msf_suggest_cve: Option<String>,
 
+    /// After the scan, look up MSF modules for EVERY CVE correlated on the
+    /// targets and print pre-filled RHOSTS fire lines (read-only module.search,
+    /// never fires). Needs --msf-url (+ --msf-user/--msf-pass or --msf-token).
+    #[arg(long = "msf-suggest")]
+    pub msf_suggest: bool,
+
     /// Fire an MSF module. Requires --msf-fire-confirm + stdin prompt.
     /// Auxiliary-only by default; --msf-fire-exploits opts in to
     /// exploit-class modules.
@@ -1330,6 +1336,27 @@ pub enum ScanType {
 }
 
 impl Cli {
+    /// Did the user explicitly type a scan-type flag (--sS/--sT/--sU/…)?
+    /// Drives script auto-run: a bare `rustymap <host>` (triage) or `-sV`/`-A`
+    /// runs the built-in scripts, but an explicit raw port scan does NOT — so
+    /// it stays fast and nmap-comparable (v0.82 bug #1 / A1 residual overhead).
+    pub fn explicit_scan_type(&self) -> bool {
+        self.scan_connect
+            || self.scan_syn
+            || self.scan_fin
+            || self.scan_null
+            || self.scan_xmas
+            || self.scan_ack
+            || self.scan_window
+            || self.scan_maimon
+            || self.scan_udp
+            || self.scan_sctp_init
+            || self.scan_sctp_cookie
+            || self.scan_ipproto
+            || self.scan_list
+            || self.scan_idle.is_some()
+    }
+
     pub fn scan_type(&self) -> ScanType {
         if self.scan_syn { ScanType::Syn }
         else if self.scan_fin { ScanType::Fin }

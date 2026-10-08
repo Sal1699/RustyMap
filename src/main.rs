@@ -1899,14 +1899,22 @@ async fn main() -> Result<()> {
     // -sA as implicit -Pn unless the user explicitly disabled the
     // auto-skip with --discover-on-ack. Window/Maimon scans share the
     // same rationale.
+    // SCTP (INIT/COOKIE) joins ACK/Window/Maimon here (v0.82 bug #3): our
+    // TCP/ICMP host-discovery doesn't speak SCTP, so it mis-reported SCTP
+    // targets as "Host seems down" even when they answered ARP. nmap-style,
+    // treat an SCTP scan as implicit -Pn and go straight to the SCTP probes.
     let implicit_pn_for_stealth = matches!(
         scan_type,
-        ScanType::Ack | ScanType::Window | ScanType::Maimon
+        ScanType::Ack
+            | ScanType::Window
+            | ScanType::Maimon
+            | ScanType::SctpInit
+            | ScanType::SctpCookie
     );
     if implicit_pn_for_stealth && !args.skip_discovery {
         eprintln!(
-            "[i] {:?} scan implies -Pn (skipping host discovery — that's the point \
-             of an ACK/Window/Maimon scan). Pass --discover-on-ack to override.",
+            "[i] {:?} scan implies -Pn (skipping host discovery). Pass \
+             --discover-on-ack to override.",
             scan_type
         );
     }
@@ -2673,6 +2681,48 @@ async fn main() -> Result<()> {
             let hits = cve::correlate(&d, &sorted);
             cve::print_hits(&hits);
             audit.event("cve_correlated", json!({ "hits": hits.len() }));
+
+            // --msf-suggest: for every correlated CVE, search msfrpcd for
+            // matching modules and print pre-filled RHOSTS fire lines. Purely
+            // read-only (module.search); never fires. Needs --msf-url + auth.
+            if args.msf_suggest && !hits.is_empty() {
+                if let Some(url) = args.msf_url.clone() {
+                    let conn = msf_rpc::ConnectArgs {
+                        url,
+                        username: args.msf_user.clone(),
+                        password: args.msf_pass.clone(),
+                        token: args.msf_token.clone(),
+                        timeout_secs: 30,
+                        accept_invalid_certs: args.msf_insecure,
+                    };
+                    match msf_rpc::Client::connect(conn).await {
+                        Ok(client) => {
+                            let findings: Vec<compliance::Finding> = hits
+                                .iter()
+                                .map(|h| {
+                                    compliance::Finding::new(
+                                        "cve",
+                                        &format!("{}:{}", h.host, h.port),
+                                        &h.cve,
+                                    )
+                                })
+                                .collect();
+                            match msf_suggest::suggest_for_findings(&client, &findings).await {
+                                Ok(sugs) => {
+                                    msf_suggest::print_suggestions(&sugs);
+                                    audit.event("msf_suggest", json!({ "findings": sugs.len() }));
+                                }
+                                Err(e) => eprintln!("[!] --msf-suggest: {}", e),
+                            }
+                        }
+                        Err(e) => eprintln!("[!] --msf-suggest connect: {}", e),
+                    }
+                } else {
+                    eprintln!(
+                        "[!] --msf-suggest needs --msf-url (+ --msf-user/--msf-pass or --msf-token)"
+                    );
+                }
+            }
         }
     }
 
@@ -3029,14 +3079,23 @@ async fn main() -> Result<()> {
     // because HTTP scripts finally had a live web port to probe. Offload
     // to a blocking thread, the canonical fix for blocking reqwest in
     // async code.
-    // Built-in scripts auto-run for focused scans, but a broad sweep that
-    // fired all ~117 against every host was slow and noisy (a /24 of 17 hosts
-    // took minutes). nmap keeps scripts opt-in at scale; mirror that — skip
-    // the auto-run above a small host threshold unless --force-scripts.
+    // Built-in scripts auto-run only in a "triage" context — a bare
+    // `rustymap <host>` (no scan-type flag) or `-sV`/`-A`. On an EXPLICIT raw
+    // port scan (`--sS`/`--sT -F`/…) they are skipped, because firing ~117
+    // scripts against every open port is what made small scans look 25-64×
+    // slower than nmap and surfaced ports outside `-p` (v0.81 A1 residual +
+    // bug #1/#4). `--force-scripts` overrides. Also skip on broad sweeps.
     const SCRIPT_SWEEP_LIMIT: usize = 8;
     let script_host_count = sorted.len();
     let script_sweep = script_host_count > SCRIPT_SWEEP_LIMIT && !args.force_scripts;
-    if !args.no_builtin_scripts && args.script_path.is_none() && !script_sweep {
+    // Triage = default scan (no explicit scan-type) OR depth requested.
+    let scripts_in_context =
+        args.service_version || args.aggressive || !args.explicit_scan_type() || args.force_scripts;
+    if !args.no_builtin_scripts
+        && args.script_path.is_none()
+        && !script_sweep
+        && scripts_in_context
+    {
         let scripts = scripting::builtin_scripts();
         let sorted_for_scripts = sorted.clone();
         let args_for_scripts = parsed_args.clone();
