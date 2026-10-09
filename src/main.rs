@@ -559,7 +559,7 @@ async fn main() -> Result<()> {
         // If the user passed an explicit -p spec, use it as the recommend
         // probe set so non-default service ports aren't missed (Fase 24
         // bug report #6). Otherwise fall back to the curated PROBE_PORTS.
-        let user_ports = if args.ports != "1-1000" && !args.ports.is_empty() {
+        let user_ports = if args.ports_explicit() {
             ports::parse_ports(&args.effective_ports()).ok()
         } else {
             None
@@ -763,7 +763,7 @@ async fn main() -> Result<()> {
     }
     if args.web_scan {
         let dur = args.timeout();
-        let parsed = ports::parse_ports(&args.ports).unwrap_or_default();
+        let parsed = ports::parse_ports(&args.ports_spec()).unwrap_or_default();
         let ports: Vec<u16> = if parsed.is_empty() || parsed.len() > 50 {
             vec![80, 443, 8080, 8443]
         } else {
@@ -789,7 +789,7 @@ async fn main() -> Result<()> {
     }
     if args.tls_scan {
         let dur = args.timeout();
-        let parsed = ports::parse_ports(&args.ports).unwrap_or_default();
+        let parsed = ports::parse_ports(&args.ports_spec()).unwrap_or_default();
         let ports: Vec<u16> = if parsed.is_empty() || parsed.len() > 50 {
             vec![443, 8443, 993, 995, 465]
         } else {
@@ -814,7 +814,7 @@ async fn main() -> Result<()> {
     }
     if args.quic {
         let dur = args.timeout();
-        let parsed = ports::parse_ports(&args.ports).unwrap_or_default();
+        let parsed = ports::parse_ports(&args.ports_spec()).unwrap_or_default();
         // A huge default port set (-p 1-1000) makes no sense for QUIC; fall
         // back to 443 unless the user gave a small explicit list.
         let udp_ports: Vec<u16> = if parsed.is_empty() || parsed.len() > 50 {
@@ -837,7 +837,7 @@ async fn main() -> Result<()> {
     if let Some(relay_spec) = &args.ftp_bounce {
         let relay = ftp_bounce::parse_relay(relay_spec);
         let dur = args.timeout();
-        let ports = ports::parse_ports(&args.ports)?;
+        let ports = ports::parse_ports(&args.ports_spec())?;
         let targets = target::expand_targets(&args.targets, !args.no_dns).await?;
         if targets.is_empty() {
             println!("[ftp-bounce] no target — pass a host to scan through the relay");
@@ -1724,7 +1724,7 @@ async fn main() -> Result<()> {
             sid, saved_type, target_spec, port_spec
         );
         args.targets = target_spec.split(',').map(|s| s.to_string()).collect();
-        args.ports = port_spec;
+        args.ports = Some(port_spec);
         apply_scan_type_str(&mut args, &saved_type)?;
         resumed_scan_id = Some(sid);
     }
@@ -2127,7 +2127,7 @@ async fn main() -> Result<()> {
     // user combines conflicting port-selection flags so they know
     // which one was effectively ignored. Previous behavior was silent
     // precedence.
-    let p_was_set_explicitly = args.ports != "1-1000" && !args.ports.is_empty();
+    let p_was_set_explicitly = args.ports_explicit();
     if args.fast && (args.top_ports.is_some() || args.all_ports || p_was_set_explicitly) {
         eprintln!(
             "[!] -F is taking precedence — --top-ports / --all-ports / -p were ignored. \
@@ -2143,7 +2143,7 @@ async fn main() -> Result<()> {
         eprintln!(
             "[!] --all-ports is taking precedence — -p '{}' was ignored. \
              Drop --all-ports if you want -p to take effect.",
-            args.ports
+            args.ports_spec()
         );
     }
     // UDP has its own frequency ranking — using the TCP top-ports list for

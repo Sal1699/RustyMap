@@ -344,12 +344,17 @@ pub async fn scan_port(ip: IpAddr, port: u16, sni: Option<String>, dur: Duration
         if st != 200 {
             continue;
         }
+        // On a catch-all server the body is the same page the soft-404 returned,
+        // so require a meaningful size delta from the baseline (v0.82.1: `.env`'s
+        // `=` and `config.json`'s `{` were matching the catch-all HTML itself).
+        let differs_from_baseline = b.len().abs_diff(baseline_len) > 64;
         let hit = if !sp.marker.is_empty() {
             b.to_lowercase().contains(&sp.marker.to_lowercase())
+                && (!catch_all || differs_from_baseline)
         } else {
             // No content marker: trust only when the server isn't a catch-all
             // and the body differs meaningfully from the soft-404 baseline.
-            !catch_all && b.len().abs_diff(baseline_len) > 64
+            !catch_all && differs_from_baseline
         };
         if hit {
             exposures.push(Exposure {

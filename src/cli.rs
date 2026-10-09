@@ -14,9 +14,13 @@ pub struct Cli {
     #[arg(num_args = 0..)]
     pub targets: Vec<String>,
 
-    /// Port specification: 22, 1-1000, 22,80,443, or - for 1-65535
-    #[arg(short = 'p', long = "ports", default_value = "1-1000")]
-    pub ports: String,
+    /// Port specification: 22, 1-1000, 22,80,443, or - for 1-65535.
+    /// Unset (None) means "no explicit -p" → the default top-1000-by-frequency
+    /// scan; an explicit `-p 1-1000` scans ports 1-1000 sequentially. (v0.82.1:
+    /// was a `String` defaulting to "1-1000", which made an explicit
+    /// `-p 1-1000` indistinguishable from the default.)
+    #[arg(short = 'p', long = "ports")]
+    pub ports: Option<String>,
 
     /// Scan all 65535 ports (shortcut for -p-)
     #[arg(long = "all-ports")]
@@ -1374,11 +1378,22 @@ impl Cli {
         else { ScanType::Connect }
     }
 
+    /// The port spec string, with the default filled in when `-p` was unset.
+    pub fn ports_spec(&self) -> String {
+        self.ports.clone().unwrap_or_else(|| "1-1000".to_string())
+    }
+
+    /// Did the user explicitly pass `-p`? (vs the top-1000-by-freq default.)
+    pub fn ports_explicit(&self) -> bool {
+        self.ports.is_some()
+    }
+
     pub fn effective_ports(&self) -> String {
-        if self.all_ports || self.ports == "-" {
+        let spec = self.ports_spec();
+        if self.all_ports || spec == "-" {
             "1-65535".to_string()
         } else {
-            self.ports.clone()
+            spec
         }
     }
 
@@ -1416,7 +1431,7 @@ impl Cli {
         // the old default but stays under most default ulimits.
         // Effective_parallel() additionally clamps to fd_safe_cap()
         // so users with tighter ulimits don't hit the ceiling.
-        let timing_based = if (self.all_ports || self.ports == "-") && self.timing >= 3 {
+        let timing_based = if (self.all_ports || self.ports.as_deref() == Some("-")) && self.timing >= 3 {
             timing_based.max(self.max_parallel * 2)
         } else {
             timing_based

@@ -29,7 +29,7 @@ pub fn load(path: &str) -> Result<Profile> {
 }
 
 pub fn apply(cli: &mut Cli, p: &Profile) {
-    if let Some(ports) = &p.ports { cli.ports = ports.clone(); }
+    if let Some(ports) = &p.ports { cli.ports = Some(ports.clone()); }
     if let Some(t) = p.timing { cli.timing = t; }
     if p.service_version == Some(true) { cli.service_version = true; }
     if p.os_fingerprint == Some(true) { cli.os_fingerprint = true; }
@@ -75,7 +75,7 @@ pub fn from_cli(cli: &Cli, name: Option<&str>) -> Profile {
     Profile {
         name: name.map(String::from),
         description: None,
-        ports: if cli.ports != "1-1000" { Some(cli.ports.clone()) } else { None },
+        ports: cli.ports.clone(),
         scan_type,
         timing: if cli.timing != 3 { Some(cli.timing) } else { None },
         service_version: if cli.service_version { Some(true) } else { None },

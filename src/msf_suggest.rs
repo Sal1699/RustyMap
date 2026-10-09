@@ -82,25 +82,25 @@ pub async fn suggest_for_findings(
 /// Decode the msgpack reply MSF's `module.search` returns. Shape is
 /// a map with a `"modules"` array whose entries are themselves maps.
 pub fn parse_search_result(resp: &Value) -> Vec<ModuleHit> {
-    let map = match resp.as_map() {
-        Some(m) => m,
-        None => return Vec::new(),
-    };
-    let modules = match map.iter().find_map(|(k, v)| {
-        let ks = value_as_str(k);
-        if ks.as_deref() == Some("modules") {
-            v.as_array()
-        } else {
-            None
+    // msfrpcd's `module.search` returns a bare ARRAY of module hashes — that's
+    // why v0.82.0 found 0 modules: we only handled a `{"modules":[...]}` wrap,
+    // and `as_map()` on a top-level array is None (bug fixed in v0.82.1). Try
+    // the array shape first, then fall back to the wrapped shape.
+    if let Some(arr) = resp.as_array() {
+        return arr.iter().filter_map(parse_module_entry).collect();
+    }
+    if let Some(map) = resp.as_map() {
+        if let Some(arr) = map.iter().find_map(|(k, v)| {
+            if value_as_str(k).as_deref() == Some("modules") {
+                v.as_array()
+            } else {
+                None
+            }
+        }) {
+            return arr.iter().filter_map(parse_module_entry).collect();
         }
-    }) {
-        Some(arr) => arr,
-        None => return Vec::new(),
-    };
-    modules
-        .iter()
-        .filter_map(parse_module_entry)
-        .collect()
+    }
+    Vec::new()
 }
 
 fn parse_module_entry(v: &Value) -> Option<ModuleHit> {
@@ -121,7 +121,8 @@ fn parse_module_entry(v: &Value) -> Option<ModuleHit> {
         fullname,
         kind,
         rank: get("rank"),
-        disclosure: get("disclosure_date"),
+        // msfrpcd uses "disclosuredate"; accept the underscored form too.
+        disclosure: get("disclosuredate").or_else(|| get("disclosure_date")),
         description: get("description"),
     })
 }
@@ -250,6 +251,22 @@ mod tests {
     fn parse_search_result_handles_missing_modules_key() {
         let resp = Value::Map(vec![(Value::from("error"), Value::Boolean(true))]);
         assert!(parse_search_result(&resp).is_empty());
+    }
+
+    #[test]
+    fn parse_search_result_decodes_bare_array() {
+        // msfrpcd's module.search returns a bare array, not {"modules":[...]}
+        // (v0.82.1 fix — this is why EternalBlue returned 0 modules before).
+        let resp = Value::Array(vec![make_module_entry(
+            "exploit/windows/smb/ms17_010_eternalblue",
+            "exploit",
+            Some("average"),
+            Some("EternalBlue"),
+        )]);
+        let hits = parse_search_result(&resp);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].fullname, "exploit/windows/smb/ms17_010_eternalblue");
+        assert_eq!(hits[0].kind, "exploit");
     }
 
     #[test]

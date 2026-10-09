@@ -4,6 +4,33 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.82.1] - 2026-10-09
+
+Fixes the three residual bugs from the v0.82.0 lab run (report:
+`VALIDATION_0.82.md`). 596/596 tests.
+
+### Fixed
+- **`-p 1-1000` scanned the top-1000-by-frequency set (incl. high ports like
+  1935/8000/9000), not ports 1–1000 sequentially.** Root cause: `--ports`
+  defaulted to the string `"1-1000"`, so `p_was_set_explicitly =
+  args.ports != "1-1000"` treated an explicit `-p 1-1000` as "no `-p` given"
+  and fell into the frequency-default branch. `--ports` is now an
+  `Option<String>` (`None` = default top-1000-by-freq; `Some(spec)` = exactly
+  that spec), via `Cli::ports_spec()` / `ports_explicit()`. This was NOT
+  "adds top-ports" and NOT the scripts (those are off on raw scans since
+  v0.82.0).
+- **`--web-scan` still flagged `.env`/`config.json` on catch-all servers.** The
+  soft-404 suppression only covered marker-*less* paths; `.env`'s `=` and
+  `config.json`'s `{` matched the catch-all HTML page. Now, on a catch-all
+  server, a marker hit is suppressed too unless the body size differs
+  meaningfully from the soft-404 baseline.
+- **`--msf-suggest` / `--msf-suggest-cve` found 0 modules (even EternalBlue).**
+  msfrpcd's `module.search` returns a bare **array** of module hashes;
+  `parse_search_result` only handled a `{"modules":[...]}` wrap, so
+  `as_map()` was `None` and the list came back empty. It now parses a
+  top-level array first (keeping the wrapped shape as a fallback), and also
+  reads msfrpcd's `disclosuredate` key.
+
 ## [0.82.0] - 2026-10-08
 
 A broad release off the v0.81.0 lab validation: fixes all six bugs found,
