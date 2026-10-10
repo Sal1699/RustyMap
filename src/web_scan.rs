@@ -55,6 +55,29 @@ const SENSITIVE_PATHS: &[SensitivePath] = &[
     SensitivePath { path: "/config.json", severity: "medium", marker: "{", note: "exposed config file" },
     SensitivePath { path: "/.aws/credentials", severity: "critical", marker: "aws_access_key", note: "AWS credentials file" },
     SensitivePath { path: "/wp-config.php.bak", severity: "critical", marker: "DB_PASSWORD", note: "WordPress config backup — DB creds" },
+    // ── added v0.85.0 ──
+    SensitivePath { path: "/.git/", severity: "high", marker: "Index of", note: "directory listing of exposed .git" },
+    SensitivePath { path: "/.git-credentials", severity: "critical", marker: "https://", note: "git credential store — plaintext creds" },
+    SensitivePath { path: "/.htpasswd", severity: "high", marker: ":", note: "Apache basic-auth hashes" },
+    SensitivePath { path: "/.htaccess", severity: "medium", marker: "", note: "Apache per-dir config leak" },
+    SensitivePath { path: "/web.config", severity: "high", marker: "<configuration", note: "IIS/ASP.NET config — connection strings" },
+    SensitivePath { path: "/WEB-INF/web.xml", severity: "high", marker: "<web-app", note: "Java web descriptor — servlet map/secrets" },
+    SensitivePath { path: "/appsettings.json", severity: "high", marker: "ConnectionStrings", note: "ASP.NET Core settings — DB/API keys" },
+    SensitivePath { path: "/appsettings.Production.json", severity: "critical", marker: "ConnectionStrings", note: "ASP.NET production settings — secrets" },
+    SensitivePath { path: "/dump.sql", severity: "critical", marker: "INSERT INTO", note: "SQL database dump" },
+    SensitivePath { path: "/database.sql", severity: "critical", marker: "CREATE TABLE", note: "SQL database schema/dump" },
+    SensitivePath { path: "/backup.tar.gz", severity: "high", marker: "", note: "downloadable backup archive" },
+    SensitivePath { path: "/.npmrc", severity: "high", marker: "_authToken", note: "npm registry auth token" },
+    SensitivePath { path: "/.dockercfg", severity: "high", marker: "auth", note: "Docker registry credentials" },
+    SensitivePath { path: "/sftp-config.json", severity: "high", marker: "password", note: "SFTP config — host/creds" },
+    SensitivePath { path: "/.vscode/sftp.json", severity: "high", marker: "password", note: "VS Code SFTP config — creds" },
+    SensitivePath { path: "/secrets.yaml", severity: "critical", marker: "", note: "secrets manifest (k8s/app)" },
+    SensitivePath { path: "/credentials.json", severity: "critical", marker: "", note: "GCP/service-account credentials" },
+    SensitivePath { path: "/phpmyadmin/", severity: "medium", marker: "phpMyAdmin", note: "phpMyAdmin — DB admin panel exposed" },
+    SensitivePath { path: "/adminer.php", severity: "medium", marker: "Adminer", note: "Adminer — DB admin panel exposed" },
+    SensitivePath { path: "/wp-json/wp/v2/users", severity: "medium", marker: "\"slug\"", note: "WordPress REST user enumeration" },
+    SensitivePath { path: "/.well-known/openid-configuration", severity: "info", marker: "issuer", note: "OIDC discovery (auth endpoints)" },
+    SensitivePath { path: "/v2/_catalog", severity: "high", marker: "repositories", note: "Docker registry catalog — image inventory" },
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,6 +171,33 @@ pub fn detect_waf(headers_lower: &str, body_lower: &str) -> Option<&'static str>
     if body_lower.contains("wordfence") {
         return Some("Wordfence");
     }
+    if h.contains("fortiwaf") || h.contains("fortigate") || h.contains("fortinet") {
+        return Some("Fortinet FortiWeb");
+    }
+    if h.contains("ns_af") || h.contains("citrix_ns_id") || h.contains("via: ns-cache") {
+        return Some("Citrix NetScaler");
+    }
+    if h.contains("x-protected-by: sqreen") {
+        return Some("Sqreen");
+    }
+    if h.contains("nginx-wallarm") || h.contains("x-wallarm") {
+        return Some("Wallarm");
+    }
+    if h.contains("ddos-guard") {
+        return Some("DDoS-Guard");
+    }
+    if h.contains("x-sp-") || h.contains("stackpath") {
+        return Some("StackPath");
+    }
+    if h.contains("x-azure-ref") || h.contains("x-msedge-ref") {
+        return Some("Azure Front Door / WAF");
+    }
+    if h.contains("via: 1.1 google") || h.contains("x-goog-") {
+        return Some("Google Cloud (LB/Armor)");
+    }
+    if h.contains("server: awselb") || h.contains("x-amz-apigw-id") {
+        return Some("AWS API Gateway / ELB");
+    }
     None
 }
 
@@ -224,7 +274,7 @@ fn http_req_blocking(
         .danger_accept_invalid_certs(true)
         .timeout(dur)
         .redirect(reqwest::redirect::Policy::none())
-        .user_agent("RustyMap/0.82 web-scan")
+        .user_agent(crate::evasion::http_user_agent())
         .build()
     {
         Ok(c) => c,

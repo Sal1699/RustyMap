@@ -4,6 +4,49 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.85.0] - 2026-10-10
+
+Docs + web-scan depth + a filtered-port accuracy fix + HTTP anti-detection.
+611/611 tests.
+
+### Fixed — filtered-port accuracy
+- **Raw SYN/stealth scans now retransmit before concluding Filtered.** The
+  connect scan already retried filtered ports (`--max-retries`, default 2),
+  but the raw path (`raw_scan.rs`) probed once and reported Filtered on a
+  single dropped packet. It now retries up to `--max-retries` on a
+  no-response (Filtered / OpenFiltered), the way nmap does — cutting
+  false-filtered from transient loss / ICMP rate-limiting. Definitive replies
+  (SYN-ACK/RST → Open/Closed/Unfiltered) are terminal and never retried.
+
+### Added — web-scan
+- **+22 sensitive paths**: `.git/` dir listing, `.git-credentials`,
+  `.htpasswd`/`.htaccess`, `web.config`, `WEB-INF/web.xml`, `appsettings*.json`,
+  `dump.sql`/`database.sql`, `.npmrc`, `.dockercfg`, `sftp-config.json`,
+  `.vscode/sftp.json`, `secrets.yaml`, `credentials.json`, phpMyAdmin/Adminer,
+  WordPress REST user-enum, OIDC discovery, Docker registry catalog.
+- **+9 WAF/CDN signatures**: Fortinet FortiWeb, Citrix NetScaler, Sqreen,
+  Wallarm, DDoS-Guard, StackPath, Azure Front Door, Google Cloud, AWS API GW.
+  (Security-header grade keeps the 6 standard headers — adding COOP/COEP would
+  make grading stricter than most tools and cause false F's.)
+
+### Added — HTTP anti-detection
+- HTTP probes (`--web-scan` etc.) send an **identifiable RustyMap User-Agent
+  by default** (correct for authorised testing — defenders can tell the scan
+  from an attack, like nmap), but **rotate a realistic current-browser UA when
+  an evasion mode is active** (`--evasion <preset>` or `--rotate-evasion`), so
+  a WAF/IDS can't block/log the scanner's default signature. The old UA was a
+  stale hardcoded `RustyMap/0.82 web-scan`. (`evasion::http_user_agent`.)
+
+### Added — docs
+- **`--help`** rewritten: quick-start lines, a DOUBLE-dash flag-syntax note,
+  exit-code legend, and pointers to `--guide`/`--examples` (was a stale
+  "Phase 1/Phase 2" blurb).
+- **`--guide` combined-examples** expanded into a progressive, phase-grouped
+  recipe set (Recon → Detection+Vuln → Web → Exploit handoff → Bruteforce →
+  Stealth → Workflow), showing how flags compose into real multi-stage runs.
+  Every command group keeps runnable examples (curated — modifier flags like
+  `--timeout` don't get a standalone example to avoid bloat).
+
 ## [0.84.1] - 2026-10-10
 
 Flag-syntax drift cleanup prompted by a `--guide` review: several surfaces

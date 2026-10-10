@@ -213,6 +213,52 @@ pub fn jitter_sleep(mode: &JitterMode) {
     }
 }
 
+// ── HTTP anti-detection (User-Agent) ─────────────────────────────
+//
+// By default RustyMap identifies itself in the HTTP User-Agent — correct for
+// authorised testing, where defenders should be able to tell the scan from a
+// real attack (this is also what nmap does). When an evasion mode is active
+// the HTTP probes instead rotate a realistic current-browser UA, so a WAF/IDS
+// can't block/log them on the scanner's default signature.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static HTTP_STEALTH: AtomicBool = AtomicBool::new(false);
+
+/// Enable (true) rotating browser User-Agents for HTTP probes. Set from
+/// `main` when an evasion preset or per-probe rotation is active.
+pub fn set_http_stealth(on: bool) {
+    HTTP_STEALTH.store(on, Ordering::Relaxed);
+}
+
+/// A realistic, current browser User-Agent, chosen at random so repeated
+/// requests don't share one fingerprint.
+pub fn random_user_agent() -> &'static str {
+    const UAS: &[&str] = &[
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:126.0) Gecko/20100101 Firefox/126.0",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+    ];
+    let i = rand::thread_rng().gen_range(0..UAS.len());
+    UAS[i]
+}
+
+/// The User-Agent HTTP probes should send: an identifiable RustyMap string by
+/// default, or a rotating browser UA when stealth is enabled.
+pub fn http_user_agent() -> String {
+    if HTTP_STEALTH.load(Ordering::Relaxed) {
+        random_user_agent().to_string()
+    } else {
+        format!(
+            "RustyMap/{} (+https://github.com/Sal1699/RustyMap)",
+            env!("CARGO_PKG_VERSION")
+        )
+    }
+}
+
 // ── Evasion Configuration ────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -676,4 +722,32 @@ pub fn parse_scanflags(s: &str) -> Result<u8, String> {
         };
     }
     Ok(flags)
+}
+
+#[cfg(test)]
+mod ua_tests {
+    use super::*;
+
+    #[test]
+    fn default_ua_is_identifiable() {
+        set_http_stealth(false);
+        let ua = http_user_agent();
+        assert!(ua.contains("RustyMap"), "default UA should identify the tool: {}", ua);
+    }
+
+    #[test]
+    fn stealth_ua_is_a_browser() {
+        set_http_stealth(true);
+        let ua = http_user_agent();
+        assert!(ua.contains("Mozilla/5.0"), "stealth UA should look like a browser: {}", ua);
+        assert!(!ua.contains("RustyMap"), "stealth UA must not name the tool: {}", ua);
+        // Reset so other tests in the binary see the default.
+        set_http_stealth(false);
+    }
+
+    #[test]
+    fn random_ua_is_from_the_pool() {
+        let ua = random_user_agent();
+        assert!(ua.starts_with("Mozilla/5.0"));
+    }
 }

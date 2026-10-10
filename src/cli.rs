@@ -5,9 +5,26 @@ use clap_complete::Shell;
 #[command(
     name = "rustymap",
     version,
-    about = "RustyMap - Rust port of nmap",
-    long_about = "RustyMap is a network scanner written in Rust.\n\
-                  Phase 1: TCP connect. Phase 2: SYN/FIN/NULL/Xmas/ACK/UDP + ICMP ping."
+    about = "RustyMap - Rust port of nmap (+ TLS/JARM, web-scan, CVE, scripting, MSF)",
+    long_about = "RustyMap is a feature-complete network scanner in Rust: an nmap-compatible \
+                  port (SYN/connect/UDP/stealth/idle scans, service + OS detection, \
+                  nmap-compatible output) plus TLS/JARM analysis, web-scan, CVE correlation, \
+                  Rhai scripting and Metasploit integration.\n\
+                  \n\
+                  QUICK START\n\
+                  \x20 rustymap 192.168.1.0/24                 discover + scan top-1000 ports\n\
+                  \x20 rustymap --sS --sV -O 10.0.0.5          SYN scan + service/OS detection\n\
+                  \x20 rustymap --sn 10.0.0.0/24               ping sweep (host discovery only)\n\
+                  \x20 rustymap --profile homelab-discover 10.0.0.0/24   curated preset\n\
+                  \n\
+                  FLAG SYNTAX: scan-type and detection flags use the DOUBLE-dash long form \
+                  (--sS --sT --sU --sV --sn --Pn --oN --oX ...). Only a few have short forms \
+                  (-p -A -O -F -v -D -f -S -e -n -t -d -b -r).\n\
+                  \n\
+                  See `rustymap --guide` for the grouped reference with examples, and \
+                  `rustymap --examples` for task recipes. Raw scans (--sS/--sU/-O) need root \
+                  on Linux or Npcap on Windows. Exit codes: 0 clean / 1 findings / 2 scan \
+                  error / 3 config error / 130 interrupted."
 )]
 pub struct Cli {
     /// Target specification: IP, hostname, CIDR (10.0.0.0/24), range (10.0.0.1-50)

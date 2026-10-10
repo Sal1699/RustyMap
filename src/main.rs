@@ -424,6 +424,12 @@ async fn run(mut args: Cli) -> Result<()> {
     };
     output::set_rich(rich_style);
 
+    // Anti-detection: when an evasion preset or per-probe rotation is active,
+    // HTTP probes (--web-scan etc.) rotate a realistic browser User-Agent
+    // instead of the identifiable RustyMap default, so a WAF/IDS can't match
+    // the scanner's default signature.
+    evasion::set_http_stealth(args.evasion_preset.is_some() || args.rotate_evasion);
+
     // -d/-dd/-ddd: category-tagged debug logging. `-vvv` (verbose level 3)
     // turns on level-1 debug when -d wasn't given, so the verbosity ladder
     // tops out at packet-level detail the way nmap's -vvv does:

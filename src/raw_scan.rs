@@ -369,9 +369,24 @@ pub fn run_raw_tcp_scan(
             continue;
         }
         let h = thread::spawn(move || {
+            let max_retries = crate::scanner::max_retries();
             let mut results = Vec::with_capacity(end - begin);
             for &p in &s_ports[begin..end] {
-                let st = s_scanner.probe(src, dst, p, kind, timeout);
+                // Retransmit on no-response before concluding Filtered/
+                // OpenFiltered — the way nmap does (--max-retries). A single
+                // dropped SYN (or a dropped RST on a stealth scan) over a
+                // lossy or rate-limited path should not be reported as
+                // filtered; a definitive reply (SYN-ACK / RST → Open / Closed
+                // / Unfiltered) is terminal and never retried. The connect
+                // path already does this (scanner.rs); the raw path did not.
+                let mut st = s_scanner.probe(src, dst, p, kind, timeout);
+                let mut attempt = 0u8;
+                while matches!(st, PortState::Filtered | PortState::OpenFiltered)
+                    && attempt < max_retries
+                {
+                    attempt += 1;
+                    st = s_scanner.probe(src, dst, p, kind, timeout);
+                }
                 results.push(PortResult {
                     port: p,
                     state: st,

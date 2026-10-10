@@ -615,16 +615,56 @@ fn combined_examples() {
     );
     println!("{}\n", bar.truecolor(HL_ORANGE.0, HL_ORANGE.1, HL_ORANGE.2));
 
+    // Ordinati dal semplice al complesso: più flag insieme = una fase in più
+    // della pipeline (ricognizione → detection → vuln → handoff/report).
+
+    combo_group("RICOGNIZIONE");
+    combo("# Sweep rapido del lab, solo host up su file grepable",
+          "rustymap --sn --oG up.gnmap 10.0.0.0/24");
+    combo("# Preset homelab: SYN top-100, timing aggressivo",
+          "rustymap --profile homelab-discover 10.0.0.0/24");
+    combo("# Cosa lanciare dopo? il recommender guarda le porte aperte",
+          "rustymap --recommend 10.0.0.5 -p 1-65535");
+
+    combo_group("DETECTION + VULN");
+    combo("# SYN + servizi + OS + correlazione CVE integrata",
+          "rustymap --sS --sV -O 10.0.0.5");
+    combo("# Audit completo con report HTML + audit-log + tutti i formati",
+          "rustymap --sS --sV -O --oA scan --oH report.html --audit-log audit.jsonl 10.0.0.0/24");
+    combo("# TLS: version matrix + cipher enum + grade + JARM",
+          "rustymap --tls-scan --ssl-enum --tls-grade 10.0.0.5 -p 443,8443");
+
+    combo_group("WEB");
+    combo("# Superficie web: header-grade + WAF/CDN + path sensibili + CORS",
+          "rustymap --web-scan 10.0.0.5 -p 80,443,8080");
+    combo("# Web vuln check mirati (verdetti chiari)",
+          "rustymap --shellshock --webdav-probe --csp-cors --vuln-ssl-ccs 10.0.0.5");
+
+    combo_group("EXPLOIT HANDOFF (Metasploit)");
+    combo("# CVE → moduli Metasploit con RHOSTS precompilati (read-only)",
+          "rustymap --sS --sV --msf-suggest --msf-url http://127.0.0.1:55553/api/ --msf-token T 10.0.0.5");
+    combo("# Importa lo scan nel workspace MSF (host+service+vuln)",
+          "rustymap --sS --sV --msf-import lab --msf-url http://127.0.0.1:55553/api/ --msf-token T 10.0.0.5");
+
+    combo_group("BRUTEFORCE (gated)");
+    combo("# SSH brute con rate-limit + gate di autorizzazione esplicito",
+          "rustymap --brute-protocol ssh --brute-target 10.0.0.5 --brute-passlist rockyou.txt --brute-rate 4 --brute-confirm-authorized");
+
+    combo_group("STEALTH / ANTI-DETECTION");
     combo("# Scan discreto Windows-style su subnet",
           "rustymap --sS --stack-profile windows11 --jitter 300 --randomize-ports -t2 10.0.0.0/24");
-    combo("# Audit completo con report HTML + CVE",
-          "rustymap --sS --sV -O --oH report.html --cve-db cves.json --audit-log audit.jsonl 10.0.0.0/24");
-    combo("# Idle scan attraverso uno zombie",
+    combo("# Massima evasione anti-DPI (frag overlap, decoy, TTL jitter, UA browser)",
+          "rustymap --sS --evasion ghost --web-scan 10.0.0.5");
+    combo("# Idle scan attraverso uno zombie (nessun pacchetto dal tuo IP)",
           "rustymap --sI 192.168.1.250:80 -p 1-1000 10.0.0.5");
+
+    combo_group("WORKFLOW / MONITORAGGIO");
+    combo("# Compliance PCI con report dei controlli",
+          "rustymap --sS --sV --compliance pci-dss --compliance-report pci.md 10.0.0.0/24");
+    combo("# Scan pianificato con persistenza e diff sul baseline",
+          "rustymap --sT --sV --db lab.db --diff --every 6h 10.0.0.0/24");
     combo("# Enumerazione sottodomini con wordlist",
           "rustymap --dns-enum example.com --dns-wordlist big.txt");
-    combo("# Scan pianificato con persistenza e diff",
-          "rustymap --sT --sV --db lab.db --diff --every 6h 10.0.0.0/24");
 }
 
 fn footer() {
@@ -708,6 +748,15 @@ fn combo(comment: &str, cmd: &str) {
         "    {} {}\n",
         "λ".truecolor(HL_ORANGE.0, HL_ORANGE.1, HL_ORANGE.2).bold(),
         cmd.truecolor(HL_YELLOW.0, HL_YELLOW.1, HL_YELLOW.2),
+    );
+}
+
+/// A sub-heading inside the combined-examples block (groups recipes by phase).
+fn combo_group(name: &str) {
+    println!(
+        "  {} {}",
+        "▪".truecolor(HL_ORANGE.0, HL_ORANGE.1, HL_ORANGE.2),
+        name.truecolor(HL_AMBER.0, HL_AMBER.1, HL_AMBER.2).bold(),
     );
 }
 
