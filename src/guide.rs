@@ -235,14 +235,15 @@ pub fn print_guide() {
     example("rustymap --sI 192.168.1.100:80 10.0.0.5");
 
     section("HOST DISCOVERY");
-    line("-Pn                   Salta discovery (tratta tutti i host come up)");
-    line("--sn                  Solo ping, niente port scan");
+    line("--Pn                  Salta discovery (tratta tutti gli host come up)");
+    line("--sn                  Solo ping, niente port scan (onora --oN/--oG/--oJ/--oX)");
     line("--PE                  ICMP echo ping (raw, admin)");
     line("--PR                  ARP discovery (LAN only; auto-detect same /24)");
     line("--PS, --PA, --PU      Variant ping types (alias)");
     line("--PP                  ICMP timestamp ping (type 13, fallback per --PE)");
     example("rustymap --sn 10.0.0.0/24           # ping sweep");
-    example("rustymap -Pn --sT 10.0.0.5          # scan forzato");
+    example("rustymap --sn --oG up.gnmap 10.0.0.0/24   # sweep → lista host up grepable");
+    example("rustymap --Pn --sT 10.0.0.5         # scan forzato");
     example("rustymap --PE --sn 10.0.0.0/24      # ICMP ping sweep");
 
     section("TIMING & PERFORMANCE");

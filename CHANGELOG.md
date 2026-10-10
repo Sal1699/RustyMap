@@ -4,6 +4,22 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.83.1] - 2026-10-10
+
+Small follow-up fixes found while checking `--sn` (ping-only / host
+discovery). 603/603 tests.
+
+### Fixed
+- **`--sn` silently ignored output-file flags.** `--sn --oX file.xml` (and
+  `--oJ`/`--oN`/`--oG`) produced no file because the ping-only path returned
+  before the output stage. It now writes the up hosts as port-less results
+  through the same writers, matching `nmap -sn -oA`. Report formats
+  (`--oH`/`--oMd`/`--oP`/`--template`) — which have nothing to render for a
+  bare sweep — print a one-line skip note instead of silently doing nothing.
+- **`--guide` showed `-Pn` (single dash) for the skip-discovery flag**, but
+  the flag is `--Pn`; the single-dash form errors out in clap. Corrected the
+  guide line and its example (guide/CLI drift).
+
 ## [0.83.0] - 2026-10-10
 
 **Fase 28 (UX hardening)** plus the three code-level bugs from the v0.82.1

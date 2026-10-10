@@ -2146,6 +2146,50 @@ async fn run(mut args: Cli) -> Result<()> {
             elapsed
         );
         audit.event("scan_end", json!({ "mode": "ping_only", "up": targets.len() }));
+
+        // -sn still honours the interop output flags (like `nmap -sn -oA`):
+        // write the up hosts as port-less HostResults. Report formats
+        // (HTML/MD/PDF/template) are skipped — a bare ping sweep has nothing
+        // to render — with a note so the flag isn't silently ignored.
+        let hosts: Vec<HostResult> = targets
+            .iter()
+            .map(|t| HostResult {
+                target: t.clone(),
+                up: true,
+                ports: Vec::new(),
+                elapsed: std::time::Duration::from_secs(0),
+                os: None,
+                device: None,
+                mac: None,
+            })
+            .collect();
+        if let Some(p) = &args.output_normal {
+            output::write_normal(p, &hosts, elapsed)?;
+        }
+        if let Some(p) = &args.output_grepable {
+            output::write_grepable(p, &hosts)?;
+        }
+        if let Some(p) = &args.output_json {
+            let json = json_out::to_json_string(&hosts, &scan_type_str, started_at, elapsed)?;
+            json_out::write_json(p, &json)?;
+        }
+        if let Some(p) = &args.output_xml {
+            let args_line: String = std::env::args().collect::<Vec<_>>().join(" ");
+            xml_out::write_xml_styled(
+                p, &hosts, &scan_type_str, started_at, elapsed, &args_line,
+                args.stylesheet.as_deref(),
+            )?;
+        }
+        if args.output_html.is_some()
+            || args.output_markdown.is_some()
+            || args.output_pdf.is_some()
+            || args.template_path.is_some()
+        {
+            eprintln!(
+                "[--sn] report formats (--oH/--oMd/--oP/--template) are skipped in ping-only \
+                 mode; use --oN/--oG/--oJ/--oX for host-discovery output."
+            );
+        }
         return Ok(());
     }
 
