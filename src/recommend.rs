@@ -216,7 +216,7 @@ pub fn derive_flags(open: &[u16], host: &str) -> (Vec<String>, Vec<String>) {
     if cve_prone {
         notes.push(
             "Turn CVE matches into Metasploit modules: re-run with \
-             `-sV --msf-suggest --msf-url <rpc> --msf-token <token>`"
+             `--sV --msf-suggest --msf-url <rpc> --msf-token <token>`"
                 .into(),
         );
     }

@@ -114,15 +114,15 @@ pub fn run() -> Result<WizardOutput> {
     }
 
     // Service / OS detection.
-    if ask_yes("Service version detection (-sV)?", true) {
-        args.push("-sV".into());
+    if ask_yes("Service version detection (--sV)?", true) {
+        args.push("--sV".into());
     }
     if ask_yes("OS fingerprint (-O)?", false) {
         args.push("-O".into());
     }
 
     // Aggressive shortcut?
-    if ask_yes("Use --aggressive (-A: -sV -O --traceroute + scripts/)?", false) {
+    if ask_yes("Use --aggressive (-A: --sV -O --traceroute + scripts/)?", false) {
         args.push("-A".into());
     }
 
@@ -208,7 +208,7 @@ mod tests {
     #[test]
     fn output_holds_args_and_flags() {
         let o = WizardOutput {
-            args: vec!["10.0.0.1".into(), "-sV".into()],
+            args: vec!["10.0.0.1".into(), "--sV".into()],
             run_now: true,
             save_profile: Some("p.toml".into()),
         };

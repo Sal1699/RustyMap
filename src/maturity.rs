@@ -49,16 +49,16 @@ pub struct Feature {
 const REGISTRY: &[Feature] = &[
     // ── Production scan primitives (listed so the maturity matrix shows
     // them as deliberately validated, not just "we didn't classify them") ──
-    Feature { key: "-sT", tier: Tier::Production, note: "TCP connect scan" },
-    Feature { key: "-sS", tier: Tier::Production, note: "SYN scan (raw sockets)" },
-    Feature { key: "-sU", tier: Tier::Production, note: "UDP scan" },
-    Feature { key: "-sn", tier: Tier::Production, note: "Host discovery (ping sweep)" },
-    Feature { key: "-Pn", tier: Tier::Production, note: "No host discovery (treat all as up)" },
+    Feature { key: "--sT", tier: Tier::Production, note: "TCP connect scan" },
+    Feature { key: "--sS", tier: Tier::Production, note: "SYN scan (raw sockets)" },
+    Feature { key: "--sU", tier: Tier::Production, note: "UDP scan" },
+    Feature { key: "--sn", tier: Tier::Production, note: "Host discovery (ping sweep)" },
+    Feature { key: "--Pn", tier: Tier::Production, note: "No host discovery (treat all as up)" },
 
     // ── Beta — passes tests but not lab-validated against real targets ──
     Feature { key: "-O", tier: Tier::Beta,
         note: "OS fingerprint uses nmap-os-db but a simpler match engine than nmap's. Compare with `nmap -O` on your hosts before trusting." },
-    Feature { key: "-sV", tier: Tier::Beta,
+    Feature { key: "--sV", tier: Tier::Beta,
         note: "Service detection: DB ported from nmap-service-probes; soft-match heuristics simpler. Spot-check on services you know." },
     Feature { key: "--ssh-audit", tier: Tier::Beta,
         note: "RFC 4253 KEXINIT enum. Validated against OpenSSH but not exotic implementations (Dropbear, Cisco IOS SSH)." },
@@ -96,7 +96,7 @@ const REGISTRY: &[Feature] = &[
         note: "MISP IoC sync. Pull-only, no de-duplication across syncs; rate-limit handling minimal." },
     Feature { key: "--osdb-submit", tier: Tier::Alpha,
         note: "Submits OS-fingerprint observations to an external endpoint. Don't enable on networks where this leak is a concern." },
-    Feature { key: "-sI", tier: Tier::Alpha,
+    Feature { key: "--sI", tier: Tier::Alpha,
         note: "Idle/zombie scan. Requires a zombie with predictable IPID; modern OSes have randomized IPID and won't work. Complex, low real-world coverage." },
     Feature { key: "--os-fp-v6", tier: Tier::Alpha,
         note: "IPv6 OS fingerprint (`os_fp_v6.rs` / `os_fp_multi.rs`). Less mature than IPv4 path; database coverage thinner." },

@@ -178,8 +178,8 @@ pub fn builtin(name: &str) -> Option<Profile> {
 /// Name + one-line summary for every built-in preset, for `--guide` and
 /// the `resolve` error message.
 pub const BUILTIN_PRESETS: &[(&str, &str)] = &[
-    ("pentest-internal", "SYN + -sV + -O, T4 adaptive — internal engagement"),
-    ("compliance-pci", "all TCP ports + -sV + TLS grade, T4 — PCI-DSS posture"),
+    ("pentest-internal", "SYN + --sV + -O, T4 adaptive — internal engagement"),
+    ("compliance-pci", "all TCP ports + --sV + TLS grade, T4 — PCI-DSS posture"),
     ("bugbounty-web", "connect web ports + --web-scan + TLS grade, T3 — web surface"),
     ("homelab-discover", "SYN top-100, T4 adaptive — fast lab sweep"),
 ];

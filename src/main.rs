@@ -979,7 +979,7 @@ async fn run(mut args: Cli) -> Result<()> {
             };
             match r {
                 Ok(d) => rpc_scan::print_dump(&d),
-                Err(e) => eprintln!("[!] -sR {}: {}", t.display(), e),
+                Err(e) => eprintln!("[!] --sR {}: {}", t.display(), e),
             }
         }
         return Ok(());
@@ -2587,13 +2587,13 @@ async fn run(mut args: Cli) -> Result<()> {
                 let v4 = match t.ip {
                     std::net::IpAddr::V4(v) => v,
                     std::net::IpAddr::V6(_) => {
-                        eprintln!("[!] -sO: skipping IPv6 target {} (not yet supported)", t.ip);
+                        eprintln!("[!] --sO: skipping IPv6 target {} (not yet supported)", t.ip);
                         continue;
                     }
                 };
                 match ip_proto_scan::scan(v4, timeout_dur) {
                     Ok(rows) => ip_proto_scan::print_report(v4, &rows),
-                    Err(e) => eprintln!("[!] -sO {}: {}", v4, e),
+                    Err(e) => eprintln!("[!] --sO {}: {}", v4, e),
                 }
             }
             audit.event("scan_end", json!({ "mode": "ip_proto", "hosts": targets.len() }));
@@ -3981,7 +3981,7 @@ fn apply_scan_type_str(args: &mut Cli, s: &str) -> Result<()> {
         "List" => return Err(anyhow!("--resume not supported for list scans (-sL)")),
         "Udp" => args.scan_udp = true,
         "Idle" => return Err(anyhow!("--resume not supported for Idle scans")),
-        "IpProto" => return Err(anyhow!("--resume not supported for -sO scans")),
+        "IpProto" => return Err(anyhow!("--resume not supported for --sO scans")),
         other => return Err(anyhow!("unknown saved scan_type '{}'", other)),
     }
     Ok(())

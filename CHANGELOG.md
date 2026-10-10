@@ -4,6 +4,30 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.84.1] - 2026-10-10
+
+Flag-syntax drift cleanup prompted by a `--guide` review: several surfaces
+showed/emitted single-dash scan flags (`-sV`, `-sT`, `-Pn`, `-sI`, `-sO`,
+`-sR`) where the real flag is double-dash (`--sV` …) — the single-dash form
+errors in clap. Same class as the v0.83.1 `--Pn` fix. 608/608 tests.
+
+### Fixed
+- **`--guide` maturity matrix** (`src/maturity.rs`): feature keys `--sT`,
+  `--sS`, `--sU`, `--sn`, `--Pn`, `--sV`, `--sI` were single-dash; now
+  double-dash (`-O` stays — it has a real short). This was the bulk of the
+  drift, since the matrix renders into `--guide`.
+- **Wizard (functional bug)**: the interactive builder pushed `-sV` into the
+  assembled argv, so a wizard-built "service detection" scan would fail with
+  a clap error when run. Now emits `--sV` (prompt text matched up too).
+- **`--profile` preset descriptions** and the **`--recommend` MSF hint** (both
+  added in v0.84.0) showed `-sV`; corrected to `--sV`.
+- **Error labels** in `--sR` / `--sO` scan paths printed the single-dash form;
+  corrected.
+- Guide examples/`-A` help line: `-sV` → `--sV`.
+
+Remaining single-dash references are now only in source code comments
+(developer-facing, non-functional).
+
 ## [0.84.0] - 2026-10-10
 
 A large MINOR: a professional, descriptive **rich output** style (now the
