@@ -1,5 +1,6 @@
+use crate::portdesc;
 use crate::ports::service_name;
-use crate::scanner::HostResult;
+use crate::scanner::{HostResult, PortState};
 use anyhow::Result;
 use serde::Serialize;
 #[allow(unused_imports)]
@@ -12,6 +13,12 @@ struct JsonPort {
     protocol: &'static str,
     state: &'static str,
     service: &'static str,
+    /// Plain-language description of the service (rich output parity).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<&'static str>,
+    /// Exposure-risk tier for an open port: "high" | "warn" | "info".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    risk: Option<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -68,11 +75,26 @@ pub fn to_json_string(
             ports: h
                 .ports
                 .iter()
-                .map(|p| JsonPort {
-                    port: p.port,
-                    protocol: "tcp",
-                    state: p.state.as_str(),
-                    service: service_name(p.port).unwrap_or("unknown"),
+                .map(|p| {
+                    // Enrich open ports with the same description + risk the
+                    // rich console shows, so the JSON carries the verdict too.
+                    let desc = if p.state == PortState::Open {
+                        portdesc::describe(p.port)
+                    } else {
+                        None
+                    };
+                    JsonPort {
+                        port: p.port,
+                        protocol: "tcp",
+                        state: p.state.as_str(),
+                        service: service_name(p.port).unwrap_or("unknown"),
+                        note: desc.map(|d| d.text),
+                        risk: desc.map(|d| match d.risk {
+                            portdesc::Risk::High => "high",
+                            portdesc::Risk::Warn => "warn",
+                            portdesc::Risk::Info => "info",
+                        }),
+                    }
                 })
                 .collect(),
         })

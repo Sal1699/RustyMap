@@ -20,7 +20,7 @@ const RECIPES: &[Recipe] = &[
     },
     Recipe {
         title: "Aggressive audit with everything on",
-        why: "-A = -sV -O --traceroute, auto-runs built-in scripts, CVE correlation.",
+        why: "-A = --sV -O --traceroute, auto-runs built-in scripts, CVE correlation.",
         cmd: "rustymap -A --oA audit-$(date +%F) target.example.com",
     },
     Recipe {

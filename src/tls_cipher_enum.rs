@@ -53,6 +53,30 @@ const SUITES: &[(u16, &str, bool)] = &[
     (0x0004, "RSA_RC4_128_MD5 (RC4)", true),
     (0x0003, "RSA_RC4_40_MD5 (export)", true),
     (0x0000, "NULL_MD5", true),
+    // ── exotic TLS 1.2 suites (ARIA / CAMELLIA / CCM / SEED) ──
+    // Rarely offered by modern stacks but common on appliances/embedded TLS,
+    // so sslscan lists them and we were missing them (lab L2b: 13/31 → now
+    // the full 1.2 set). ARIA-GCM and AES-CCM are AEAD (not "weak"); the
+    // CAMELLIA-CBC and SEED-CBC suites are CBC-mode legacy → flagged weak.
+    (0xC05C, "ECDHE_ECDSA_ARIA_128_GCM_SHA256", false),
+    (0xC05D, "ECDHE_ECDSA_ARIA_256_GCM_SHA384", false),
+    (0xC060, "ECDHE_RSA_ARIA_128_GCM_SHA256", false),
+    (0xC061, "ECDHE_RSA_ARIA_256_GCM_SHA384", false),
+    (0xC050, "RSA_ARIA_128_GCM_SHA256", false),
+    (0xC051, "RSA_ARIA_256_GCM_SHA384", false),
+    (0xC09C, "RSA_AES_128_CCM", false),
+    (0xC09D, "RSA_AES_256_CCM", false),
+    (0xC0A0, "RSA_AES_128_CCM_8", false),
+    (0xC0A1, "RSA_AES_256_CCM_8", false),
+    (0xC072, "ECDHE_ECDSA_CAMELLIA_128_CBC_SHA256", true),
+    (0xC073, "ECDHE_ECDSA_CAMELLIA_256_CBC_SHA384", true),
+    (0xC076, "ECDHE_RSA_CAMELLIA_128_CBC_SHA256", true),
+    (0xC077, "ECDHE_RSA_CAMELLIA_256_CBC_SHA384", true),
+    (0x00BA, "RSA_CAMELLIA_128_CBC_SHA256", true),
+    (0x00C0, "RSA_CAMELLIA_256_CBC_SHA256", true),
+    (0x0041, "RSA_CAMELLIA_128_CBC_SHA", true),
+    (0x0084, "RSA_CAMELLIA_256_CBC_SHA", true),
+    (0x0096, "RSA_SEED_CBC_SHA (SEED)", true),
 ];
 
 /// One enumerated, accepted cipher suite.

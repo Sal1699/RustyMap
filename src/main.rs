@@ -33,6 +33,7 @@ mod npcap;
 mod os_db;
 mod os_fp;
 mod output;
+mod portdesc;
 mod ports;
 mod profile;
 mod privilege;
@@ -43,6 +44,7 @@ mod raw_scan;
 mod report;
 mod scanner;
 mod scripting;
+mod self_test;
 mod service_probe;
 mod shutdown;
 mod spoof_mac;
@@ -407,6 +409,21 @@ async fn run(mut args: Cli) -> Result<()> {
         }
     }
 
+    // Console output style (--output-style): rich (professional, descriptive,
+    // default) or terse (compact nmap-like). Only affects the console view;
+    // the file writers (--oN/--oG/--oJ/--oX) are unaffected.
+    let rich_style = match args.output_style.to_lowercase().as_str() {
+        "rich" => true,
+        "terse" => false,
+        other => {
+            return Err(exit::config_err(format!(
+                "unknown --output-style '{}' (valid: rich | terse)",
+                other
+            )));
+        }
+    };
+    output::set_rich(rich_style);
+
     // -d/-dd/-ddd: category-tagged debug logging. `-vvv` (verbose level 3)
     // turns on level-1 debug when -d wasn't given, so the verbosity ladder
     // tops out at packet-level detail the way nmap's -vvv does:
@@ -484,6 +501,9 @@ async fn run(mut args: Cli) -> Result<()> {
     if args.examples {
         examples::print();
         return Ok(());
+    }
+    if args.self_test {
+        return self_test::run();
     }
     if let Some(secs) = args.ble_scan {
         let dur = secs.clamp(1, 300);
@@ -3411,7 +3431,9 @@ async fn run(mut args: Cli) -> Result<()> {
             .map_err(|e| anyhow!("--diff-against {}: {}", baseline, e))?;
         baseline_diff::print(&d);
     }
-    if args.executive_summary {
+    // Findings footer: explicit --exec-summary, or by default in the rich
+    // console style (a consolidated, severity-aware verdict at the end).
+    if args.executive_summary || output::is_rich() {
         let summary = exec_summary::build(&sorted, elapsed);
         exec_summary::print(&summary);
     }

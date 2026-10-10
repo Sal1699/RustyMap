@@ -303,9 +303,14 @@ pub fn classify(host: &HostResult, mac: Option<&[u8; 6]>) -> DeviceGuess {
     }
 
     // ── NAS ──
-    if has(5000) && has(5001) {
-        g.bump(DeviceClass::Nas, 85, "Synology DSM ports");
-        g.vendor.get_or_insert_with(|| "Synology".into());
+    // Ports 5000/5001 are Synology DSM's defaults, but plenty of residential
+    // gateways and app servers use them too, so the ports ALONE are only a
+    // weak hint (no vendor claim) — and are ignored entirely when the host
+    // also serves DNS on :53, which is a gateway shape, not a NAS (lab: a TIM
+    // modem was mislabelled "Synology NAS 90%"). A real Synology still wins
+    // via its banner/OUI below.
+    if has(5000) && has(5001) && !has(53) {
+        g.bump(DeviceClass::Nas, 55, "ports 5000/5001 (Synology DSM?)");
     }
     if contains("synology") {
         g.bump(DeviceClass::Nas, 95, "Synology banner");
@@ -323,6 +328,13 @@ pub fn classify(host: &HostResult, mac: Option<&[u8; 6]>) -> DeviceGuess {
     }
 
     // ── Routers / switches / APs / firewalls ──
+    // Residential gateway / ISP modem shape: serves DNS to the LAN plus a web
+    // admin UI, usually with UPnP (1900/49152) or TR-069 CWMP (7547). General
+    // servers don't run :53 for the LAN, so this cleanly separates a gateway
+    // from a NAS/app server even without a vendor banner.
+    if has(53) && (has(80) || has(443)) && (has(49152) || has(1900) || has(7547)) {
+        g.bump(DeviceClass::Router, 70, "DNS + web admin + UPnP/TR-069 (residential gateway)");
+    }
     if contains("mikrotik") || contains("routeros") {
         g.bump(DeviceClass::Router, 95, "MikroTik/RouterOS banner");
         g.vendor.get_or_insert_with(|| "MikroTik".into());

@@ -658,9 +658,20 @@ pub struct Cli {
     #[arg(long = "color")]
     pub color: bool,
 
+    /// Console output style: rich (professional, descriptive — default) or
+    /// terse (compact nmap-like table). Machine formats (--oN/--oG/--oJ/--oX)
+    /// are unaffected.
+    #[arg(long = "output-style", value_name = "STYLE", default_value = "rich")]
+    pub output_style: String,
+
     /// Stampa la guida estesa con esempi e categorie
     #[arg(long = "guide")]
     pub guide: bool,
+
+    /// Run an internal no-privilege smoke test (spawns common commands
+    /// against 127.0.0.1 and checks none crash), then exit
+    #[arg(long = "self-test")]
+    pub self_test: bool,
 
     /// Never do DNS resolution
     #[arg(short = 'n', long = "no-dns")]

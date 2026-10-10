@@ -38,6 +38,17 @@ pub async fn push(
 ) -> Result<ImportStats> {
     let mut stats = ImportStats::default();
 
+    // Ensure the workspace exists first: msfrpcd returns a hard error on
+    // db.report_* against a missing workspace (lab L1). add_workspace is
+    // best-effort — if it already exists msfrpcd errors harmlessly and we
+    // ignore it, so the import works whether or not the user pre-created it.
+    let _ = client
+        .call(
+            "db.add_workspace",
+            &[Value::from(workspace.to_string())],
+        )
+        .await;
+
     for h in hosts {
         if !h.up {
             continue;

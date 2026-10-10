@@ -1,9 +1,27 @@
 use crate::file_out;
+use crate::portdesc;
 use crate::ports::service_name;
 use crate::scanner::{HostResult, PortResult, PortState};
 use anyhow::Result;
 use colored::*;
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Console output style. `rich` (default) adds the per-host summary line, the
+/// descriptive NOTE column and the scan-wide findings/stats footer; `terse`
+/// is the compact nmap-like table. Set once from `--output-style` in `main`;
+/// the file writers (--oN/--oG/--oJ/--oX) ignore it entirely.
+static RICH: AtomicBool = AtomicBool::new(true);
+
+/// Select the console output style. `true` = rich, `false` = terse.
+pub fn set_rich(on: bool) {
+    RICH.store(on, Ordering::Relaxed);
+}
+
+/// Whether the rich console style is active.
+pub fn is_rich() -> bool {
+    RICH.load(Ordering::Relaxed)
+}
 
 pub fn print_banner() {
     println!(
@@ -61,6 +79,57 @@ fn fmt_rtt(rtt: std::time::Duration) -> String {
     } else {
         format!("{:.2}ms", rtt.as_secs_f64() * 1000.0)
     }
+}
+
+/// Rich-style one-line exposure headline for a host, or `None` when no open
+/// port carries a notable risk. Example:
+///   `Exposure: 2 high, 1 notable  (‼ 23 telnet · ‼ 3306 mysql · ⚠ 445 …)`
+fn rich_exposure_line(host: &HostResult) -> Option<String> {
+    let mut high = 0usize;
+    let mut warn = 0usize;
+    let mut items: Vec<(portdesc::Risk, u16, &'static str)> = Vec::new();
+    for p in &host.ports {
+        if p.state != PortState::Open {
+            continue;
+        }
+        if let Some(d) = portdesc::describe(p.port) {
+            match d.risk {
+                portdesc::Risk::High => high += 1,
+                portdesc::Risk::Warn => warn += 1,
+                portdesc::Risk::Info => continue,
+            }
+            items.push((d.risk, p.port, service_name(p.port).unwrap_or("?")));
+        }
+    }
+    if items.is_empty() {
+        return None;
+    }
+    let rank = |r: portdesc::Risk| match r {
+        portdesc::Risk::High => 0u8,
+        portdesc::Risk::Warn => 1,
+        portdesc::Risk::Info => 2,
+    };
+    items.sort_by(|a, b| rank(a.0).cmp(&rank(b.0)).then(a.1.cmp(&b.1)));
+    let preview: Vec<String> = items
+        .iter()
+        .take(4)
+        .map(|(r, port, svc)| format!("{} {} {}", r.glyph(), port, svc))
+        .collect();
+    let more = if items.len() > 4 {
+        format!(" (+{} more)", items.len() - 4)
+    } else {
+        String::new()
+    };
+    let mut counts: Vec<String> = Vec::new();
+    if high > 0 {
+        counts.push(format!("{} high", high));
+    }
+    if warn > 0 {
+        counts.push(format!("{} notable", warn));
+    }
+    let head = format!("Exposure: {}", counts.join(", "));
+    let head = if high > 0 { head.red().bold() } else { head.yellow().bold() };
+    Some(format!("{}  ({}{})", head, preview.join(" · ").dimmed(), more))
 }
 
 #[cfg(test)]
@@ -228,6 +297,15 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
         }
     }
 
+    // Rich style: a one-line exposure headline so the reader sees the
+    // security verdict before the table. Built from the open ports' risk
+    // tiers (portdesc); silent in terse mode and when nothing stands out.
+    if is_rich() {
+        if let Some(line) = rich_exposure_line(host) {
+            println!("{}", line);
+        }
+    }
+
     // Split ports into what we list individually vs. what we collapse into
     // an nmap-style "Not shown" summary. Open ports are always listed;
     // non-open ports are listed only with -v or when there are few enough
@@ -281,6 +359,10 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
     // once the user asks for any verbosity. Columns are assembled
     // dynamically so REASON/RTT slot in without breaking alignment.
     let show_rtt = verbose >= 1;
+    // --reason shows the REASON column explicitly; -v (any verbosity) now
+    // implies it too, so "why open/closed/filtered" is visible without a
+    // separate flag (the reasons are nmap-style: syn-ack, rst, no-response…).
+    let show_reason = show_reason || verbose >= 1;
     let mut header: Vec<String> = vec![
         format!("{:<10}", "PORT").bold().to_string(),
         format!("{:<14}", "STATE").bold().to_string(),
@@ -292,7 +374,13 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
         header.push(format!("{:<10}", "RTT").bold().to_string());
     }
     header.push(format!("{:<16}", "SERVICE").bold().to_string());
-    header.push("VERSION".bold().to_string());
+    if is_rich() {
+        // Rich: VERSION gets a fixed width so the trailing NOTE column aligns.
+        header.push(format!("{:<18}", "VERSION").bold().to_string());
+        header.push("NOTE".bold().to_string());
+    } else {
+        header.push("VERSION".bold().to_string());
+    }
     println!("{}", header.join(" "));
 
     // Label ports with the right transport: /udp for UDP, /sctp for the SCTP
@@ -330,7 +418,25 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
             cells.push(format!("{:<10}", fmt_rtt(p.rtt)));
         }
         cells.push(format!("{:<16}", service));
-        cells.push(version);
+        if is_rich() {
+            // Fixed-width VERSION, then the descriptive NOTE (glyph + text)
+            // for open/open-filtered ports we have something to say about.
+            cells.push(format!("{:<18}", version));
+            let wants_note =
+                matches!(p.state, PortState::Open | PortState::OpenFiltered);
+            if wants_note {
+                if let Some(d) = portdesc::describe(p.port) {
+                    let glyph = match d.risk {
+                        portdesc::Risk::High => d.risk.glyph().red().bold(),
+                        portdesc::Risk::Warn => d.risk.glyph().yellow().bold(),
+                        portdesc::Risk::Info => d.risk.glyph().dimmed(),
+                    };
+                    cells.push(format!("{} {}", glyph, d.text.dimmed()));
+                }
+            }
+        } else {
+            cells.push(version);
+        }
         println!("{}", cells.join(" "));
         // Raw service banner at -vv — the actual bytes we matched on,
         // more transparent than nmap's cooked service line.
@@ -415,6 +521,30 @@ pub fn print_summary(hosts: &[HostResult], elapsed_sec: f64) {
         if up == 1 { "" } else { "s" },
         elapsed_sec
     );
+    // Rich style: an honest scan-stats line. We report what we can account
+    // for centrally — port-probes resolved to a state and the derived rate —
+    // rather than inventing packet/retransmit counters the scanners don't
+    // surface here.
+    if is_rich() {
+        let probed: usize = hosts.iter().map(|h| h.ports.len()).sum();
+        let open: usize = hosts
+            .iter()
+            .flat_map(|h| h.ports.iter())
+            .filter(|p| p.state == PortState::Open)
+            .count();
+        let rate = if elapsed_sec > 0.0 {
+            probed as f64 / elapsed_sec
+        } else {
+            0.0
+        };
+        println!(
+            "  stats: {} port-probe{} · {} open · {:.0} probes/s",
+            probed,
+            if probed == 1 { "" } else { "s" },
+            open,
+            rate
+        );
+    }
 }
 
 pub fn write_normal(path: &str, hosts: &[HostResult], elapsed_sec: f64) -> Result<()> {

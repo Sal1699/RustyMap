@@ -48,7 +48,7 @@ pub fn print_guide() {
     line("--tui                 Apre browser TUI dei risultati (q per uscire)");
     line("--exclude SPEC        Esclude IP/CIDR/range (ripetibile, virgole ok)");
     line("--exclude-file FILE   File con un host/CIDR per riga da escludere");
-    line("-A, --aggressive      Combo: -sV -O --traceroute + scripts/ se presente");
+    line("-A, --aggressive      Combo: --sV -O --traceroute + scripts/ se presente");
     line("--top-ports N         Scansiona le N porte più comuni (override -p)");
     line("--reason              Mostra perché lo stato è quello (syn-ack, rst, …)");
     line("--randomize-hosts     Randomizza l'ordine degli host");
@@ -318,10 +318,12 @@ pub fn print_guide() {
     line("--oH FILE             Report HTML");
     line("--oMd FILE            Report Markdown");
     line("--template TPL --oT FILE   Template Tera custom");
-    line("-v / -vv / -vvv       Verbosita: RTT+porte chiuse / colonne extra / log [net]/[probe]");
+    line("-v / -vv / -vvv       Verbosita: RTT+reason+porte chiuse / colonne extra / log [net]/[probe]");
+    line("--output-style S      Console: rich (pro, descrittivo — default) | terse (tabella nmap)");
     line("--no-color            Disabilita i colori");
     line("--color               Forza i colori anche in pipe (auto-off se non-TTY, NO_COLOR, CI)");
     example("rustymap --sT --oN scan.txt --oJ scan.json 10.0.0.5");
+    example("rustymap --sS --output-style terse 10.0.0.5   # tabella compatta nmap-like");
     example("rustymap --sT --oH report.html 10.0.0.0/24");
     example("rustymap --sT --template my.tera --oT out.txt 10.0.0.5");
 
@@ -440,7 +442,7 @@ pub fn print_guide() {
     example("rustymap --diff-against baseline.json --oJ now.json 10.0.0.0/24");
     example("rustymap --wizard");
     example("rustymap --recommend example.com");
-    example("rustymap -sV --auth-audit --save-profile lab.toml 10.0.0.5");
+    example("rustymap --sV --auth-audit --save-profile lab.toml 10.0.0.5");
     example("rustymap --history 50");
     example("rustymap --siem-format ecs --siem-out events.jsonl 10.0.0.0/24");
     example("rustymap --siem-format cef --siem-out events.cef --auth-audit 10.0.0.5");
@@ -472,8 +474,8 @@ pub fn print_guide() {
 
     section("PROFILI & SCHEDULAZIONE");
     line("--profile NOME|FILE   Preset integrato o file TOML");
-    line("   preset: pentest-internal   SYN + -sV + -O, T4 adaptive (engagement interno)");
-    line("   preset: compliance-pci     tutte le porte TCP + -sV + TLS grade, T4 (PCI-DSS)");
+    line("   preset: pentest-internal   SYN + --sV + -O, T4 adaptive (engagement interno)");
+    line("   preset: compliance-pci     tutte le porte TCP + --sV + TLS grade, T4 (PCI-DSS)");
     line("   preset: bugbounty-web      connect porte web + --web-scan + TLS grade, T3");
     line("   preset: homelab-discover   SYN top-100, T4 adaptive (sweep rapido del lab)");
     line("--every SPEC          Ripeti ogni N[s|m|h|d]");
@@ -494,7 +496,7 @@ pub fn print_guide() {
     line("--cve-db FILE         Correla servizi a CVE (usa con --sV)");
     line("--no-builtin-scripts  Disabilita gli script Rhai baked nel binario");
     line("--force-scripts       Forza i built-in. Di default auto-partono SOLO su");
-    line("                      scan di default/`-sV`/`-A`, non sui port-scan raw");
+    line("                      scan di default/`--sV`/`-A`, non sui port-scan raw");
     line("                      espliciti (--sS/--sT -F) né sugli sweep >8 host —");
     line("                      così un port-scan resta veloce come nmap");
     line("--no-builtin-cves     Disabilita il DB CVE baked nel binario");
@@ -551,6 +553,7 @@ pub fn print_guide() {
     category("MAINTENANCE");
     section("AUDIT & INSTALL");
     line("--audit-log FILE      JSONL con tutte le azioni (timestamped)");
+    line("--self-test           Smoke-test interno: lancia comandi no-priv su 127.0.0.1, verifica no-crash");
     line("--install-npcap       Installa runtime Npcap (Windows admin)");
     line("--check-update        Controlla se esiste una release più recente");
     line("--update              Scarica e installa l'ultima release da GitHub");

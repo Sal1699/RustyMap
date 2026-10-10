@@ -4,6 +4,70 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.84.0] - 2026-10-10
+
+A large MINOR: a professional, descriptive **rich output** style (now the
+default console view), the residuals from the Fase L lab run, and a batch of
+UX/test-infra improvements. Machine formats (`--oN/--oG/--oX`) stay
+nmap-compatible. 608/608 tests.
+
+### Added — professional output
+- **`--output-style rich|terse`** (default `rich`). Rich adds, on top of the
+  existing nmap-like table:
+  - a per-host **Exposure** headline (risk-ranked open services);
+  - a descriptive **NOTE** column — plain-language service description + a
+    risk glyph (‼ high / ⚠ notable / · info), from the new `portdesc` map
+    (~140 ports);
+  - a **findings footer** (the executive summary, now shown by default in
+    rich mode) and an honest **scan-stats line** (port-probes, open, probes/s).
+  `terse` reproduces the compact v0.83 table for scripts/eyeballing.
+- **JSON output enrichment**: each open port now carries optional `note` and
+  `risk` fields (same source as the rich NOTE column), so the native JSON
+  format matches what the console shows. XML stays strictly nmap-compatible.
+- **`-v` now implies the REASON column** (why open/closed/filtered — nmap-style
+  reasons), no separate `--reason` needed.
+
+### Added — test infra
+- **`--self-test`**: spawns this binary with a set of no-privilege commands
+  against 127.0.0.1 and checks none crash (a panic aborts with exit 101; any
+  other exit is "handled"). A pre-release smoke net; exits 2 if any case
+  crashed.
+- **`COMMAND_COVERAGE.md`**: a category matrix of every command's lab-test
+  status (✅/🟡/⬜), the companion to `LAB_VALIDATION.md`, to make the
+  "keep testing toward nmap parity" effort systematic.
+
+### Fixed — Fase L residuals
+- **`--ssl-enum` missed exotic TLS 1.2 suites**: added ARIA-GCM, AES-CCM,
+  CAMELLIA-CBC and SEED-CBC (19 suites) so the enumeration matches sslscan's
+  broader list on appliance/embedded TLS (lab L2b: was 13/31). Full TLS 1.3
+  suite enumeration still shows the negotiated suite only (needs a 1.3
+  key_share ClientHello — documented micro-gap).
+- **`--msf-import` now auto-creates the workspace** (`db.add_workspace`,
+  best-effort) instead of failing with msfrpcd HTTP 500 when it didn't exist
+  (lab L1).
+- **Device fingerprint**: a residential gateway / ISP modem is no longer
+  mislabelled "Synology NAS" — ports 5000/5001 alone are a weak hint (no
+  vendor claim) and are ignored when the host also serves DNS, plus a positive
+  "residential gateway" signal (DNS + web admin + UPnP/TR-069). (lab: TIM modem
+  → "Synology NAS 90%".)
+- **Guide/CLI drift**: `--guide` showed `-sV` (single dash) in several places,
+  but the flag is `--sV`; the single-dash form errors in clap. Corrected
+  (same drift class as the v0.83.1 `--Pn` fix).
+
+### Notes
+- Router ports 631/6699 (lab "2/13 missed"): both are in the top-ports list —
+  the difference was filtered-port display-collapsing, not a coverage gap. No
+  change.
+- **BUG 0.A provenance confirmed**: the closed/filtered "Not shown" reporting
+  landed in **v0.68.2** (commit 67b1a9e), not a 0.83.x change.
+- A determinate mid-scan **%/ETA** was intentionally *not* added: it needs the
+  `ScanStats` counter wired into the async scan hot-path (a flagged follow-up).
+  The `--progress` spinner (live elapsed + scope) and the new post-scan
+  stats line cover throughput honestly without fabricating an ETA.
+- **Needs Kali re-run**: rich output on a real multi-service host; ssl-enum
+  exotic suites vs sslscan on :8443; msf-import against a fresh (uncreated)
+  workspace; device fingerprint on the TIM gateway.
+
 ## [0.83.1] - 2026-10-10
 
 Small follow-up fixes found while checking `--sn` (ping-only / host
