@@ -54,14 +54,10 @@ pub struct Recommendation {
     pub command_line: String,
 }
 
-pub async fn analyze(host: &str, dur: Duration) -> Result<Recommendation> {
-    analyze_with_ports(host, dur, None).await
-}
-
-/// Same as `analyze` but lets the caller widen (or restrict) the probe
-/// set. When `ports` is None we fall back to `PROBE_PORTS`. When the
-/// caller passes a list (e.g. from `-p 1-65535`), we probe those — so
-/// the recommender stops missing services on non-default ports.
+/// Probe a host over a known-service port set and derive the recommended
+/// follow-up flags. When `ports` is None we fall back to `PROBE_PORTS`; when
+/// the caller passes a list (e.g. from `-p 1-65535`), we probe those — so the
+/// recommender stops missing services on non-default ports.
 pub async fn analyze_with_ports(
     host: &str,
     dur: Duration,
@@ -145,7 +141,10 @@ pub fn derive_flags(open: &[u16], host: &str) -> (Vec<String>, Vec<String>) {
     }
     if set.contains(&445) || set.contains(&139) {
         flags.push("--smb-audit".into());
-        notes.push("SMB on 445/139 — flag SMBv1 + signing-not-required".into());
+        notes.push(
+            "SMB on 445/139 — flag SMBv1 + signing-not-required; add --vuln-ms17-010 for EternalBlue"
+                .into(),
+        );
     }
     if set.contains(&3389) {
         flags.push("--rdp-audit".into());
@@ -157,12 +156,27 @@ pub fn derive_flags(open: &[u16], host: &str) -> (Vec<String>, Vec<String>) {
     }
     if has_any_http {
         flags.push("--http-enum".into());
-        notes.push("HTTP exposed — enumerate ~80 admin/leak paths".into());
+        flags.push("--web-scan".into());
+        notes.push(
+            "HTTP exposed — path enum (--http-enum) + security-header/WAF/CORS grade (--web-scan)"
+                .into(),
+        );
+        notes.push(
+            "Lab-validated web vuln probes with clear verdicts: --shellshock, --webdav-probe, --csp-cors"
+                .into(),
+        );
     }
     if has_any_tls_port {
         flags.push("--ssl-enum".into());
         flags.push("--tls-grade".into());
-        notes.push("TLS port(s) detected — protocol enum + A+/F grade".into());
+        flags.push("--vuln-ssl-ccs".into());
+        notes.push(
+            "TLS port(s) — protocol+cipher enum, A+/F grade, and CCS-injection check (--vuln-ssl-ccs)"
+                .into(),
+        );
+    }
+    if set.contains(&443) {
+        notes.push("HTTPS on 443 — probe HTTP/3 (QUIC) with `--quic <host>`".into());
     }
     if set.contains(&53) {
         if !host.parse::<IpAddr>().is_ok() {
@@ -192,6 +206,19 @@ pub fn derive_flags(open: &[u16], host: &str) -> (Vec<String>, Vec<String>) {
     }
     if set.contains(&21) {
         notes.push("FTP on 21 — likely cleartext; consider SFTP/FTPS".into());
+    }
+
+    // When any CVE-prone service is exposed, point at the full
+    // detect→correlate→exploit chain (lab-validated end-to-end in v0.82.1).
+    let cve_prone = [21u16, 22, 25, 80, 110, 139, 143, 443, 445, 3389, 8080, 8443]
+        .iter()
+        .any(|p| set.contains(p));
+    if cve_prone {
+        notes.push(
+            "Turn CVE matches into Metasploit modules: re-run with \
+             `-sV --msf-suggest --msf-url <rpc> --msf-token <token>`"
+                .into(),
+        );
     }
 
     if flags.is_empty() && notes.is_empty() {
@@ -246,6 +273,27 @@ mod tests {
         let (flags, _) = derive_flags(&[443], "host");
         assert!(flags.contains(&"--ssl-enum".to_string()));
         assert!(flags.contains(&"--tls-grade".to_string()));
+        // Lab-validated CCS-injection check is now suggested for TLS ports.
+        assert!(flags.contains(&"--vuln-ssl-ccs".to_string()));
+    }
+
+    #[test]
+    fn http_yields_web_scan_and_http_enum() {
+        let (flags, _) = derive_flags(&[80], "host");
+        assert!(flags.contains(&"--http-enum".to_string()));
+        assert!(flags.contains(&"--web-scan".to_string()));
+    }
+
+    #[test]
+    fn smb_note_mentions_ms17_010() {
+        let (_, notes) = derive_flags(&[445], "host");
+        assert!(notes.iter().any(|n| n.contains("ms17-010")));
+    }
+
+    #[test]
+    fn cve_prone_service_suggests_msf_chain() {
+        let (_, notes) = derive_flags(&[22], "host");
+        assert!(notes.iter().any(|n| n.contains("--msf-suggest")));
     }
 
     #[test]

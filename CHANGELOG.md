@@ -4,6 +4,72 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.83.0] - 2026-10-10
+
+**Fase 28 (UX hardening)** plus the three code-level bugs from the v0.82.1
+lab sweep (report: `VALIDATION_0.82.md` / `LAB_VALIDATION.md`, where the 3
+residual fixes passed and the never-tested areas N1–N13 were swept). A MINOR
+release — new flags and behaviour, no breaking changes. 603/603 tests (+7).
+
+### Added
+- **Exit-code discipline** (new `src/exit.rs`): the process now exits
+  `0` clean · `1` findings (correlated CVEs, script findings, or
+  deprecated/weak TLS) · `2` scan error · `3` config error · `130`
+  interrupted. `main` is split into a thin wrapper over `run()`; clap usage
+  errors map to `3` (and `--help`/`--version` to `0`). Documented in
+  `--guide`.
+- **Curated `--profile` presets** — `--profile <name>` now resolves a
+  built-in preset without a TOML file: `pentest-internal` (SYN + -sV + -O,
+  T4 adaptive), `compliance-pci` (all TCP ports + -sV + TLS grade, T4),
+  `bugbounty-web` (connect web ports + --web-scan + TLS grade, T3),
+  `homelab-discover` (SYN top-100, T4 adaptive). A path is still loaded as a
+  TOML file; an unknown value lists the presets.
+- **`--color`** forces coloured output even through a pipe. Colour now
+  **auto-disables** when stdout is not a TTY, or when `NO_COLOR`/`CI` is set
+  (the no-color.org convention), unless `--color` overrides.
+- **`-vvv`** now tops out the verbosity ladder by enabling level-1 category
+  debug (`[net]`/`[probe]`/`[parse]`/`[scan]`) when `-d` wasn't given, the
+  way nmap's `-vvv` does. `-v` = RTT + all non-open ports; `-vv` = per-port
+  extra columns; `-vvv` = + packet-level logging.
+
+### Fixed
+- **`--msf-import <ws>` imported nothing even with a target** (lab bug N8).
+  The flag was handled only in a pre-scan early-return block that always
+  pushed an empty host list. It now runs **after** the scan — pushing real
+  hosts, open services, and CVE-derived vulns into the MSF workspace — while
+  the standalone no-target form just explains what to run. `--msf-suggest`
+  and `--msf-import` now share one CVE→Finding mapping.
+- **`--ssl-enum` reported only ECDHE suites** (lab bug N6). Cipher
+  enumeration ran a single TLS 1.2 ClientHello, so suites a server only
+  accepts under TLS 1.0/1.1 (RSA-kx, DHE, legacy CBC) never surfaced. It now
+  enumerates once **per supported legacy version** (1.0/1.1/1.2) and unions
+  the distinct suites, matching sslscan's broader list.
+- **smb-audit printed "bogus SMB response length 1"** on a modern Windows
+  host that accepts the TCP connect then RSTs the SMB negotiate (lab bug on
+  SMB-deep). The raw read failure and implausible NetBIOS header are now
+  turned into a clear verdict ("likely a firewall reject or a non-SMB
+  service on this port") instead of a bare I/O error.
+
+### Changed
+- **`--recommend` rebuilt** from the lab sweep: HTTP ports now also suggest
+  `--web-scan` (and note the lab-validated `--shellshock`/`--webdav-probe`/
+  `--csp-cors` probes); TLS ports add the `--vuln-ssl-ccs` CCS-injection
+  check; SMB notes point at `--vuln-ms17-010`; 443 suggests `--quic`; any
+  CVE-prone service points at the `-sV --msf-suggest` chain.
+- Config-level errors (bad flag combos, unreadable `--profile`, invalid
+  `--every`, unknown `--evasion`/`--stack-profile`/framework, missing
+  `--msf-url`/targets, bad `--oX`-family output dir) now carry a
+  what-happened/what-to-do message and exit `3` (anyhow-message audit).
+
+### Notes — needs Kali re-run
+- `--msf-import <ws> <target> --msf-url …` end-to-end against a live
+  `msfrpcd` (confirm hosts/services/vulns land in `workspace <ws>`).
+- `--ssl-enum` now lists DHE/RSA/CBC suites on the lab router/server that
+  only showed ECDHE before (vs sslscan).
+- `--smb-audit` against firewalled Win11 shows the new clear verdict.
+- Exit codes: a scan with findings returns `1` (CI-gate-friendly); confirm
+  on a target with a real CVE/TLS finding.
+
 ## [0.82.1] - 2026-10-09
 
 Fixes the three residual bugs from the v0.82.0 lab run (report:

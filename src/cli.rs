@@ -654,6 +654,10 @@ pub struct Cli {
     #[arg(long = "no-color")]
     pub no_color: bool,
 
+    /// Force colored output even when stdout is piped or NO_COLOR/CI is set
+    #[arg(long = "color")]
+    pub color: bool,
+
     /// Stampa la guida estesa con esempi e categorie
     #[arg(long = "guide")]
     pub guide: bool,

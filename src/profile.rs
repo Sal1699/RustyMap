@@ -20,6 +20,20 @@ pub struct Profile {
     pub cve_db: Option<String>,
     pub script: Option<String>,
     pub adaptive: Option<bool>,
+    // Added for the built-in presets (Fase 28). All optional + serde-default
+    // so pre-existing TOML profiles still parse unchanged.
+    #[serde(default)]
+    pub ssl_enum: Option<bool>,
+    #[serde(default)]
+    pub tls_grade: Option<bool>,
+    #[serde(default)]
+    pub web_scan: Option<bool>,
+    #[serde(default)]
+    pub aggressive: Option<bool>,
+    #[serde(default)]
+    pub all_ports: Option<bool>,
+    #[serde(default)]
+    pub top_ports: Option<u32>,
 }
 
 pub fn load(path: &str) -> Result<Profile> {
@@ -38,6 +52,12 @@ pub fn apply(cli: &mut Cli, p: &Profile) {
     if let Some(c) = &p.cve_db { if cli.cve_db.is_none() { cli.cve_db = Some(c.clone()); } }
     if let Some(s) = &p.script { if cli.script_path.is_none() { cli.script_path = Some(s.clone()); } }
     if p.adaptive == Some(true) { cli.adaptive = true; }
+    if p.ssl_enum == Some(true) { cli.ssl_enum = true; }
+    if p.tls_grade == Some(true) { cli.tls_grade = true; }
+    if p.web_scan == Some(true) { cli.web_scan = true; }
+    if p.aggressive == Some(true) { cli.aggressive = true; }
+    if p.all_ports == Some(true) { cli.all_ports = true; }
+    if let Some(n) = p.top_ports { if cli.top_ports.is_none() { cli.top_ports = Some(n); } }
     if let Some(st) = &p.scan_type {
         match st.to_lowercase().as_str() {
             "connect" => cli.scan_connect = true,
@@ -85,7 +105,99 @@ pub fn from_cli(cli: &Cli, name: Option<&str>) -> Profile {
         cve_db: cli.cve_db.clone(),
         script: cli.script_path.clone(),
         adaptive: if cli.adaptive { Some(true) } else { None },
+        ssl_enum: if cli.ssl_enum { Some(true) } else { None },
+        tls_grade: if cli.tls_grade { Some(true) } else { None },
+        web_scan: if cli.web_scan { Some(true) } else { None },
+        aggressive: if cli.aggressive { Some(true) } else { None },
+        all_ports: if cli.all_ports { Some(true) } else { None },
+        top_ports: cli.top_ports,
     }
+}
+
+/// Built-in named presets (Fase 28). `--profile <name>` resolves one of
+/// these without a TOML file on disk; `--profile <path>` still loads a file.
+/// Keep [`BUILTIN_PRESETS`] and this match in sync.
+pub fn builtin(name: &str) -> Option<Profile> {
+    let p = match name.to_lowercase().replace('_', "-").as_str() {
+        "pentest-internal" => Profile {
+            name: Some("pentest-internal".into()),
+            description: Some(
+                "Internal engagement: SYN scan + service/OS detection, aggressive timing".into(),
+            ),
+            scan_type: Some("syn".into()),
+            service_version: Some(true),
+            os_fingerprint: Some(true),
+            timing: Some(4),
+            adaptive: Some(true),
+            ..Default::default()
+        },
+        "compliance-pci" => Profile {
+            name: Some("compliance-pci".into()),
+            description: Some(
+                "PCI-DSS posture: all TCP ports, service detection, TLS protocol + cipher grade"
+                    .into(),
+            ),
+            scan_type: Some("syn".into()),
+            service_version: Some(true),
+            ssl_enum: Some(true),
+            tls_grade: Some(true),
+            all_ports: Some(true),
+            timing: Some(4),
+            ..Default::default()
+        },
+        "bugbounty-web" => Profile {
+            name: Some("bugbounty-web".into()),
+            description: Some(
+                "Web attack surface: connect scan of web ports + --web-scan + TLS grade".into(),
+            ),
+            scan_type: Some("connect".into()),
+            ports: Some("80,443,3000,5000,8000,8008,8080,8081,8443,8888,9000".into()),
+            service_version: Some(true),
+            web_scan: Some(true),
+            ssl_enum: Some(true),
+            tls_grade: Some(true),
+            timing: Some(3),
+            ..Default::default()
+        },
+        "homelab-discover" => Profile {
+            name: Some("homelab-discover".into()),
+            description: Some(
+                "Fast homelab sweep: SYN top-100 ports, aggressive timing, no deep probes".into(),
+            ),
+            scan_type: Some("syn".into()),
+            top_ports: Some(100),
+            timing: Some(4),
+            adaptive: Some(true),
+            ..Default::default()
+        },
+        _ => return None,
+    };
+    Some(p)
+}
+
+/// Name + one-line summary for every built-in preset, for `--guide` and
+/// the `resolve` error message.
+pub const BUILTIN_PRESETS: &[(&str, &str)] = &[
+    ("pentest-internal", "SYN + -sV + -O, T4 adaptive — internal engagement"),
+    ("compliance-pci", "all TCP ports + -sV + TLS grade, T4 — PCI-DSS posture"),
+    ("bugbounty-web", "connect web ports + --web-scan + TLS grade, T3 — web surface"),
+    ("homelab-discover", "SYN top-100, T4 adaptive — fast lab sweep"),
+];
+
+/// Resolve a `--profile` value: a built-in preset name when it matches one,
+/// otherwise a path to a TOML profile file.
+pub fn resolve(spec: &str) -> Result<Profile> {
+    if let Some(p) = builtin(spec) {
+        return Ok(p);
+    }
+    load(spec).with_context(|| {
+        let names: Vec<&str> = BUILTIN_PRESETS.iter().map(|(n, _)| *n).collect();
+        format!(
+            "'{}' is neither a built-in preset ({}) nor a readable profile file",
+            spec,
+            names.join(", ")
+        )
+    })
 }
 
 pub fn save(path: &str, p: &Profile) -> Result<()> {

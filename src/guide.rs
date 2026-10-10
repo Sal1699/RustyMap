@@ -317,11 +317,19 @@ pub fn print_guide() {
     line("--oH FILE             Report HTML");
     line("--oMd FILE            Report Markdown");
     line("--template TPL --oT FILE   Template Tera custom");
-    line("-v, -vv               Verbose (mostra anche porte chiuse con -vv)");
-    line("--no-color            Disabilita colori");
+    line("-v / -vv / -vvv       Verbosita: RTT+porte chiuse / colonne extra / log [net]/[probe]");
+    line("--no-color            Disabilita i colori");
+    line("--color               Forza i colori anche in pipe (auto-off se non-TTY, NO_COLOR, CI)");
     example("rustymap --sT --oN scan.txt --oJ scan.json 10.0.0.5");
     example("rustymap --sT --oH report.html 10.0.0.0/24");
     example("rustymap --sT --template my.tera --oT out.txt 10.0.0.5");
+
+    section("EXIT CODE");
+    line("0  pulito: scan completato, nessun finding");
+    line("1  finding: CVE correlate, finding di script, o TLS deprecato/debole");
+    line("2  errore di scan (fallimento runtime/IO)");
+    line("3  errore di configurazione (flag errati, profilo illeggibile, spec non valida)");
+    line("130  interrotto (Ctrl-C)");
 
     section("DATABASE & DIFF");
     line("--db FILE             Path SQLite (default: rustymap.db)");
@@ -462,9 +470,15 @@ pub fn print_guide() {
     example("rustymap --vault-list");
 
     section("PROFILI & SCHEDULAZIONE");
-    line("--profile FILE.toml   Carica profilo scan (es. profiles/pci-lite.toml)");
+    line("--profile NOME|FILE   Preset integrato o file TOML");
+    line("   preset: pentest-internal   SYN + -sV + -O, T4 adaptive (engagement interno)");
+    line("   preset: compliance-pci     tutte le porte TCP + -sV + TLS grade, T4 (PCI-DSS)");
+    line("   preset: bugbounty-web      connect porte web + --web-scan + TLS grade, T3");
+    line("   preset: homelab-discover   SYN top-100, T4 adaptive (sweep rapido del lab)");
     line("--every SPEC          Ripeti ogni N[s|m|h|d]");
-    example("rustymap --profile profiles/pci-lite.toml 10.0.0.0/24");
+    example("rustymap --profile homelab-discover 10.0.0.0/24");
+    example("rustymap --profile compliance-pci 10.0.0.5");
+    example("rustymap --profile profiles/pci-lite.toml 10.0.0.0/24   # file TOML custom");
     example("rustymap --sT --every 1h 10.0.0.5");
 
     section("WEB UI");

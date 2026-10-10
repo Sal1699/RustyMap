@@ -11,6 +11,7 @@ mod dns;
 mod discovery;
 mod evasion;
 mod examples;
+mod exit;
 mod file_out;
 mod ftp_bounce;
 mod guide;
@@ -169,14 +170,42 @@ use std::time::Instant;
 use udp_scan::UdpScanner;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> std::process::ExitCode {
     win_console::init();
 
-    let mut args = Cli::parse();
+    // Parse here so clap's own usage handling maps onto our exit scheme:
+    // --help / --version exit 0, a genuine usage error exits 3 (config error).
+    let args = match Cli::try_parse() {
+        Ok(a) => a,
+        Err(e) => {
+            let _ = e.print();
+            let code = if e.use_stderr() { exit::CONFIG_ERROR } else { exit::CLEAN };
+            return std::process::ExitCode::from(code);
+        }
+    };
 
-    // Apply profile overrides BEFORE any command dispatch
-    if let Some(profile_path) = args.profile.clone() {
-        let p = profile::load(&profile_path)?;
+    match run(args).await {
+        Ok(()) => std::process::ExitCode::from(exit::success_code()),
+        Err(e) => {
+            use colored::Colorize;
+            let code = exit::classify(&e);
+            eprintln!("{} {:#}", "error:".red().bold(), e);
+            std::process::ExitCode::from(code)
+        }
+    }
+}
+
+/// The real entry point. `Ok(())` means the run completed — the process then
+/// exits 0, or 1 if [`exit::note_findings`] recorded a security-relevant
+/// finding. An `Err` is mapped to 2 (scan error) or 3 (config error) by
+/// [`exit::classify`].
+async fn run(mut args: Cli) -> Result<()> {
+    // Apply profile overrides BEFORE any command dispatch. The value is a
+    // built-in preset name (pentest-internal / compliance-pci / bugbounty-web
+    // / homelab-discover) or a path to a TOML profile file.
+    if let Some(profile_spec) = args.profile.clone() {
+        let p = profile::resolve(&profile_spec)
+            .map_err(|e| exit::config_err(format!("{:#}", e)))?;
         if let Some(name) = &p.name { eprintln!("[profile] loaded: {}", name); }
         profile::apply(&mut args, &p);
     }
@@ -239,7 +268,7 @@ async fn main() -> Result<()> {
                 .into_iter()
                 .find(|i| i.is_up() && !i.is_loopback() && !i.ips.is_empty())
                 .map(|i| i.name)
-        }).ok_or_else(|| anyhow!("--spoof-mac needs -e/--iface-scan or a default interface"))?;
+        }).ok_or_else(|| exit::config_err("--spoof-mac needs -e/--iface-scan or a default interface"))?;
         match spoof_mac::apply(&iface, &mac) {
             Ok(applied) => eprintln!("[spoof-mac] {} now uses {}", iface, applied),
             Err(e) => return Err(e),
@@ -260,10 +289,10 @@ async fn main() -> Result<()> {
     // failure to non-zero exit.
     if let Some(name) = &args.evasion_preset {
         if evasion::EvasionPreset::from_name(name).is_none() {
-            return Err(anyhow!(
+            return Err(exit::config_err(format!(
                 "unknown --evasion preset '{}' (valid: stealth | aggressive | paranoid | ghost)",
                 name
-            ));
+            )));
         }
     }
 
@@ -321,16 +350,16 @@ async fn main() -> Result<()> {
             let parent = p.parent().filter(|p| !p.as_os_str().is_empty());
             if let Some(dir) = parent {
                 if !dir.exists() {
-                    return Err(anyhow!(
+                    return Err(exit::config_err(format!(
                         "{} target directory {:?} does not exist — create it before the scan or pick another path",
                         flag, dir
-                    ));
+                    )));
                 }
                 if !dir.is_dir() {
-                    return Err(anyhow!(
+                    return Err(exit::config_err(format!(
                         "{} target {:?} is not a directory",
                         flag, dir
-                    ));
+                    )));
                 }
             }
         }
@@ -360,12 +389,32 @@ async fn main() -> Result<()> {
         );
     }
 
-    if args.no_color {
-        control::set_override(false);
+    // Colour policy (Fase 28): honour --no-color and the NO_COLOR convention,
+    // and auto-disable colour when stdout is not a terminal (piped/redirected)
+    // or when running under CI — unless --color forces it on. Centralising the
+    // decision here means every output path agrees and --color can override a
+    // pipe (e.g. `rustymap … --color | less -R`).
+    {
+        use std::io::IsTerminal;
+        if args.color {
+            control::set_override(true);
+        } else if args.no_color
+            || std::env::var_os("NO_COLOR").is_some()
+            || std::env::var_os("CI").is_some()
+            || !std::io::stdout().is_terminal()
+        {
+            control::set_override(false);
+        }
     }
 
-    // -d/-dd/-ddd: category-tagged debug logging.
-    log::set_level(args.debug);
+    // -d/-dd/-ddd: category-tagged debug logging. `-vvv` (verbose level 3)
+    // turns on level-1 debug when -d wasn't given, so the verbosity ladder
+    // tops out at packet-level detail the way nmap's -vvv does:
+    //   -v   RTT column, all non-open ports, OS/device hints, status lines
+    //   -vv  + per-port extra columns
+    //   -vvv + [net]/[probe]/[parse]/[scan] category logging
+    let debug_level = if args.debug == 0 && args.verbose >= 3 { 1 } else { args.debug };
+    log::set_level(debug_level);
     // --script-trace: emit JSON Lines per script-host execution.
     scripting::set_trace(args.script_trace);
     // --append-output: writers in output/report/json_out/xml_out use this.
@@ -1116,7 +1165,7 @@ async fn main() -> Result<()> {
             let raw = args
                 .brute_target
                 .clone()
-                .ok_or_else(|| anyhow!("--brute-target HOST[:PORT] is required for {} bruteforce", proto))?;
+                .ok_or_else(|| exit::config_err(format!("--brute-target HOST[:PORT] is required for {} bruteforce", proto)))?;
             let with_port = if raw.contains(':') {
                 raw
             } else {
@@ -1163,7 +1212,7 @@ async fn main() -> Result<()> {
                     .map(|l| l.trim().to_string())
                     .filter(|l| !l.starts_with('#'))
                     .collect(),
-                None => return Err(anyhow!("--brute-passlist is required (or --brute-userpass / --brute-pair / --brute-default-creds-only)")),
+                None => return Err(exit::config_err("--brute-passlist is required (or --brute-userpass / --brute-pair / --brute-default-creds-only)")),
             };
             brute::PairSource::Cross { users, passes }
         };
@@ -1235,15 +1284,25 @@ async fn main() -> Result<()> {
     }
 
     // ── Metasploit integration ──
+    // `--msf-import` with a target is NOT handled here: it needs the scan to
+    // run first, so it falls through to the post-scan importer below. Only
+    // the standalone forms (ping / suggest-cve / fire, or import with no
+    // target) are pure pre-scan operations that return early.
     if args.msf_ping
-        || args.msf_import.is_some()
+        || (args.msf_import.is_some() && args.targets.is_empty())
         || args.msf_suggest_cve.is_some()
         || args.msf_fire.is_some()
     {
         let url = args
             .msf_url
             .clone()
-            .ok_or_else(|| anyhow!("--msf-url is required for --msf-* operations"))?;
+            .ok_or_else(|| {
+                exit::config_err(
+                    "--msf-url is required for --msf-* operations \
+                     (e.g. --msf-url http://127.0.0.1:55553/api/ plus --msf-token \
+                     or --msf-user/--msf-pass)",
+                )
+            })?;
         let conn = msf_rpc::ConnectArgs {
             url,
             username: args.msf_user.clone(),
@@ -1257,18 +1316,15 @@ async fn main() -> Result<()> {
             let v = client.version().await?;
             println!("[msf] connected — version {}", v);
         }
-        if let Some(ws) = &args.msf_import {
-            // No findings in this standalone call — caller supplies
-            // empty list. (Future: chain with a recent scan output.)
-            let hosts: Vec<scanner::HostResult> = Vec::new();
-            let findings: Vec<compliance::Finding> = Vec::new();
-            let stats = msf_import::push(&client, ws, &hosts, &findings).await?;
-            msf_import::print_stats(ws, &stats);
+        if args.msf_import.is_some() && args.targets.is_empty() {
+            // Standalone `--msf-import` with no target: there is nothing to
+            // import. The scan-driven path below does the real work when a
+            // target is supplied.
             use colored::Colorize;
             eprintln!(
                 "{}",
-                "[msf-import] note: this standalone path imports nothing because no scan ran in \
-                this invocation. Run a scan + this flag together by including target args."
+                "[msf-import] nothing to import — no target was given. Run the scan and the import \
+                 together, e.g. `rustymap 10.0.0.5 -sV --msf-import lab --msf-url … --msf-token …`."
                     .yellow()
             );
         }
@@ -1702,7 +1758,7 @@ async fn main() -> Result<()> {
     let mut resumed_scan_id: Option<i64> = None;
     if let Some(spec) = args.resume.clone() {
         if args.no_db {
-            return Err(anyhow!("--resume requires the SQLite db; remove --no-db"));
+            return Err(exit::config_err("--resume requires the SQLite db; remove --no-db"));
         }
         let path = args.db_path.clone().unwrap_or_else(|| "rustymap.db".to_string());
         let db = Db::open(&path)?;
@@ -1735,7 +1791,10 @@ async fn main() -> Result<()> {
     // both valid sources of targets that don't require a positional
     // argument — allow either.
     if args.targets.is_empty() && args.random_targets == 0 && args.resume_from.is_none() {
-        return Err(anyhow!("no targets specified. Use --help for usage."));
+        return Err(exit::config_err(
+            "no targets given. Pass one or more hosts or CIDRs \
+             (e.g. `rustymap 192.168.1.0/24`); see --help or --guide.",
+        ));
     }
 
     // ----- Scan pipeline -----
@@ -2663,6 +2722,10 @@ async fn main() -> Result<()> {
     // CVE correlation (requires -sV to have populated service info).
     // Use --cve-db when given, otherwise fall back to the built-in DB
     // unless the user opts out with --no-builtin-cves.
+    //
+    // Findings derived here are also handed to --msf-import (below) so a
+    // scan-driven import populates MSF's vulns table, not just hosts/services.
+    let mut import_findings: Vec<compliance::Finding> = Vec::new();
     {
         let db = if let Some(path) = &args.cve_db {
             match cve::load_db(path) {
@@ -2681,6 +2744,17 @@ async fn main() -> Result<()> {
             let hits = cve::correlate(&d, &sorted);
             cve::print_hits(&hits);
             audit.event("cve_correlated", json!({ "hits": hits.len() }));
+            // Correlated CVEs are a security-relevant finding → exit code 1.
+            exit::note_findings(!hits.is_empty());
+
+            // One Finding per correlated CVE — shared by --msf-suggest and
+            // --msf-import so the two agree on what the scan found.
+            let cve_findings: Vec<compliance::Finding> = hits
+                .iter()
+                .map(|h| {
+                    compliance::Finding::new("cve", &format!("{}:{}", h.host, h.port), &h.cve)
+                })
+                .collect();
 
             // --msf-suggest: for every correlated CVE, search msfrpcd for
             // matching modules and print pre-filled RHOSTS fire lines. Purely
@@ -2697,17 +2771,7 @@ async fn main() -> Result<()> {
                     };
                     match msf_rpc::Client::connect(conn).await {
                         Ok(client) => {
-                            let findings: Vec<compliance::Finding> = hits
-                                .iter()
-                                .map(|h| {
-                                    compliance::Finding::new(
-                                        "cve",
-                                        &format!("{}:{}", h.host, h.port),
-                                        &h.cve,
-                                    )
-                                })
-                                .collect();
-                            match msf_suggest::suggest_for_findings(&client, &findings).await {
+                            match msf_suggest::suggest_for_findings(&client, &cve_findings).await {
                                 Ok(sugs) => {
                                     msf_suggest::print_suggestions(&sugs);
                                     audit.event("msf_suggest", json!({ "findings": sugs.len() }));
@@ -2723,6 +2787,46 @@ async fn main() -> Result<()> {
                     );
                 }
             }
+            import_findings = cve_findings;
+        }
+    }
+
+    // --msf-import <workspace>: push the completed scan (hosts + open
+    // services + CVE findings) into the user's MSF workspace. This runs
+    // AFTER the scan — unlike the standalone pre-scan path — so it imports
+    // the real results the lab run found empty. Read-only on our side
+    // (db.report_host / db.report_service / db.report_vuln). Needs
+    // --msf-url + auth.
+    if let Some(ws) = &args.msf_import {
+        if let Some(url) = args.msf_url.clone() {
+            let conn = msf_rpc::ConnectArgs {
+                url,
+                username: args.msf_user.clone(),
+                password: args.msf_pass.clone(),
+                token: args.msf_token.clone(),
+                timeout_secs: 30,
+                accept_invalid_certs: args.msf_insecure,
+            };
+            match msf_rpc::Client::connect(conn).await {
+                Ok(client) => match msf_import::push(&client, ws, &sorted, &import_findings).await {
+                    Ok(stats) => {
+                        msf_import::print_stats(ws, &stats);
+                        audit.event(
+                            "msf_import",
+                            json!({
+                                "workspace": ws,
+                                "hosts": stats.hosts_pushed,
+                                "services": stats.services_pushed,
+                                "vulns": stats.vulns_pushed,
+                            }),
+                        );
+                    }
+                    Err(e) => eprintln!("[!] --msf-import: {}", e),
+                },
+                Err(e) => eprintln!("[!] --msf-import connect: {}", e),
+            }
+        } else {
+            eprintln!("[!] --msf-import needs --msf-url (+ --msf-user/--msf-pass or --msf-token)");
         }
     }
 
@@ -2760,6 +2864,7 @@ async fn main() -> Result<()> {
                                 format!("{} weak cipher suite(s): {}",
                                     e.weak_ciphers.len(), e.weak_ciphers.join(", ")),
                             ));
+                            exit::note_findings(true);
                         }
                         compliance_findings.push(compliance::Finding::new(
                             "tls_evaluated",
@@ -2767,6 +2872,7 @@ async fn main() -> Result<()> {
                             e.summary(),
                         ));
                         if e.has_deprecated() {
+                            exit::note_findings(true);
                             audit.event(
                                 "tls_deprecated",
                                 json!({
@@ -3107,6 +3213,7 @@ async fn main() -> Result<()> {
         scripting::print_findings(&f);
         if !f.is_empty() {
             audit.event("scripts_builtin_run", json!({ "count": f.len() }));
+            exit::note_findings(true);
         }
     } else if !args.no_builtin_scripts && args.script_path.is_none() && script_sweep {
         println!(
@@ -3128,6 +3235,7 @@ async fn main() -> Result<()> {
             Ok(Ok(f)) => {
                 scripting::print_findings(&f);
                 audit.event("scripts_run", json!({ "count": f.len() }));
+                exit::note_findings(!f.is_empty());
             }
             Ok(Err(e)) => eprintln!("[!] script error: {}", e),
             Err(e) => eprintln!("[!] script task panicked: {}", e),
@@ -3197,7 +3305,7 @@ async fn main() -> Result<()> {
     if let (Some(tpl), Some(out)) = (&args.template_path, &args.output_template) {
         report::write_custom(tpl, out, &sorted, &scan_type_str, started_at, elapsed, &diffs)?;
     } else if args.template_path.is_some() ^ args.output_template.is_some() {
-        return Err(anyhow!("--template and --oT must be used together"));
+        return Err(exit::config_err("--template and --oT must be used together"));
     }
     if let Some(p) = &args.output_pdf {
         pdf_out::write_pdf(std::path::Path::new(p), &sorted, &scan_type_str, started_at, elapsed)?;
@@ -3269,7 +3377,7 @@ async fn main() -> Result<()> {
     // open ports) ensure controls covering port exposure aren't N/A.
     if let Some(fw_str) = &args.compliance {
         let fw = compliance::Framework::parse(fw_str)
-            .ok_or_else(|| anyhow!("unknown framework '{}': pci-dss|hipaa|nist-800-53|iso-27001|cis", fw_str))?;
+            .ok_or_else(|| exit::config_err(format!("unknown framework '{}': pci-dss|hipaa|nist-800-53|iso-27001|cis", fw_str)))?;
         for h in sorted.iter().filter(|h| h.up) {
             let host_label = h.target.ip.to_string();
             compliance_findings.push(compliance::Finding::new(
@@ -3354,13 +3462,18 @@ async fn main() -> Result<()> {
 
     if was_cancelled {
         eprintln!("[!] Scan aborted; partial results saved.");
-        std::process::exit(130);
+        std::process::exit(exit::INTERRUPTED as i32);
     }
 
     // Scheduling mode: re-exec self with same args after the configured interval.
     if let Some(spec) = &args.every {
         let dur = profile::parse_duration(spec)
-            .ok_or_else(|| anyhow!("invalid --every spec '{}' (use e.g. 30s, 5m, 1h)", spec))?;
+            .ok_or_else(|| {
+                exit::config_err(format!(
+                    "invalid --every spec '{}' — use a duration like 30s, 5m, 1h or 1d",
+                    spec
+                ))
+            })?;
         eprintln!("[schedule] next run in {:?}", dur);
         tokio::time::sleep(dur).await;
         let exe = std::env::current_exe()?;
@@ -3386,7 +3499,7 @@ fn is_probe_only_invocation(args: &cli::Cli) -> bool {
         || args.threat_intel_misp.is_some()
         || args.threat_intel_match
         || args.msf_ping
-        || args.msf_import.is_some()
+        || (args.msf_import.is_some() && args.targets.is_empty())
         || args.msf_suggest_cve.is_some()
         || args.msf_fire.is_some()
         || args.vuln_ssl_ccs.is_some()
@@ -3812,7 +3925,7 @@ fn build_evasion_config(args: &Cli) -> Result<evasion::EvasionConfig> {
     // Start from preset if provided, else default.
     let mut cfg = if let Some(name) = &args.evasion_preset {
         let preset = evasion::EvasionPreset::from_name(name)
-            .ok_or_else(|| anyhow!("unknown --evasion preset '{}' (stealth|aggressive|paranoid|ghost)", name))?;
+            .ok_or_else(|| exit::config_err(format!("unknown --evasion preset '{}' (stealth|aggressive|paranoid|ghost)", name)))?;
         preset.to_config()
     } else {
         evasion::EvasionConfig::default()
@@ -3907,7 +4020,7 @@ fn build_evasion_config(args: &Cli) -> Result<evasion::EvasionConfig> {
     }
     if let Some(ref name) = args.stack_profile {
         let sp = evasion::StackProfile::from_name(name).ok_or_else(|| {
-            anyhow!("unknown --stack-profile '{}' (windows11|linux6|macos|freebsd|android14)", name)
+            exit::config_err(format!("unknown --stack-profile '{}' (windows11|linux6|macos|freebsd|android14)", name))
         })?;
         cfg.stack_profile = sp;
         // Inherit stack's TTL if user didn't explicitly override --ip-ttl

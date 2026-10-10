@@ -96,12 +96,35 @@ pub async fn audit(ip: IpAddr, port: u16, dur: Duration) -> Result<SmbAudit> {
 
     timeout(dur, s.write_all(&req)).await??;
 
-    // Read NetBIOS header (4B) then the body.
+    // Read NetBIOS header (4B) then the body. A modern Windows host behind
+    // a firewall often accepts the TCP connect and then RSTs the SMB
+    // negotiate, so translate the raw read failure into a verdict instead
+    // of a bare I/O error (lab bug: "bogus SMB response length 1").
     let mut nbhdr = [0u8; 4];
-    timeout(dur, s.read_exact(&mut nbhdr)).await??;
+    timeout(dur, s.read_exact(&mut nbhdr))
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "no SMB negotiate reply from {}:{} within timeout — port filtered or not SMB",
+                ip, port
+            )
+        })?
+        .map_err(|e| {
+            anyhow!(
+                "{}:{} dropped the SMB negotiate ({}) — likely a firewall RST or the host refused SMB",
+                ip, port, e
+            )
+        })?;
+    // A NetBIOS session message has message-type 0x00; anything else — or an
+    // implausible body length — means the peer isn't speaking SMB-over-NetBIOS
+    // here (firewall reset mid-handshake, or a non-SMB service on the port).
     let resp_len = (((nbhdr[1] as u32) << 16) | ((nbhdr[2] as u32) << 8) | (nbhdr[3] as u32)) as usize;
-    if resp_len < 32 || resp_len > 4096 {
-        return Err(anyhow!("bogus SMB response length {}", resp_len));
+    if nbhdr[0] != 0x00 || resp_len < 32 || resp_len > 4096 {
+        return Err(anyhow!(
+            "{}:{} did not return a valid SMB negotiate (NetBIOS type=0x{:02x}, len={}) — \
+             likely a firewall reject or a non-SMB service on this port",
+            ip, port, nbhdr[0], resp_len
+        ));
     }
     let mut body = vec![0u8; resp_len];
     timeout(dur, s.read_exact(&mut body)).await??;

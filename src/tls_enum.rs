@@ -241,9 +241,26 @@ pub async fn enumerate(ip: IpAddr, port: u16, sni: Option<&str>, dur: Duration) 
     out.cipher_tls13 = probe_modern(ip, port, sni, ProtocolVersion::TLSv1_3, dur).await;
     out.tls13 = out.cipher_tls13.is_some();
     // Full sslscan-style cipher enumeration (protocol-level, catches weak
-    // suites rustls won't offer). TLS 1.2 record carries supported_versions
-    // so 1.3-only servers answer too.
-    let ciphers = crate::tls_cipher_enum::enumerate(ip, port, 0x0303, sni, dur).await;
+    // suites rustls won't offer). Enumerate once PER supported legacy
+    // version (1.0 / 1.1 / 1.2): a server frequently accepts RSA-kx, DHE and
+    // CBC suites under TLS 1.0/1.1 that its TLS 1.2 handshake — which prefers
+    // ECDHE — never surfaces, so a single 1.2 pass under-reports the set
+    // (lab bug: ssl-enum showed "only ECDHE" where sslscan listed DHE/RSA).
+    let mut versions: Vec<u16> = Vec::new();
+    if out.tls10 { versions.push(0x0301); }
+    if out.tls11 { versions.push(0x0302); }
+    if out.tls12 { versions.push(0x0303); }
+    // No legacy version detected (1.3-only host, or detection missed it) —
+    // still attempt a 1.2 ClientHello so enumeration isn't skipped outright.
+    if versions.is_empty() { versions.push(0x0303); }
+    let mut ciphers: Vec<crate::tls_cipher_enum::Cipher> = Vec::new();
+    for ver in versions {
+        for c in crate::tls_cipher_enum::enumerate(ip, port, ver, sni, dur).await {
+            if !ciphers.iter().any(|x| x.name == c.name) {
+                ciphers.push(c);
+            }
+        }
+    }
     out.weak_ciphers = ciphers.iter().filter(|c| c.weak).map(|c| c.name.clone()).collect();
     out.ciphers = ciphers.into_iter().map(|c| c.name).collect();
     Ok(out)
