@@ -22,26 +22,28 @@
 
 ---
 
-## Fase L — Chiusura loop di validazione lab  →  v0.83.x (PATCH)
+## Fase L — Chiusura loop di validazione lab  →  v0.83.x (PATCH)  ✅ CHIUSA 6/6 PASS (2026-10-10)
 
-Prima di toccare altro, confermare su Kali i fix già spediti ma non ancora
-validati su hardware reale. Ogni bug trovato → patch release mirata.
+Validata su Kali (home /24) — report `VALIDATION_0.83.md`. Tutti i fix
+v0.83.0/v0.83.1 confermati su hardware reale.
 
-**Da ri-verificare (home /24 + Win11 + router + server):**
-- [ ] `--msf-import <ws> <target> --msf-url …` end-to-end vs `msfrpcd` vivo →
-      host/service/vuln atterrano in `workspace <ws>` (v0.83.0)
-- [ ] `--ssl-enum` elenca DHE/RSA/CBC sul router/server (non più solo ECDHE) vs
-      sslscan (v0.83.0)
-- [ ] `--smb-audit` su Win11 firewallato → verdetto "firewall reject" chiaro
-      (non più "bogus SMB response length 1") (v0.83.0)
-- [ ] Exit code: scan con finding reale (CVE/TLS) → exit `1`; config error → `3`
-      (v0.83.0)
-- [ ] `--sn --oG up.gnmap <range>` → lista host-up nei file (v0.83.1)
-- [ ] Ri-conferma i 3 fix v0.82.1 (p 1-1000 esatto, web-scan no .env FP,
-      --msf-suggest EternalBlue) ancora OK dopo le modifiche 0.83.x
+- [x] `--msf-import <ws> <target>` e2e vs `msfrpcd` vivo → 1 host + 2 svc nel
+      workspace (verificato via API)
+- [x] `--ssl-enum` DHE/RSA/CBC → router :443 8/8 match perfetto vs sslscan;
+      :8443 13/31 (esotici ARIA/CAMELLIA/CCM/SEED mancanti → Fase M)
+- [x] `--smb-audit` Win11 firewallato → verdetto "firewall reject"/"RST" chiaro
+- [x] Exit code: finding→`1`, config→`3`, pulito→`0` (3/3)
+- [x] `--sn --oG` → lista host-up nmap-compatible nei file
+- [x] 3 fix v0.82.1 (p 1-1000, web-scan FP, msf-suggest) ancora OK
 
-**Definition of done:** `VALIDATION_0.83.md` scritto, riga di log in
-`LAB_VALIDATION.md`, feature toccate promosse a Production nella matrice.
+**DoD:** `VALIDATION_0.83.md` ✅ + riga log `LAB_VALIDATION.md` ✅ + promozione
+matrice = in attesa di conferma utente (vedi sotto). **Bonus osservato:** BUG
+0.A (porte closed/filtered ora mostrate) risolto — fuori dal changeset 0.83.x,
+provenienza da confermare.
+
+**Promozioni matrice proposte (da confermare):** `--tls-grade` Beta→Production
+(ssl-enum match sslscan). `--smb-audit` **resta Beta** (validato solo il path di
+reject, non un negotiate riuscito su SMB vivo).
 
 ---
 
@@ -122,7 +124,7 @@ Esplicitamente fuori scope finché non c'è il taglio stabile:
 
 | Fase | Release | Tema | Gate |
 |------|---------|------|------|
-| L | v0.83.x | Chiusura validazione lab | run Kali documentato |
+| L | v0.83.x | Chiusura validazione lab | ✅ CHIUSA — 6/6 PASS (2026-10-10) |
 | M | v0.84.x+ | Backlog tecnico mirato | solo con caso d'uso lab |
 | 26 | **v1.0.0** | Portfolio polish + taglio stabile | **tuo ok al freeze** |
 | — | post-1.0 | Backlog ampiezza | dopo v1.0 |
