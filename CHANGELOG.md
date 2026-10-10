@@ -4,6 +4,46 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.86.0] - 2026-10-10
+
+Real progress %/ETA, enriched HTML/MD reports, IPv6-raw UX, and a hydra
+parity harness — tackling the deferred `%/ETA` item and the ⬜ blocks of
+`COMMAND_COVERAGE.md`. 611/611 tests.
+
+### Added — real progress %/ETA
+- The `ScanStats` counter is now **wired into the scan hot-path**: the connect
+  (`scanner.rs`) and raw (`raw_scan.rs`) loops call `record_result` as each
+  port resolves, via a process-global `scan_stats::global()`.
+- **`--progress` is now a determinate bar with a true %/ETA** (ports
+  resolved / total), not a spinner — driven by that counter. Hidden when
+  stderr isn't a TTY (like colour), so pipes/CI stay clean.
+- **`--scan-stats` now shows real numbers** (sent/replied/open/filtered) —
+  the counters were never bumped before (the hot-path was a documented TODO).
+
+### Added — richer HTML/MD reports (`--oH` / `--oMd`)
+- Port tables gained **Version** (from `-sV`) and a risk-annotated **Note**
+  column (‼/⚠ + plain-language description, from `portdesc`), and each host
+  now shows its **OS guess**. Previously the reports were a bare
+  port/state/service list — far thinner than the console. XML stays
+  nmap-compatible.
+
+### Improved — IPv6 raw UX
+- When a raw scan receives zero reply packets, the "fix your firewall" hint is
+  now **address-family aware**: it suggests `ip6tables` (not `iptables`) for
+  IPv6 targets, on its own copy-pasteable line, with the `--sT` fallback —
+  IPv6 conntrack drops the unsolicited SYN-ACK especially often (lab N2).
+
+### Added — bruteforce hydra parity harness
+- **`HYDRA_PARITY.md`**: turnkey RustyMap↔hydra command pairs for all 13
+  brute adapters (+ a no-target smoke check), so the Kali second-opinion run
+  is ready to execute. The actual cross-check stays a lab task.
+
+### Notes
+- `--progress`/`--scan-stats` are behaviour upgrades, no new flags.
+- Still needs Kali: observe the live %/ETA bar on a `/24`; `--oH`/`--oMd`
+  render on a real multi-service host; the IPv6-raw `ip6tables` hint on a
+  dual-stack target; the hydra parity runs.
+
 ## [0.85.0] - 2026-10-10
 
 Docs + web-scan depth + a filtered-port accuracy fix + HTTP anti-detection.

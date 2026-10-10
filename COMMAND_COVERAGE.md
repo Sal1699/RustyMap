@@ -77,7 +77,7 @@ Keep this in sync as new areas get a documented lab run. Reference the
 | Command | Status | Reference | Note |
 |---------|--------|-----------|------|
 | `--brute-protocol ssh` | ✅ | hydra | rate + gate verified (N7) |
-| ftp/smtp/http-basic/http-form/smb/mssql/mysql/postgres/vnc/rdp/snmp/ldap/telnet | ⬜ | hydra | 13 adapters need Hydra second-opinion |
+| ftp/smtp/http-basic/http-form/smb/mssql/mysql/postgres/vnc/rdp/snmp/ldap/telnet | ⬜ | hydra | turnkey command pairs in **HYDRA_PARITY.md** (v0.86.0) — run on Kali |
 
 ## Metasploit
 
@@ -95,7 +95,8 @@ Keep this in sync as new areas get a documented lab run. Reference the
 | `--oN` / `--oG` / `--oJ` / `--oX` | ✅ | xmllint / jq | valid + parseable (N9/L5) |
 | `--output-style rich\|terse` | 🟡 | — | new v0.84; smoke-tested on localhost |
 | JSON `note`/`risk` enrichment | 🟡 | — | new v0.84; needs lab spot-check |
-| `--oH` / `--oMd` / `--oP` reports | ⬜ | — | render untested on real data |
+| `--oH` / `--oMd` reports | 🟡 | — | v0.86.0 enriched with version + risk-note + OS; render spot-check on real data pending |
+| `--oP` PDF report | ⬜ | — | render untested on real data |
 | `--oS` SIEM (CEF/LEEF/ECS) | ⬜ | — | exporter untested |
 
 ## Evasion
@@ -129,5 +130,5 @@ Keep this in sync as new areas get a documented lab run. Reference the
 
 ---
 
-*Last updated: v0.84.0 (2026-10-10). Flip cells to ✅ only with a dated
+*Last updated: v0.86.0 (2026-10-10). Flip cells to ✅ only with a dated
 `LAB_VALIDATION.md` row + a `VALIDATION_*.md` reference.*

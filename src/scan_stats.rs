@@ -21,9 +21,10 @@
 //!   `[stats] t=15s sent=12450 replied=11308 (rate 829/s) open=42 filt=1100 \
 //!     rtt=24.6ms peak=192 mem=43MB`
 
+use crate::scanner::PortState;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Default)]
@@ -36,6 +37,20 @@ pub struct ScanStats {
     pub rtt_count: AtomicU64,
     pub peak_parallel: AtomicUsize,
     pub current_parallel: AtomicUsize,
+    /// Ports resolved to a final state — drives the determinate progress bar
+    /// (position) and hence the real %/ETA.
+    pub ports_done: AtomicU64,
+}
+
+/// Process-wide stats, shared by the scan hot-paths (which bump it) and the
+/// `--scan-stats` reporter + `--progress` ETA bar (which read it). A global —
+/// like `log`/`output`/`evasion` state — so the scan loops needn't thread an
+/// `Arc` through every signature.
+static GLOBAL: OnceLock<Arc<ScanStats>> = OnceLock::new();
+
+/// Handle to the process-wide [`ScanStats`].
+pub fn global() -> Arc<ScanStats> {
+    GLOBAL.get_or_init(ScanStats::new).clone()
 }
 
 #[allow(dead_code)]
@@ -72,6 +87,31 @@ impl ScanStats {
 
     pub fn record_open(&self) { self.open_ports.fetch_add(1, Ordering::Relaxed); }
     pub fn record_filtered(&self) { self.filtered_ports.fetch_add(1, Ordering::Relaxed); }
+
+    /// Record one port resolved to its final state. Bumps `ports_done` (for
+    /// the ETA bar) and the sent/replied/open/filtered counters (for
+    /// `--scan-stats`). Called once per port by the connect and raw loops.
+    pub fn record_result(&self, state: PortState) {
+        self.ports_done.fetch_add(1, Ordering::Relaxed);
+        self.probes_sent.fetch_add(1, Ordering::Relaxed);
+        match state {
+            PortState::Open => {
+                self.open_ports.fetch_add(1, Ordering::Relaxed);
+                self.probes_replied.fetch_add(1, Ordering::Relaxed);
+            }
+            PortState::Closed | PortState::Unfiltered => {
+                self.probes_replied.fetch_add(1, Ordering::Relaxed);
+            }
+            PortState::Filtered | PortState::OpenFiltered => {
+                self.filtered_ports.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Ports resolved so far (progress-bar position).
+    pub fn ports_done(&self) -> u64 {
+        self.ports_done.load(Ordering::Relaxed)
+    }
 
     pub fn snapshot(&self, since_start: Duration) -> StatsSnapshot {
         let sent = self.probes_sent.load(Ordering::Relaxed);

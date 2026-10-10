@@ -1,6 +1,6 @@
 use crate::db::PortDiff;
 use crate::ports::service_name;
-use crate::scanner::HostResult;
+use crate::scanner::{HostResult, PortState};
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -16,6 +16,12 @@ struct PortView {
     protocol: &'static str,
     state: &'static str,
     service: &'static str,
+    /// -sV product/version string, or empty.
+    version: String,
+    /// Plain-language description (open ports), or empty.
+    note: &'static str,
+    /// Exposure risk for an open port: "high" | "warn" | "info" | "".
+    risk: &'static str,
 }
 
 #[derive(Serialize)]
@@ -37,6 +43,7 @@ struct HostView {
     model: Option<String>,
     firmware: Option<String>,
     device_confidence: Option<u8>,
+    os: Option<String>,
     ports: Vec<PortView>,
     diff: Option<DiffView>,
 }
@@ -61,11 +68,27 @@ fn to_view(hosts: &[HostResult], diffs: &HashMap<String, PortDiff>) -> Vec<HostV
             let ports: Vec<PortView> = h
                 .ports
                 .iter()
-                .map(|p| PortView {
-                    port: p.port,
-                    protocol: "tcp",
-                    state: p.state.as_str(),
-                    service: service_name(p.port).unwrap_or("unknown"),
+                .map(|p| {
+                    let desc = if p.state == PortState::Open {
+                        crate::portdesc::describe(p.port)
+                    } else {
+                        None
+                    };
+                    PortView {
+                        port: p.port,
+                        protocol: "tcp",
+                        state: p.state.as_str(),
+                        service: service_name(p.port).unwrap_or("unknown"),
+                        version: p.service.as_ref().map(|s| s.display()).unwrap_or_default(),
+                        note: desc.map(|d| d.text).unwrap_or(""),
+                        risk: desc
+                            .map(|d| match d.risk {
+                                crate::portdesc::Risk::High => "high",
+                                crate::portdesc::Risk::Warn => "warn",
+                                crate::portdesc::Risk::Info => "info",
+                            })
+                            .unwrap_or(""),
+                    }
                 })
                 .collect();
             let open_count = ports.iter().filter(|p| p.state == "open").count();
@@ -86,6 +109,7 @@ fn to_view(hosts: &[HostResult], diffs: &HashMap<String, PortDiff>) -> Vec<HostV
                 model: h.device.as_ref().and_then(|d| d.model.clone()),
                 firmware: h.device.as_ref().and_then(|d| d.firmware.clone()),
                 device_confidence: h.device.as_ref().map(|d| d.confidence),
+                os: h.os.as_ref().map(|o| format!("{} ({}%)", o.family, o.confidence)),
                 ports,
                 diff,
             }

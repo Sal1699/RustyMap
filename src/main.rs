@@ -2381,34 +2381,61 @@ async fn run(mut args: Cli) -> Result<()> {
     // there are few or `-v` is set, so the default stays readable.
     let show_closed = !args.only_open;
 
-    // --progress: spinner with elapsed time + scan type until results return.
-    let progress_bar: Option<indicatif::ProgressBar> = if args.progress {
-        let pb = indicatif::ProgressBar::new_spinner();
+    // --progress: a DETERMINATE bar driven by the real ports-resolved counter
+    // (the scan_stats hot-path the connect + raw loops bump), so it shows a
+    // true %/ETA instead of just a spinner. A background task copies the
+    // lock-free counter into the bar position; it's stopped at scan end.
+    #[allow(clippy::type_complexity)]
+    let progress_bar: Option<(
+        indicatif::ProgressBar,
+        tokio::task::JoinHandle<()>,
+        Arc<std::sync::atomic::AtomicBool>,
+    )> = if args.progress {
+        let total = (targets.len() as u64) * (port_list.len() as u64).max(1);
+        let total = total.max(1);
+        let pb = indicatif::ProgressBar::new(total);
         pb.set_style(
-            indicatif::ProgressStyle::with_template("{spinner:.cyan} [{elapsed_precise}] {msg}")
-                .unwrap()
-                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+            indicatif::ProgressStyle::with_template(
+                "{spinner:.cyan} [{elapsed_precise}] {bar:28.cyan/blue} {pos}/{len} ({percent}%) ETA {eta}  {msg}",
+            )
+            .unwrap()
+            .progress_chars("=>-")
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
         );
         pb.set_message(format!(
-            "{:?} scan · {} target(s) · {} port(s)",
+            "{:?} · {} host(s) · {} port(s)",
             scan_type,
             targets.len(),
             port_list.len()
         ));
         pb.enable_steady_tick(std::time::Duration::from_millis(120));
-        Some(pb)
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_c = Arc::clone(&stop);
+        let pbc = pb.clone();
+        let h = tokio::spawn(async move {
+            let mut t = tokio::time::interval(std::time::Duration::from_millis(150));
+            loop {
+                t.tick().await;
+                if stop_c.load(Ordering::Relaxed) {
+                    break;
+                }
+                pbc.set_position(scan_stats::global().ports_done().min(total));
+            }
+        });
+        Some((pb, h, stop))
     } else {
         None
     };
 
-    // --scan-stats: spawn the detailed-counters reporter. The counter
-    // struct itself is exposed; future scanner hot-paths can update it
-    // via Arc<ScanStats>.
+    // --scan-stats: spawn the detailed-counters reporter. It reads the
+    // process-global ScanStats that the connect + raw scan loops now bump
+    // (ports_done / sent / replied / open / filtered), so the line shows real
+    // numbers instead of zeros.
     let scan_stats_handle: Option<(tokio::task::JoinHandle<()>, Arc<std::sync::atomic::AtomicBool>)> =
         if args.scan_stats_every_secs > 0 {
             let interval = std::time::Duration::from_secs(args.scan_stats_every_secs);
             let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let stats = scan_stats::ScanStats::new();
+            let stats = scan_stats::global();
             let h = scan_stats::spawn_reporter(stats, std::time::Instant::now(), interval, stop.clone());
             Some((h, stop))
         } else {
@@ -2505,19 +2532,29 @@ async fn run(mut args: Cli) -> Result<()> {
                 raw_scan::set_trace(true);
                 eprintln!("[trace-raw] enabled — every tx/rx packet will be logged to stderr");
             }
+            let any_v6 = targets.iter().any(|t| t.ip.is_ipv6());
             let scanner = Arc::new(RawTcpScanner::new(evasion_cfg)?);
             let result = run_raw_tcp(targets, port_list.clone(), kind, scanner, timeout_dur, parallel).await;
             // Post-scan sanity check: if we sent packets but rx_count is 0,
             // the kernel (or a firewall) is silently swallowing responses
-            // before they reach our raw socket.
+            // before they reach our raw socket. IPv6 conntrack drops the
+            // unsolicited SYN-ACK especially often (lab N2), so point at
+            // ip6tables when the targets were v6.
             if cfg!(target_os = "linux") && raw_scan::rx_count() == 0 && !result.is_empty() {
+                let (ipt, fam) = if any_v6 {
+                    ("ip6tables", "IPv6 ")
+                } else {
+                    ("iptables", "")
+                };
                 eprintln!(
-                    "[!] raw TCP scanner received zero packets. Common causes on Linux:\n    \
-                     - iptables/nftables dropping unsolicited SYN-ACK as INVALID\n    \
-                     - conntrack deciding the flow is unknown and dropping replies\n    \
-                     - interface has no routable path to the target\n    \
-                     Try `sudo iptables -I INPUT -p tcp --tcp-flags ALL SYN,ACK -j ACCEPT`\n    \
-                     or fall back to --sT (connect scan)."
+                    "[!] raw TCP scanner received zero {}packets. On Linux the kernel/firewall is\n    \
+                     swallowing the replies before our raw socket sees them — usually conntrack\n    \
+                     dropping the unsolicited SYN-ACK as INVALID. Fix with:\n    \
+                     \n    \
+                     \x20   sudo {} -I INPUT -p tcp --tcp-flags ALL SYN,ACK -j ACCEPT\n    \
+                     \n    \
+                     then re-run; or fall back to --sT (connect scan, no raw socket needed).",
+                    fam, ipt
                 );
             }
             result
@@ -2780,8 +2817,11 @@ async fn run(mut args: Cli) -> Result<()> {
         handle.abort();
         let _ = handle.await;
     }
-    if let Some(pb) = progress_bar {
+    if let Some((pb, h, stop)) = progress_bar {
+        stop.store(true, Ordering::Relaxed);
+        pb.set_position(scan_stats::global().ports_done());
         pb.finish_and_clear();
+        h.abort();
     }
     // NOTE: the "RustyMap done: scanned in X" summary is printed LAST
     // (after CVE correlation + script findings), not here — those phases

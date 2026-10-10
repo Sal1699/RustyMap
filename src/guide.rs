@@ -413,7 +413,7 @@ pub fn print_guide() {
     line("--script-cve CVE-ID   Trova plugin che verificano un CVE specifico");
     line("--script-catalog FILE Esporta tutto il catalogo (.json o .md)");
     line("--notify URL          Webhook su completion (ntfy://topic, slack://hook, https://)");
-    line("--progress            Spinner indicatif durante lo scan (elapsed + tipo + N target)");
+    line("--progress            Barra di avanzamento con % ed ETA reali (porte risolte/totali)");
     line("--dns-sniff           Sniff DNS sulla rete (admin + Npcap)");
     line("--dns-spoof D=IP      Spoof risposte DNS (ripetibile)");
     line("--iface NOME          Interfaccia per sniff/spoof");

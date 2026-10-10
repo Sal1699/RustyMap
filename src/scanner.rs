@@ -163,6 +163,7 @@ pub async fn tcp_connect_scan(
                 }
                 let rtt = t0.elapsed();
                 lim_task.record(timed_out, rtt);
+                crate::scan_stats::global().record_result(state);
                 PortResult { port, state, rtt, service: None }
             }));
         }
@@ -202,6 +203,7 @@ pub async fn tcp_connect_scan(
                     attempt += 1;
                 }
                 let rtt = t0.elapsed();
+                crate::scan_stats::global().record_result(state);
                 PortResult { port, state, rtt, service: None }
                 }
             })

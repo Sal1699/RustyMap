@@ -387,6 +387,7 @@ pub fn run_raw_tcp_scan(
                     attempt += 1;
                     st = s_scanner.probe(src, dst, p, kind, timeout);
                 }
+                crate::scan_stats::global().record_result(st);
                 results.push(PortResult {
                     port: p,
                     state: st,

@@ -20,6 +20,9 @@
   .state-filtered { color: #fbbf24; }
   .state-open\|filtered { color: #22d3ee; }
   .state-unfiltered { color: #c084fc; }
+  .risk-high { color: #f87171; font-weight: 600; }
+  .risk-warn { color: #fbbf24; }
+  .risk-info { color: #94a3b8; }
   .summary { background: #1e293b; padding: 1em 1.25em; border-radius: 8px; margin-bottom: 1.5em; }
   .summary strong { color: #38bdf8; }
   .diff { background: #0b1220; border-left: 3px solid #38bdf8; padding: 0.5em 0.8em; margin: 0.6em 0 0.4em; font-size: 0.85em; }
@@ -52,6 +55,9 @@
       Device: <strong>{{ h.device_class }}</strong>{% if h.vendor %} &middot; {{ h.vendor }}{% endif %}{% if h.model %} {{ h.model }}{% endif %}{% if h.firmware %} &middot; firmware {{ h.firmware }}{% endif %}{% if h.device_confidence %} &middot; {{ h.device_confidence }}% conf{% endif %}
     </div>
     {% endif %}
+    {% if h.os %}
+    <div class="hostmeta">OS: <strong>{{ h.os }}</strong></div>
+    {% endif %}
     {% if h.diff %}
     <div class="diff">
       <strong>Diff vs previous scan:</strong>
@@ -68,7 +74,7 @@
     {% endif %}
     {% if h.ports | length > 0 %}
     <table>
-      <thead><tr><th>Port</th><th>Proto</th><th>State</th><th>Service</th></tr></thead>
+      <thead><tr><th>Port</th><th>Proto</th><th>State</th><th>Service</th><th>Version</th><th>Note</th></tr></thead>
       <tbody>
       {% for p in h.ports %}
         <tr>
@@ -76,6 +82,8 @@
           <td>{{ p.protocol }}</td>
           <td class="state-{{ p.state }}">{{ p.state }}</td>
           <td>{{ p.service }}</td>
+          <td>{{ p.version }}</td>
+          <td class="risk-{{ p.risk }}">{% if p.risk == "high" %}&#8252; {% elif p.risk == "warn" %}&#9888; {% endif %}{{ p.note }}</td>
         </tr>
       {% endfor %}
       </tbody>

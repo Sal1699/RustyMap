@@ -15,6 +15,8 @@
 {% if h.device_class %}
 Device: **{{ h.device_class }}**{% if h.vendor %} · {{ h.vendor }}{% endif %}{% if h.model %} {{ h.model }}{% endif %}{% if h.firmware %} · firmware {{ h.firmware }}{% endif %}{% if h.device_confidence %} · confidence {{ h.device_confidence }}%{% endif %}
 {% endif %}
+{% if h.os %}OS: **{{ h.os }}**
+{% endif %}
 {% if h.diff %}
 **Diff vs previous scan:**
 {% if h.diff.new_open | length > 0 %}- newly open: `{{ h.diff.new_open | join(sep=", ") }}`
@@ -24,9 +26,9 @@ Device: **{{ h.device_class }}**{% if h.vendor %} · {{ h.vendor }}{% endif %}{%
 {% endif %}
 
 {% if h.ports | length > 0 %}
-| Port | Proto | State | Service |
-|------|-------|-------|---------|
-{% for p in h.ports %}| {{ p.port }} | {{ p.protocol }} | {{ p.state }} | {{ p.service }} |
+| Port | Proto | State | Service | Version | Note |
+|------|-------|-------|---------|---------|------|
+{% for p in h.ports %}| {{ p.port }} | {{ p.protocol }} | {{ p.state }} | {{ p.service }} | {{ p.version }} | {% if p.risk == "high" %}‼ {% elif p.risk == "warn" %}⚠ {% endif %}{{ p.note }} |
 {% endfor %}
 {% endif %}
 {% endfor %}
