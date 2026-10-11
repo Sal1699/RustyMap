@@ -126,6 +126,24 @@ rate-limit honoured, no hang. Flip COMMAND_COVERAGE brute cells per adapter.
 
 ---
 
+## P4 — Aggiornamento & manutenzione (self-update + data-sync)
+
+Richiedono rete (GitHub release, feed NVD / CISA KEV / ExploitDB / Nuclei).
+
+| Command | Expect | Note |
+|---------|--------|------|
+| `$RM --check-update` | riporta se esiste una release GitHub più recente (o "up to date") | read-only, sicuro |
+| `$RM --update-cve-db` | sync NVD JSON 2.0 (ultimi 5 anni) → `~/.cache/rustymap/nvd.sqlite`; stampa conteggio | poi `$RM --cve-db ~/.cache/rustymap/nvd.sqlite --sV $SERVER` usa il DB scaricato |
+| `$RM --update-exploit-refs` | sync KEV + ExploitDB + Nuclei → `exploit_refs.json`; stampa conteggi | — |
+| `$RM --inspect-exploit-cache CVE-2021-44228` | voce di cache per Log4Shell (sempre in KEV) → badge `[KEV]` presente | sanity dei feed scaricati |
+| `$RM --update` | scarica+installa l'ultima release da GitHub, **sostituisce il binario** | ⚠ fallo per ULTIMO (rimpiazza l'eseguibile sotto test); verifica poi `$RM --version` |
+
+> `--install-npcap` è solo-Windows (su Kali non serve: i raw-socket girano come root nativamente).
+
+**Ordine consigliato:** `--check-update` → `--update-cve-db` / `--update-exploit-refs` → `--inspect-exploit-cache` (conferma i feed) → `--update` alla fine.
+
+---
+
 ## Done criteria
 
 - `VALIDATION_0.86.md` written with P0 results (all must pass) + whatever P1/P2/P3 you reach.
