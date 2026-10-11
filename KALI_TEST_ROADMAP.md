@@ -12,9 +12,14 @@ matrix), `HYDRA_PARITY.md` (brute), and `LAB_VALIDATION.md` (the run log).
 ## Prep
 
 ```sh
-# Build the release binary on Kali (the manual release step)
+# 1) Aggiorna il checkout Kali all'ultima versione (v0.86.0) e builda
+cd RustyMap
+git fetch origin --tags
+git checkout v0.86.0            # versione esatta sotto test
+#   (oppure, per seguire la testa:  git pull origin main)
 cargo build --release          # ./target/release/rustymap
 RM=./target/release/rustymap
+$RM --version                  # deve stampare: rustymap 0.86.0
 
 # Lab targets (adjust to your /24)
 ROUTER=192.168.1.1     # TIM gateway (TLS 1.2, ~13 ports)
