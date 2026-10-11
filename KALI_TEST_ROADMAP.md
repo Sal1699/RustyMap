@@ -12,12 +12,14 @@ matrix), `HYDRA_PARITY.md` (brute), and `LAB_VALIDATION.md` (the run log).
 ## Prep
 
 ```sh
-# 1) Aggiorna il checkout Kali all'ultima versione (v0.86.0) e builda
-cd RustyMap
+# 1) Ottieni/aggiorna il repo su Kali e builda v0.86.0
+#    Prima volta: clona. Già clonato: il clone fallisce (|| true) e si prosegue.
+cd ~
+git clone https://github.com/Sal1699/RustyMap.git 2>/dev/null || true
+cd RustyMap || { echo "ERRORE: clone/clone-path non trovato"; }
 git fetch origin --tags
-git checkout v0.86.0            # versione esatta sotto test
-#   (oppure, per seguire la testa:  git pull origin main)
-cargo build --release          # ./target/release/rustymap
+git checkout v0.86.0            # versione esatta sotto test (oppure: git pull origin main)
+cargo build --release          # ./target/release/rustymap (qualche minuto)
 RM=./target/release/rustymap
 $RM --version                  # deve stampare: rustymap 0.86.0
 
