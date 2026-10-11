@@ -135,6 +135,15 @@ rate-limit honoured, no hang. Flip COMMAND_COVERAGE brute cells per adapter.
 
 Richiedono rete (GitHub release, feed NVD / CISA KEV / ExploitDB / Nuclei).
 
+> ⚠ **`--update`/`--check-update` sono TARATI sulle GitHub *Release*, non sui
+> tag.** L'ultima Release pubblicata è **v0.68.0** (le versioni successive sono
+> solo tag git — CI di release bloccata dal billing). Quindi su un binario
+> recente `--update` dice *"Already up to date (latest: v0.68.0)"* e **NON**
+> porta a v0.86.0. Per aggiornare Kali usa il flusso **git + cargo** del Prep
+> (`git fetch --tags && git checkout v0.86.0 && cargo build --release`). Perché
+> `--update` torni utile vanno pubblicate le Release con gli asset
+> (`rustymap-linux-x86_64.tar.gz`) buildati su Kali — vedi nota sotto.
+
 | Command | Expect | Note |
 |---------|--------|------|
 | `$RM --check-update` | riporta se esiste una release GitHub più recente (o "up to date") | read-only, sicuro |
