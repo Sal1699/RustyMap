@@ -23,6 +23,12 @@ cargo build --release          # ./target/release/rustymap (qualche minuto)
 RM=./target/release/rustymap
 $RM --version                  # deve stampare: rustymap 0.86.0
 
+# 2) (consigliato) allinea il `rustymap` su PATH al binario appena buildato,
+#    altrimenti un vecchio install resta e `rustymap --version` mostra la
+#    versione sbagliata (gli scan raw vanno comunque lanciati come root).
+install -m 0755 target/release/rustymap "$(command -v rustymap || echo /usr/local/bin/rustymap)"
+rustymap --version             # ora anche da PATH → rustymap 0.86.0
+
 # Lab targets (adjust to your /24)
 ROUTER=192.168.1.1     # TIM gateway (TLS 1.2, ~13 ports)
 SERVER=192.168.1.31    # SSH+DNS+HTTPS+rsync+8080
