@@ -4,6 +4,35 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.86.1] - 2026-10-11
+
+Fixes the three bugs from the v0.86.0 Kali lab run (report:
+`VALIDATION_0.86.md`, 2 reproducible runs, 90% pass). 611/611 tests.
+
+### Fixed
+- **Bug #1 — `--sS -p <range>` looked like it probed only 1–2 ports.** It was
+  a **display** bug, not a scan bug: the rich footer counted
+  `host.ports.len()`, and the raw SYN/stealth path drops closed+filtered from
+  `host.ports`, so the sum collapsed to the OPEN count. The footer now uses the
+  real `scan_stats::ports_done()` counter (connect + raw). Verified locally:
+  `--sT -p 1-1000` probes all 1000 and finds every open port. (The router's
+  1-vs-5-open discrepancy vs nmap was router-side — firmware/rate-limiting —
+  not a RustyMap scan bug.)
+- **Bug #2 — web probes rejected a bare host** ("relative URL without a
+  base"). `--cms-detect`, `--http-methods`, `--owasp-scan`, `--web-crawl` now
+  normalise a scheme-less target to `http://…` (new `normalize_url`).
+  `--iot-discover` with a CIDR (it's a single-host unicast probe) now gives a
+  clear config error (exit 3) instead of "failed to lookup address
+  information".
+- **Bug #3 — `--update-cve-db` timed out** on a slow link. The per-request
+  NVD timeout went 120s → 300s, and the parse error now suggests retrying or
+  setting `NVD_API_KEY` (higher rate limit).
+
+### Notes
+- No new flags; all three are fixes. The v0.86.0 lab run otherwise passed
+  44/49 executed (90%), confirming ssl-enum exotic suites (:8443 42%→90%),
+  device-fp gateway, enriched reports, real scan-stats, mDNS, SIEM/compliance.
+
 ## [0.86.0] - 2026-10-10
 
 Real progress %/ETA, enriched HTML/MD reports, IPv6-raw UX, and a hydra

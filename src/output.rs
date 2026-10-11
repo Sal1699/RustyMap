@@ -526,7 +526,15 @@ pub fn print_summary(hosts: &[HostResult], elapsed_sec: f64) {
     // rather than inventing packet/retransmit counters the scanners don't
     // surface here.
     if is_rich() {
-        let probed: usize = hosts.iter().map(|h| h.ports.len()).sum();
+        // Real ports-probed count comes from the scan_stats hot-path counter
+        // (bumped once per resolved port by the connect + raw loops). We can't
+        // derive it from host.ports.len(): the raw SYN/stealth path drops
+        // closed+filtered from host.ports, so that sum collapses to the OPEN
+        // count — which made `--sS -p 1-1000` look like "1 port-probe" when it
+        // actually probed 1000 (lab v0.86.0 Bug #1). Fall back to the host sum
+        // only when the counter wasn't fed (e.g. a path that doesn't record).
+        let by_hosts: usize = hosts.iter().map(|h| h.ports.len()).sum();
+        let probed = (crate::scan_stats::global().ports_done() as usize).max(by_hosts);
         let open: usize = hosts
             .iter()
             .flat_map(|h| h.ports.iter())

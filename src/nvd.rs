@@ -284,7 +284,10 @@ pub fn sync(conn: &mut Connection, verbose: bool) -> Result<usize> {
         Duration::from_millis(6500)
     };
     let mut client_builder = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(120))
+        // NVD can be slow per page, especially without an API key; 120s timed
+        // out on a slow link (lab v0.86.0 Bug #3). 300s per request gives it
+        // room. An NVD API key (NVD_API_KEY) also raises the rate limit.
+        .timeout(Duration::from_secs(300))
         .user_agent("rustymap/nvd-sync");
     if let Some(key) = &api_key {
         let mut headers = reqwest::header::HeaderMap::new();
@@ -326,7 +329,10 @@ pub fn sync(conn: &mut Connection, verbose: bool) -> Result<usize> {
                 status, url, body_snippet
             ));
         }
-        let parsed: NvdResponse = resp.json().context("parse NVD JSON")?;
+        let parsed: NvdResponse = resp.json().context(
+            "reading/parsing the NVD page (slow response or timeout) — retry, \
+             or set NVD_API_KEY to raise the rate limit and speed it up",
+        )?;
 
         let tx = conn.transaction()?;
         for v in &parsed.vulnerabilities {

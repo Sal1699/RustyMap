@@ -1036,7 +1036,7 @@ async fn run(mut args: Cli) -> Result<()> {
         return Ok(());
     }
     if let Some(u) = &args.cms_detect {
-        let url = u.clone();
+        let url = normalize_url(u);
         let dur = args.timeout();
         match cms_detect::detect(&url, dur).await? {
             Some(f) => cms_detect::print_finding(&f),
@@ -1045,7 +1045,7 @@ async fn run(mut args: Cli) -> Result<()> {
         return Ok(());
     }
     if let Some(u) = &args.http_methods {
-        let url = u.clone();
+        let url = normalize_url(u);
         let dur = args.timeout();
         let f = http_methods::enumerate(&url, dur).await?;
         http_methods::print_finding(&f);
@@ -1520,6 +1520,16 @@ async fn run(mut args: Cli) -> Result<()> {
         return Ok(());
     }
     if let Some(host) = &args.iot_discover {
+        // iot-discover sends unicast mDNS/SSDP/CoAP to ONE host; a CIDR/range
+        // can't be resolved (lab v0.86.0 Bug #2: `--iot-discover <CIDR>` →
+        // "failed to lookup address information"). Give a clear message.
+        if host.contains('/') {
+            return Err(exit::config_err(format!(
+                "--iot-discover probes a single host (unicast mDNS/SSDP/CoAP), not a CIDR — \
+                 got '{}'. Pass one IP, e.g. --iot-discover 192.168.1.50",
+                host
+            )));
+        }
         let h = host.clone();
         let dur = std::time::Duration::from_secs(3);
         let findings = iot_discover::discover(&h, dur).await?;
@@ -1561,11 +1571,12 @@ async fn run(mut args: Cli) -> Result<()> {
         if args.owasp_scan.is_some() {
             maturity::announce_and_gate("--owasp-probes", args.experimental_confirm)?;
         }
-        let seed = args
+        let seed_raw = args
             .owasp_scan
             .clone()
             .or_else(|| args.web_crawl.clone())
             .unwrap();
+        let seed = normalize_url(&seed_raw);
         let cfg = web_crawl::CrawlConfig {
             max_depth: args.crawl_depth,
             max_urls: args.crawl_max_urls,
@@ -3602,6 +3613,18 @@ async fn run(mut args: Cli) -> Result<()> {
 /// returns early in `main()` before the scan + file-output stage. Used
 /// to warn when `--oA` etc. are combined with these and would otherwise
 /// silently produce no output files.
+/// Ensure a web target carries a scheme: a bare `host` / `host:port` / `ip`
+/// becomes `http://…`. Without it, `Url::parse` inside the web probes fails
+/// with "relative URL without a base" (lab v0.86.0 Bug #2: --cms-detect,
+/// --owasp-scan, --web-crawl rejected a bare host).
+fn normalize_url(target: &str) -> String {
+    if target.contains("://") {
+        target.to_string()
+    } else {
+        format!("http://{}", target)
+    }
+}
+
 fn is_probe_only_invocation(args: &cli::Cli) -> bool {
     args.brute_protocol.is_some()
         || args.cve_for.is_some()
