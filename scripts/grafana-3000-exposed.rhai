@@ -1,11 +1,20 @@
 // @name: grafana-3000-exposed
-// @description: Grafana (3000) open (check default admin)
+// @description: Grafana
 // @category: http
 // @severity: low
-// @tags: http, exposure
+// @tags: http, exposure, version
 // @author: rustymap
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 3000 { continue; }
-    findings.push(#{ severity: "low", port: 3000, message: "Grafana (3000) open (check default admin)" });
+    let svc = p.service;
+    if type_of(svc) != "map" { continue; }
+    let s = "";
+    if type_of(svc.banner) == "string" { s += svc.banner.to_lower() + " "; }
+    if type_of(svc.product) == "string" { s += svc.product.to_lower() + " "; }
+    if type_of(svc.version) == "string" { s += svc.version.to_lower() + " "; }
+    if s == "" { continue; }
+    if s.contains("grafana") {
+        findings.push(#{ severity: "low", port: 3000, message: `Grafana confirmed on ${p.port}: ${s.trim()}` });
+    }
 }

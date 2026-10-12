@@ -4,6 +4,44 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.87.1] - 2026-10-12
+
+Fixes the 5 bugs from the v0.87.0 Kali script-engine run (report:
+`VALIDATION_0.87.md`, 78% → bugs triaged). 611/611 tests + 307-script parse
+gate.
+
+### Fixed
+- **BUG-2 (HIGH) — HTTP marker scripts false-positived on catch-all 200
+  pages.** The ~76 generated `http-*` detect scripts now do an inline soft-404
+  baseline (fetch a random path first) and skip a hit when that random path
+  also returns 200 with the same (or empty) marker — the `--web-scan` soft-404
+  logic, now in the scripts. Empty markers were also replaced with distinctive
+  ones (e.g. `.bash_history`→"cd ", `.svn/wc.db`→"sqlite").
+- **BUG-3 (MED) — port-only scripts asserted a service on shared ports.**
+  `clickhouse-native` (:9000), `vmware-vsphere-8443` (:8443), `grafana-3000`,
+  `kibana-5601` now require a matching `-sV` product/banner marker before
+  firing (silent otherwise). `exposed-management` dropped from HIGH-asserting
+  to a low-severity "port NNNN open — commonly X" hint (folds in the real
+  product when `-sV` knows it). Fixes "SonarQube on an IP camera :9000".
+- **BUG-5 (LOW) — banner scripts missed when `-sV` stored the string in
+  product/version, not banner.** The ~38 banner scripts now match over
+  `banner + product + version` combined, so e.g. `ssh-dropbear-detect` fires on
+  Dropbear 2017.75.
+- **BUG-1 (LOW) — catalog FILE export ignored the filter.** `--script-catalog
+  <file>` now honours `--script-category`/`--script-tag`/`--script-severity`/
+  `--script-cve` (e.g. `--script-category ics` → 8 of 307 exported).
+- **BUG-4 (LOW) — `rtsp-options` never fired.** The OPTIONS request was built
+  in a backtick template that didn't interpret `\r\n`, so the server never
+  answered; rebuilt with real CRLF, broader `RTSP/` match, and a 401-aware
+  message.
+
+### Notes
+- Runtime script subsetting by category/tag (filtering which scripts *run*
+  during a scan, vs the catalog view) is still not wired — a candidate
+  enhancement, not a bug.
+- BUG-2/BUG-4 fixes want a Kali re-run (catch-all host, live RTSP camera) to
+  confirm the FP flood is gone and rtsp-options now fires.
+
 ## [0.87.0] - 2026-10-12
 
 **Fase 29 — script engine ≥300.** The built-in Rhai script set goes from

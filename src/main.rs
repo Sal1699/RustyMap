@@ -690,13 +690,25 @@ async fn run(mut args: Cli) -> Result<()> {
             cve: args.script_cve.clone(),
         };
         if let Some(path) = &args.script_catalog {
+            // Honour --script-category/--script-tag/--script-severity/--script-cve
+            // on the FILE export too, not just the stdout print (lab v0.87.0
+            // BUG-1: the export dumped all scripts regardless of the filter).
+            let selected: Vec<plugin_meta::PluginMeta> =
+                catalog.iter().filter(|m| filter.matches(m)).cloned().collect();
             let body = if path.ends_with(".json") {
-                plugin_meta::export_json(&catalog)
+                plugin_meta::export_json(&selected)
             } else {
-                plugin_meta::export_markdown(&catalog)
+                plugin_meta::export_markdown(&selected)
             };
             std::fs::write(path, body)?;
-            println!("[catalog] {} scripts exported to {}", catalog.len(), path);
+            if selected.len() == catalog.len() {
+                println!("[catalog] {} scripts exported to {}", selected.len(), path);
+            } else {
+                println!(
+                    "[catalog] {} of {} scripts exported to {} (filtered)",
+                    selected.len(), catalog.len(), path
+                );
+            }
             return Ok(());
         }
         plugin_meta::print_catalog(&catalog, &filter);

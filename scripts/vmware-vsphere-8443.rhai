@@ -1,11 +1,20 @@
 // @name: vmware-vsphere-8443
-// @description: VMware vSphere/mgmt on 8443
+// @description: VMware vSphere/mgmt
 // @category: mgmt
 // @severity: low
-// @tags: mgmt, exposure
+// @tags: mgmt, exposure, version
 // @author: rustymap
 for p in host.ports {
     if p.state != "open" { continue; }
     if p.port != 8443 { continue; }
-    findings.push(#{ severity: "low", port: 8443, message: "VMware vSphere/mgmt on 8443" });
+    let svc = p.service;
+    if type_of(svc) != "map" { continue; }
+    let s = "";
+    if type_of(svc.banner) == "string" { s += svc.banner.to_lower() + " "; }
+    if type_of(svc.product) == "string" { s += svc.product.to_lower() + " "; }
+    if type_of(svc.version) == "string" { s += svc.version.to_lower() + " "; }
+    if s == "" { continue; }
+    if s.contains("vmware") {
+        findings.push(#{ severity: "low", port: 8443, message: `VMware vSphere/mgmt confirmed on ${p.port}: ${s.trim()}` });
+    }
 }
