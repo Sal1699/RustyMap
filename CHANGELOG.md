@@ -4,6 +4,45 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.87.0] - 2026-10-12
+
+**Fase 29 — script engine ≥300.** The built-in Rhai script set goes from
+**117 → 307**, re-adapting the logic of the most-used NSE checks (logic
+ported, not Lua copied). 611/611 tests + the `all_builtin_scripts_parse`
+gate covers all 307.
+
+### Added — +190 scripts across families
+- **HTTP tech/panel detection (~36):** Tomcat/JBoss/WebLogic manager+console,
+  Drupal/Joomla/Magento/GitLab/Harbor/Nexus/Artifactory/Rancher, Webmin/
+  cPanel/Plesk, OWA/Exchange/SharePoint/ColdFusion, Citrix/Fortinet/Pulse VPN
+  portals, vCenter, Zabbix/Nagios/Cacti, Solr/Airflow/Superset/Keycloak/WSO2,
+  WordPress/Django/Flask-debug.
+- **Banner/version (~38):** vsftpd/ProFTPD/Pure-FTPd/FileZilla, Dropbear/
+  Cisco/MikroTik/Huawei/libssh SSH, Telnet (Cisco/BusyBox), Postfix/Exim/
+  Sendmail/Exchange SMTP, Dovecot/Courier, MariaDB/MySQL/Postgres/Mongo/Redis
+  banners, Asterisk/FreeSWITCH SIP, Mosquitto/RabbitMQ, X11/finger.
+- **Port exposure (~75):** ICS (Modbus/S7/DNP3/BACnet/EtherNet-IP/PROFINET/
+  IEC-104/Niagara-Fox), legacy-cleartext (rexec/rlogin/rsh/tftp/chargen/
+  daytime/echo), DBs (Oracle-TNS/Db2/Firebird/Cassandra/CockroachDB/
+  ClickHouse/HBase), remote-mgmt (WinRM/Cockpit/Proxmox/pcAnywhere/Winbox/
+  BMC), VPN (PPTP/L2TP/IKE/OpenVPN), printers (JetDirect/IPP/LPD),
+  directory (LDAPS/Kerberos/GC), monitoring/stream (Splunk/Logstash/Graylog/
+  ActiveMQ/Pulsar/NSQ), iSCSI/AFP/git-daemon/SVN/X11.
+- **HTTP files/endpoints/vuln-hints (~40):** .idea/.vscode-sftp/.aws/.netrc/
+  .git-config/.svn/.hg, Dockerfile/.npmrc/composer/package.json, web.config/
+  WEB-INF/appsettings/application.yml, Jolokia/Druid/Hystrix/Spring-H2,
+  Actuator mappings/loggers/beans, Jenkins script console, Struts2 dev-mode,
+  OpenAPI/Swagger.
+- Every script carries `@category`/`@severity`/`@tags` metadata, so the
+  existing `--script-category` / `--script-tag` / `--script-catalog` selection
+  works over the full set (307 scripts across ~25 categories: http 98, vuln
+  32, db/database 28, misc 30, ics 8, ssh 7, …).
+
+### Notes
+- Quality gate: all 307 compile in `all_builtin_scripts_parse`; detection
+  scripts are heuristic (path/banner/marker), tuned conservative.
+- Minor taxonomy overlap to tidy later: `db` vs `database`, `http` vs `web`.
+
 ## [0.86.1] - 2026-10-11
 
 Fixes the three bugs from the v0.86.0 Kali lab run (report:
