@@ -125,10 +125,14 @@ Esplicitamente fuori scope finché non c'è il taglio stabile:
 | Fase | Release | Tema | Gate |
 |------|---------|------|------|
 | L | v0.83.x | Chiusura validazione lab | ✅ CHIUSA — 6/6 PASS (2026-10-10) |
-| M | v0.84.x+ | Backlog tecnico mirato | solo con caso d'uso lab |
-| 26 | **v1.0.0** | Portfolio polish + taglio stabile | **tuo ok al freeze** |
+| M | v0.84–0.86 | Backlog mirato + bug lab | ✅ fatto (v0.84→v0.86.1) |
+| **29–37** | **v0.87→v0.95** | **9 fasi feature verso/oltre nmap** | **vedi `ROADMAP_FEATURES_v0.87-v0.95.md`** |
+| 26 | **v1.0.0** | Portfolio polish + taglio stabile | **tuo ok al freeze, DOPO le 29–37** |
 | — | post-1.0 | Backlog ampiezza | dopo v1.0 |
 
-Ordine operativo: **L → (M se serve) → 26**. La Fase M è opzionale e
-"pull-based" (entra roba solo se il lab la chiede); se il lab è pulito, si può
-saltare dritti alla Fase 26 quando dai il via al v1.0.
+Ordine operativo aggiornato (2026-10-12): **L ✅ → M ✅ → Fasi 29–37
+(v0.87→v0.95) → 26 (v1.0)**. Le 9 fasi feature (script ≥300, motore pacchetti
+nativo, congestion control, service-probe DB parità, web-scan moderno, mobile
+iOS/Android, evasion, report+output, velocità) chiudono i gap con nmap e
+allargano i differenziatori — dettaglio completo in
+**`ROADMAP_FEATURES_v0.87-v0.95.md`**. Il taglio v1.0 arriva dopo.
