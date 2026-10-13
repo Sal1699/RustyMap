@@ -275,6 +275,95 @@ impl RawTcpScanner {
             .remove(&(dst_ip, dst_port));
         state
     }
+
+    /// Send a probe WITHOUT waiting for the reply, returning the channel the
+    /// receiver thread will push the response onto. The `--fast-engine` burst
+    /// path uses this (send all, then collect) instead of the per-probe
+    /// send→block→next of `probe()`. Send half mirrors `probe()` exactly so
+    /// the packets on the wire are identical.
+    fn send_probe(
+        &self,
+        src_ip: Ipv4Addr,
+        dst_ip: Ipv4Addr,
+        dst_port: u16,
+        kind: RawTcpKind,
+    ) -> mpsc::Receiver<Response> {
+        evasion::jitter_sleep(&self.evasion.jitter);
+        let ev = if self.evasion.rotate {
+            self.evasion.rotated()
+        } else {
+            self.evasion.clone()
+        };
+        let mut rng = rand::thread_rng();
+        let src_port: u16 = ev
+            .source_port
+            .unwrap_or_else(|| rng.gen_range(40000..60000));
+        let flags = ev.effective_flags(kind.flags());
+
+        let (sender, receiver) = mpsc::channel::<Response>();
+        {
+            self.pending
+                .lock()
+                .unwrap()
+                .insert((dst_ip, dst_port), sender);
+        }
+
+        let send_ok = if ev.needs_layer3() {
+            if let Some(ref tx3) = self.tx3 {
+                let mut tx = tx3.lock().unwrap();
+                evasion::send_with_decoys(&mut tx, src_ip, dst_ip, dst_port, flags, src_port, &ev)
+            } else {
+                false
+            }
+        } else {
+            let tcp = evasion::build_tcp_segment(src_ip, dst_ip, dst_port, flags, rng.gen(), src_port, &ev);
+            let mut tx = self.tx4.lock().unwrap();
+            let pkt = TcpPacket::new(&tcp).unwrap();
+            tx.send_to(pkt, IpAddr::V4(dst_ip)).is_ok()
+        };
+        if TRACE_ENABLED.load(Ordering::Relaxed) {
+            eprintln!(
+                "[raw-tx] {}:{} flags=0x{:02x} src_port={} send_ok={}",
+                dst_ip, dst_port, flags, src_port, send_ok
+            );
+        }
+        receiver
+    }
+
+    /// Remove a pending entry (fast path, after collecting or timing out).
+    fn clear_pending(&self, dst_ip: Ipv4Addr, dst_port: u16) {
+        self.pending.lock().unwrap().remove(&(dst_ip, dst_port));
+    }
+}
+
+/// Map a raw reply to a port state for a given scan kind (shared by `probe`'s
+/// inline match and the fast engine).
+fn response_to_state(resp: Response, kind: RawTcpKind) -> PortState {
+    match resp {
+        Response::SynAck => PortState::Open,
+        Response::Rst { window } => match kind {
+            RawTcpKind::Syn | RawTcpKind::Fin | RawTcpKind::Null | RawTcpKind::Xmas => {
+                PortState::Closed
+            }
+            RawTcpKind::Ack => PortState::Unfiltered,
+            RawTcpKind::Window => {
+                if window > 0 { PortState::Open } else { PortState::Closed }
+            }
+            RawTcpKind::Maimon => PortState::Closed,
+        },
+        Response::Other => PortState::Filtered,
+    }
+}
+
+/// No-reply state for a scan kind (SYN/ACK/Window → filtered; FIN/NULL/Xmas/
+/// Maimon → open|filtered — same as `probe()`'s timeout arm).
+fn no_reply_state(kind: RawTcpKind) -> PortState {
+    match kind {
+        RawTcpKind::Syn | RawTcpKind::Ack | RawTcpKind::Window => PortState::Filtered,
+        RawTcpKind::Fin | RawTcpKind::Null | RawTcpKind::Xmas | RawTcpKind::Maimon => {
+            PortState::OpenFiltered
+        }
+    }
 }
 
 fn receiver_loop(mut rx: TransportReceiver, pending: PendingMap) {
@@ -429,6 +518,116 @@ pub fn run_raw_tcp_scan(
         // For stealth scans, "host is up" includes "responded with RST"
         // (we got something back). Otherwise fall back to the old
         // "any interesting state" heuristic.
+        up: !interesting.is_empty() && (matches!(kind, RawTcpKind::Syn) || any_response),
+        target,
+        ports: interesting,
+        elapsed: start.elapsed(),
+        os: None,
+        device: None,
+        mac: None,
+    }
+}
+
+/// `--fast-engine` raw TCP scan (Fase 30): an nsock/ultra_scan-style path that
+/// decouples send from receive. Instead of `--max-parallel` OS threads each
+/// doing a synchronous send→block→next (`run_raw_tcp_scan`), a single sender
+/// bursts all probes, the existing receiver thread demuxes replies
+/// asynchronously, and we poll-collect them within a window — then retransmit
+/// the unanswered ports in waves (bounded by --max-retries). Same packets,
+/// same state logic, far fewer threads.
+///
+/// v0.88.0 is the cross-platform restructure. The Linux `sendmmsg` batched
+/// burst (collapsing N send syscalls into ~N/50) is the v0.88.1 step, to be
+/// built + benchmarked on Kali. Opt-in until it beats the default path in lab.
+pub fn run_raw_tcp_fast(
+    target: Target,
+    ports: Arc<Vec<u16>>,
+    kind: RawTcpKind,
+    scanner: Arc<RawTcpScanner>,
+    timeout: Duration,
+) -> HostResult {
+    let start = Instant::now();
+    let dst = match target.ip {
+        IpAddr::V4(v) => v,
+        IpAddr::V6(_) => {
+            return HostResult { target, up: false, ports: vec![], elapsed: start.elapsed(), os: None, device: None, mac: None };
+        }
+    };
+    let src = match source_ipv4_for(dst) {
+        Ok(s) => s,
+        Err(_) => {
+            return HostResult { target, up: false, ports: vec![], elapsed: start.elapsed(), os: None, device: None, mac: None };
+        }
+    };
+    let max_retries = crate::scanner::max_retries();
+
+    // Definitive states only (Open/Closed/Unfiltered); "Other" and no-reply are
+    // left out so they get retransmitted, then mapped at finalize.
+    let mut state: HashMap<u16, PortState> = HashMap::new();
+    let mut todo: Vec<u16> = ports.iter().copied().collect();
+
+    for _ in 0..=max_retries {
+        if todo.is_empty() {
+            break;
+        }
+        // ── burst: send every pending probe without waiting ──
+        let mut pend: Vec<(u16, mpsc::Receiver<Response>)> = Vec::with_capacity(todo.len());
+        for &p in &todo {
+            let rx = scanner.send_probe(src, dst, p, kind);
+            pend.push((p, rx));
+        }
+        // ── collect: poll the channels until the window elapses ──
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline && !pend.is_empty() {
+            let mut still: Vec<(u16, mpsc::Receiver<Response>)> = Vec::with_capacity(pend.len());
+            for (p, rx) in pend.into_iter() {
+                match rx.try_recv() {
+                    Ok(resp) => {
+                        scanner.clear_pending(dst, p);
+                        let st = response_to_state(resp, kind);
+                        // Only SYN-ACK / RST are terminal; "Other" → retransmit.
+                        if matches!(st, PortState::Open | PortState::Closed | PortState::Unfiltered) {
+                            state.insert(p, st);
+                        }
+                    }
+                    Err(mpsc::TryRecvError::Empty) => still.push((p, rx)),
+                    Err(mpsc::TryRecvError::Disconnected) => scanner.clear_pending(dst, p),
+                }
+            }
+            pend = still;
+            if pend.is_empty() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        for (p, _rx) in pend {
+            scanner.clear_pending(dst, p);
+        }
+        todo = ports.iter().copied().filter(|p| !state.contains_key(p)).collect();
+    }
+
+    let mut all: Vec<PortResult> = ports
+        .iter()
+        .map(|&p| {
+            let st = state.get(&p).copied().unwrap_or_else(|| no_reply_state(kind));
+            crate::scan_stats::global().record_result(st);
+            PortResult { port: p, state: st, rtt: Duration::from_millis(0), service: None }
+        })
+        .collect();
+    all.sort_by_key(|p| p.port);
+
+    let drop_closed = matches!(kind, RawTcpKind::Syn);
+    let interesting: Vec<PortResult> = all
+        .into_iter()
+        .filter(|p| match p.state {
+            PortState::Open | PortState::OpenFiltered | PortState::Unfiltered => true,
+            PortState::Filtered => !matches!(kind, RawTcpKind::Syn),
+            PortState::Closed => !drop_closed,
+        })
+        .collect();
+    let any_response = interesting.iter().any(|p| !matches!(p.state, PortState::Filtered));
+
+    HostResult {
         up: !interesting.is_empty() && (matches!(kind, RawTcpKind::Syn) || any_response),
         target,
         ports: interesting,

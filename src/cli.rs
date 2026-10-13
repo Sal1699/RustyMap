@@ -571,6 +571,12 @@ pub struct Cli {
     #[arg(long = "max-retries", default_value_t = 2u8)]
     pub max_retries: u8,
 
+    /// Experimental fast raw engine (Fase 30): burst-send + async poll-collect
+    /// for --sS/--sU-family raw scans, instead of one thread per port chunk.
+    /// Opt-in while it's benchmarked vs the default path.
+    #[arg(long = "fast-engine")]
+    pub fast_engine: bool,
+
     /// IP protocol scan — discover which IP protocols (TCP/UDP/ICMP/GRE/…) the target supports
     #[arg(long = "sO", group = "scan_type")]
     pub scan_ipproto: bool,

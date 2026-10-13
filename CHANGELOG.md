@@ -4,6 +4,35 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.88.0] - 2026-10-13
+
+**Fase 30 — native packet engine (first cut).** An nsock/ultra_scan-style raw
+engine that decouples send from receive, behind `--fast-engine` (opt-in;
+default path unchanged → zero regression). 611/611 tests.
+
+### Added
+- **`--fast-engine`**: for `--sS` and the stealth/ACK/Window/Maimon raw scans,
+  instead of one OS thread per port chunk each doing a synchronous
+  send→block→next, a single sender **bursts every probe**, the existing
+  receiver thread demuxes replies asynchronously, and we **poll-collect**
+  within the timeout window, then **retransmit** the unanswered ports in waves
+  (bounded by `--max-retries`). Same packets on the wire, same state logic
+  (`response_to_state`/`no_reply_state` shared with `probe()`), far fewer
+  threads (~2 vs up to `--max-parallel`). `RawTcpScanner::send_probe` /
+  `clear_pending` added; `run_raw_tcp_fast` in `raw_scan.rs`.
+
+### Notes
+- This is the **cross-platform restructure** — the foundation. The Linux
+  `sendmmsg`/`AF_PACKET`-ring batched burst (collapsing N send syscalls into
+  ~N/50 — the real throughput multiplier) is the **v0.88.1** step, to be built
+  and benchmarked on Kali (no Linux target available on the Windows dev box to
+  compile-check syscall code here).
+- **Opt-in until lab-proven**: the default raw path (validated byte-identical
+  for `-O`, SYN parity) is untouched. Benchmark `--fast-engine` vs default vs
+  nmap on Kali (`--sS -F /24`, `-p 1-65535`); promote to default only if it
+  wins. Needs Kali: correctness (same open/closed/filtered as the default
+  path) + throughput.
+
 ## [0.87.1] - 2026-10-12
 
 Fixes the 5 bugs from the v0.87.0 Kali script-engine run (report:
