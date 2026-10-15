@@ -4,6 +4,39 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.88.4] - 2026-10-15
+
+**Revert the default-flip — the fast raw engine is OPT-IN again.** The Kali run
+(`VALIDATION_0.88.3.md`) led to keeping the stable per-probe path as the
+default until Fase 31. 611/611 tests.
+
+### Changed
+- **Default raw engine is the per-probe path again** (reverts v0.88.3). Raw TCP
+  scans (`--sS`/`--sA`/`--sW`/`--sF`/`--sN`/`--sX`/`--sM`) use the original
+  per-probe engine unless `--fast-engine` is given.
+- **`--fast-engine` is a real opt-in flag again** (no longer a deprecated
+  no-op).
+
+### Removed
+- **`--legacy-engine`** (introduced in v0.88.3) — redundant now that per-probe
+  is the default. CLI surface is back to the v0.88.2 posture.
+
+### Why
+- **No code regression.** `git diff v0.88.2 v0.88.3` shows the engine code
+  (`raw_scan.rs`, both the fast path and the legacy `run_raw_tcp_scan`) is
+  byte-identical across those tags — only the dispatch boolean and flag/docs
+  changed. The alarming v0.88.3 benchmark deltas were **environmental**: the
+  nmap control (an unchanged binary) itself doubled on the /24 sweep (42→85s,
+  up to 207s) in that run, and legacy (unchanged code) swung too, so the
+  cross-run comparison is invalid.
+- **One real, pre-existing signal:** within the v0.88.3 run the fast engine was
+  unstable on full-65535 (σ=19s vs legacy σ=0.3s). The `sendmmsg` burst can
+  outpace the receiver / trigger host RST rate-limiting on huge port sets →
+  dropped replies → retransmit variance. This is a **congestion-control** gap
+  (same code already in v0.88.2), so the fast engine stays opt-in until **Fase
+  31 (v0.89.0)** adds an in-flight window / pacing. It still wins on sweeps and
+  SYN ranges, hence remains available via `--fast-engine`.
+
 ## [0.88.3] - 2026-10-15
 
 **Fase 30 capstone — the fast raw engine is now the DEFAULT.** After the Kali

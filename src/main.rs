@@ -2557,16 +2557,15 @@ async fn run(mut args: Cli) -> Result<()> {
             }
             let any_v6 = targets.iter().any(|t| t.ip.is_ipv6());
             let scanner = Arc::new(RawTcpScanner::new(evasion_cfg)?);
-            // Fase 30 capstone (v0.88.3): the fast raw engine is now the
-            // default on all platforms; --legacy-engine opts back into the
-            // per-probe path. --fast-engine is kept as a deprecated no-op.
-            let use_fast = !args.legacy_engine;
-            if args.legacy_engine {
-                eprintln!("[legacy-engine] fast raw engine disabled — using the per-probe path");
-            } else if args.fast_engine {
-                eprintln!("[fast-engine] note: the fast engine is now the default; --fast-engine is a no-op (use --legacy-engine to opt out)");
+            // v0.88.4: the fast engine is OPT-IN again (reverted the v0.88.3
+            // default-flip). The Kali run (VALIDATION_0.88.3.md) showed the
+            // fast burst can outpace the receiver on full-port scans under
+            // load; keep the stable per-probe path as default until Fase 31
+            // adds congestion control.
+            if args.fast_engine {
+                eprintln!("[fast-engine] opt-in raw engine active (burst-send + async collect)");
             }
-            let result = run_raw_tcp(targets, port_list.clone(), kind, scanner, timeout_dur, parallel, use_fast).await;
+            let result = run_raw_tcp(targets, port_list.clone(), kind, scanner, timeout_dur, parallel, args.fast_engine).await;
             // Post-scan sanity check: if we sent packets but rx_count is 0,
             // the kernel (or a firewall) is silently swallowing responses
             // before they reach our raw socket. IPv6 conntrack drops the
