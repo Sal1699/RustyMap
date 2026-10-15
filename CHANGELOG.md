@@ -4,6 +4,35 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.88.1] - 2026-10-15
+
+**Fase 30 follow-up — adaptive collect window for `--fast-engine`.** Fixes a
+worst-case latency flaw in the v0.88.0 fast engine on firewalled/lossy hosts.
+No new flags. 611/611 tests.
+
+### Fixed
+- **`--fast-engine` no longer burns the full `--timeout` on filtered ports.**
+  The poll-collect loop only ends a round early once *every* pending port has
+  replied (`pend.is_empty()`). A dropped or filtered port never replies, so on
+  a firewalled host the pending set stays non-empty and — with the old fixed
+  deadline — each retransmit round waited the entire `--timeout`. The collect
+  window is now **adaptive** (`rate::adaptive_timeout`): it shrinks toward
+  ~10×RTT once a few replies have been observed, clamped to
+  `[timeout_floor, --timeout]`, exactly like the default per-probe path. The
+  engine feeds its RTT EWMA (`RawTcpScanner::record_rtt`) from the first reply
+  of each burst, and the EWMA is shared across hosts in a sweep. Open/closed
+  ports (which reply) already exited early and are unaffected; filtered sweeps
+  stop pinning at the worst case.
+
+### Notes
+- Still **opt-in and Windows-compile-verified only** — the raw path needs
+  admin+Npcap/root to exercise. Kali must confirm (a) correctness unchanged
+  (same open/closed/filtered as the default path, per `KALI_TEST_v0.88.md`
+  F1) and (b) that filtered `/24` sweeps with `--fast-engine` now track the
+  default path instead of lagging it (F2).
+- The Linux `sendmmsg`/`AF_PACKET`-ring batched burst (the real throughput
+  multiplier) is still the next step, to be built and benchmarked on Kali.
+
 ## [0.88.0] - 2026-10-13
 
 **Fase 30 — native packet engine (first cut).** An nsock/ultra_scan-style raw
@@ -24,7 +53,7 @@ default path unchanged → zero regression). 611/611 tests.
 ### Notes
 - This is the **cross-platform restructure** — the foundation. The Linux
   `sendmmsg`/`AF_PACKET`-ring batched burst (collapsing N send syscalls into
-  ~N/50 — the real throughput multiplier) is the **v0.88.1** step, to be built
+  ~N/50 — the real throughput multiplier) is a **later step**, to be built
   and benchmarked on Kali (no Linux target available on the Windows dev box to
   compile-check syscall code here).
 - **Opt-in until lab-proven**: the default raw path (validated byte-identical

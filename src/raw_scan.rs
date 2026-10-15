@@ -571,19 +571,40 @@ pub fn run_raw_tcp_fast(
             break;
         }
         // ── burst: send every pending probe without waiting ──
+        let burst_start = Instant::now();
         let mut pend: Vec<(u16, mpsc::Receiver<Response>)> = Vec::with_capacity(todo.len());
         for &p in &todo {
             let rx = scanner.send_probe(src, dst, p, kind);
             pend.push((p, rx));
         }
-        // ── collect: poll the channels until the window elapses ──
-        let deadline = Instant::now() + timeout;
+        // ── collect: poll the channels until an ADAPTIVE window elapses ──
+        // The window shrinks toward ~10×RTT once a few replies have been seen
+        // (shared across hosts in a sweep via the scanner's RTT EWMA) — exactly
+        // like the per-probe path. This matters because the loop below only
+        // breaks early once EVERY pending port has replied (`pend.is_empty()`);
+        // a dropped/filtered port never replies, so on a firewalled host `pend`
+        // stays non-empty and — with a fixed deadline — the round would burn the
+        // full `--timeout`. Adapting the window keeps firewalled sweeps from
+        // pinning at the worst case while open/closed ports still exit early.
+        let eff = crate::rate::adaptive_timeout(
+            timeout,
+            scanner.mean_rtt(),
+            crate::rate::timeout_floor(timeout),
+        );
+        let deadline = Instant::now() + eff;
+        let mut rtt_recorded = false;
         while Instant::now() < deadline && !pend.is_empty() {
             let mut still: Vec<(u16, mpsc::Receiver<Response>)> = Vec::with_capacity(pend.len());
             for (p, rx) in pend.into_iter() {
                 match rx.try_recv() {
                     Ok(resp) => {
                         scanner.clear_pending(dst, p);
+                        // Feed the RTT EWMA once per round (first reply ≈ host
+                        // RTT for a fast burst) so the window adapts.
+                        if !rtt_recorded {
+                            scanner.record_rtt(burst_start.elapsed());
+                            rtt_recorded = true;
+                        }
                         let st = response_to_state(resp, kind);
                         // Only SYN-ACK / RST are terminal; "Other" → retransmit.
                         if matches!(st, PortState::Open | PortState::Closed | PortState::Unfiltered) {

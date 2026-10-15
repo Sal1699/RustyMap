@@ -52,6 +52,15 @@ coincidere (open/closed/filtered). Poi confronta con nmap.
 
 ## F2 — Throughput (hyperfine: fast vs default vs nmap)
 
+> **v0.88.1 fix da verificare qui:** in v0.88.0 il fast engine aspettava l'intero
+> `--timeout` a ogni round sulle porte filtered (il loop esce in anticipo solo
+> quando *tutte* le pending rispondono, e una porta filtered non risponde mai).
+> v0.88.1 rende la finestra di collect **adattiva** (~10×RTT, come il path
+> default). Atteso: su sweep filtered (`-F /24`, `$ROUTER`) il fast ora
+> **affianca** il default invece di restare indietro. Open/closed erano già a
+> posto (uscita anticipata). Se il fast è ancora molto più lento del default su
+> host firewallati → riportamelo.
+
 ```sh
 hyperfine -w1 -r5 \
   "sudo $RM --sS -F $NET --no-builtin-scripts" \
@@ -94,8 +103,8 @@ Ripeti per: `--sS -p 1-1000 $SERVER`, `--sS -p 1-65535 $SERVER`,
 ---
 
 ## Decisione post-test
-- **F1 tutti PASS + F2 fast ≥ default** → promuovi `--fast-engine` a default (prossima patch) e procedi con **v0.88.1** (batch Linux `sendmmsg`/AF_PACKET per il vero salto throughput).
-- **F2 fast ≈ default senza sendmmsg** → atteso: il win vero arriva con v0.88.1 (sendmmsg); tieni il flag opt-in, implementiamo il batch e ri-benchiamo.
+- **F1 tutti PASS + F2 fast ≥ default** → promuovi `--fast-engine` a default (prossima patch) e procedi con la **prossima release** (batch Linux `sendmmsg`/AF_PACKET per il vero salto throughput).
+- **F2 fast ≈ default senza sendmmsg** → atteso: il win vero arriva con il batch `sendmmsg`; tieni il flag opt-in, implementiamo il batch e ri-benchiamo.
 - **F1 divergenze** → bug nel motore fast: riportami quali porte differiscono (quali stati) e fix in 0.88.x.
 
 ## Done criteria
