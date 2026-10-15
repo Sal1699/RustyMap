@@ -334,6 +334,170 @@ impl RawTcpScanner {
     fn clear_pending(&self, dst_ip: Ipv4Addr, dst_port: u16) {
         self.pending.lock().unwrap().remove(&(dst_ip, dst_port));
     }
+
+    /// Fase 30 (Linux): the `sendmmsg(2)` burst path is only byte-for-byte
+    /// equivalent to the per-probe path when evasion is *passive* — no
+    /// per-probe timing jitter and no Layer-3/IP-header control (decoys, frag,
+    /// TTL tricks, source spoof, IP options, rotation). Custom source port,
+    /// padding and bad-checksum are baked into the TCP segment by
+    /// `build_tcp_segment`, so they ride along unchanged and stay batch-safe.
+    #[cfg(target_os = "linux")]
+    fn batch_eligible(&self) -> bool {
+        !self.evasion.needs_layer3()
+            && matches!(self.evasion.jitter, crate::evasion::JitterMode::None)
+    }
+
+    /// Fase 30 (Linux): burst-send every probe in `ports` with a single
+    /// `sendmmsg(2)` (per up-to-1024 probes) instead of one `send_to` syscall
+    /// each. The send half mirrors `send_probe()`'s Layer4 branch exactly —
+    /// same `build_tcp_segment` call, same pending-map insert keyed on
+    /// `(dst_ip, port)` — so the packets on the wire and the reply demux are
+    /// identical; only the syscall count drops. Returns the per-port receivers
+    /// in the same shape the fast engine's collect loop already consumes.
+    #[cfg(target_os = "linux")]
+    fn send_probe_batch(
+        &self,
+        batch: &linux_batch::LinuxBatchSender,
+        src_ip: Ipv4Addr,
+        dst_ip: Ipv4Addr,
+        ports: &[u16],
+        kind: RawTcpKind,
+    ) -> Vec<(u16, mpsc::Receiver<Response>)> {
+        let mut rng = rand::thread_rng();
+        let ev = self.evasion.clone(); // passive — guaranteed by batch_eligible()
+        let mut pairs: Vec<(u16, mpsc::Receiver<Response>)> = Vec::with_capacity(ports.len());
+        let mut segs: Vec<Vec<u8>> = Vec::with_capacity(ports.len());
+        for &p in ports {
+            let src_port: u16 = ev.source_port.unwrap_or_else(|| rng.gen_range(40000..60000));
+            let flags = ev.effective_flags(kind.flags());
+            let seg = evasion::build_tcp_segment(src_ip, dst_ip, p, flags, rng.gen(), src_port, &ev);
+            let (sender, receiver) = mpsc::channel::<Response>();
+            self.pending.lock().unwrap().insert((dst_ip, p), sender);
+            segs.push(seg);
+            pairs.push((p, receiver));
+        }
+        let sent = batch.send_batch(dst_ip, &segs);
+        if TRACE_ENABLED.load(Ordering::Relaxed) {
+            eprintln!(
+                "[raw-tx] sendmmsg burst {} → {} ports ({} queued)",
+                dst_ip,
+                ports.len(),
+                sent
+            );
+        }
+        pairs
+    }
+}
+
+/// Fase 30 (Linux only): batched raw-send engine. A send-only `SOCK_RAW` /
+/// `IPPROTO_TCP` socket with `IP_HDRINCL` OFF — so the kernel prepends the IP
+/// header exactly like pnet's Layer4 sender — fed many probe segments per
+/// `sendmmsg(2)` call (the kernel caps a batch at 1024 messages). Replies are
+/// demuxed by the existing pnet receiver thread via the scanner's pending map;
+/// this socket is never read from. Collapsing N `send_to` syscalls into ~N/1024
+/// is the real throughput lever behind `--fast-engine` on Linux.
+#[cfg(target_os = "linux")]
+mod linux_batch {
+    use std::io;
+    use std::mem;
+    use std::net::Ipv4Addr;
+    use std::os::unix::io::RawFd;
+
+    pub struct LinuxBatchSender {
+        fd: RawFd,
+    }
+
+    impl LinuxBatchSender {
+        pub fn new() -> io::Result<Self> {
+            // SOCK_RAW + IPPROTO_TCP, IP_HDRINCL left off → we supply the TCP
+            // segment and the kernel builds the IP header, matching the Layer4
+            // path byte-for-byte.
+            let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_TCP) };
+            if fd < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // Enlarge the send buffer so a wide burst (e.g. full-65535) does not
+            // hit ENOBUFS part-way; any shortfall still degrades safely to the
+            // retransmit round.
+            let bufsz: libc::c_int = 4 * 1024 * 1024;
+            unsafe {
+                libc::setsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_SNDBUF,
+                    &bufsz as *const _ as *const libc::c_void,
+                    mem::size_of::<libc::c_int>() as libc::socklen_t,
+                );
+            }
+            Ok(Self { fd })
+        }
+
+        /// Send every segment in `segments` to `dst` in as few `sendmmsg(2)`
+        /// calls as the 1024-message kernel cap allows. Returns the number the
+        /// kernel accepted; any shortfall is left to the caller's retransmit
+        /// round (unsent ports simply surface as no-reply).
+        pub fn send_batch(&self, dst: Ipv4Addr, segments: &[Vec<u8>]) -> usize {
+            if segments.is_empty() {
+                return 0;
+            }
+            // Destination address: for an IPPROTO_TCP raw socket the port field
+            // is ignored (the real dst port lives in the TCP header); only the
+            // address is used, for routing.
+            let mut addr: libc::sockaddr_in = unsafe { mem::zeroed() };
+            addr.sin_family = libc::AF_INET as libc::sa_family_t;
+            addr.sin_port = 0;
+            addr.sin_addr.s_addr = u32::from_ne_bytes(dst.octets());
+            let addr_ptr = &mut addr as *mut libc::sockaddr_in as *mut libc::c_void;
+            let addr_len = mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+
+            // One single-buffer iovec + mmsghdr per segment. `iovecs` and
+            // `segments` must outlive the syscalls below — both are alive for
+            // the whole function, and the raw pointers into them are only read
+            // by the kernel during each `sendmmsg`.
+            let mut iovecs: Vec<libc::iovec> = segments
+                .iter()
+                .map(|s| libc::iovec {
+                    iov_base: s.as_ptr() as *mut libc::c_void,
+                    iov_len: s.len(),
+                })
+                .collect();
+            let mut msgs: Vec<libc::mmsghdr> = iovecs
+                .iter_mut()
+                .map(|iov| {
+                    let mut m: libc::mmsghdr = unsafe { mem::zeroed() };
+                    m.msg_hdr.msg_name = addr_ptr;
+                    m.msg_hdr.msg_namelen = addr_len;
+                    m.msg_hdr.msg_iov = iov as *mut libc::iovec;
+                    m.msg_hdr.msg_iovlen = 1;
+                    m
+                })
+                .collect();
+
+            let mut sent = 0usize;
+            while sent < msgs.len() {
+                let chunk = (msgs.len() - sent).min(1024);
+                let n = unsafe {
+                    libc::sendmmsg(self.fd, msgs[sent..].as_mut_ptr(), chunk as libc::c_uint, 0)
+                };
+                if n <= 0 {
+                    break; // error or nothing accepted → leave the rest to retransmit
+                }
+                sent += n as usize;
+                if (n as usize) < chunk {
+                    break; // partial (send-buffer pressure) → stop; retransmit covers it
+                }
+            }
+            sent
+        }
+    }
+
+    impl Drop for LinuxBatchSender {
+        fn drop(&mut self) {
+            unsafe {
+                libc::close(self.fd);
+            }
+        }
+    }
 }
 
 /// Map a raw reply to a port state for a given scan kind (shared by `probe`'s
@@ -566,17 +730,42 @@ pub fn run_raw_tcp_fast(
     let mut state: HashMap<u16, PortState> = HashMap::new();
     let mut todo: Vec<u16> = ports.iter().copied().collect();
 
+    // Fase 30 (Linux): when evasion is passive, swap the per-probe send loop
+    // for a single `sendmmsg(2)` burst (N sends → ~N/1024 syscalls) — the real
+    // throughput lever. Built once per host, reused across retransmit rounds.
+    // Any other platform, or active evasion, keeps the per-probe path below.
+    #[cfg(target_os = "linux")]
+    let batch: Option<linux_batch::LinuxBatchSender> = if scanner.batch_eligible() {
+        linux_batch::LinuxBatchSender::new().ok()
+    } else {
+        None
+    };
+
     for _ in 0..=max_retries {
         if todo.is_empty() {
             break;
         }
         // ── burst: send every pending probe without waiting ──
         let burst_start = Instant::now();
-        let mut pend: Vec<(u16, mpsc::Receiver<Response>)> = Vec::with_capacity(todo.len());
-        for &p in &todo {
-            let rx = scanner.send_probe(src, dst, p, kind);
-            pend.push((p, rx));
-        }
+        #[cfg(target_os = "linux")]
+        let mut pend: Vec<(u16, mpsc::Receiver<Response>)> = match batch {
+            Some(ref b) => scanner.send_probe_batch(b, src, dst, &todo, kind),
+            None => {
+                let mut v = Vec::with_capacity(todo.len());
+                for &p in &todo {
+                    v.push((p, scanner.send_probe(src, dst, p, kind)));
+                }
+                v
+            }
+        };
+        #[cfg(not(target_os = "linux"))]
+        let mut pend: Vec<(u16, mpsc::Receiver<Response>)> = {
+            let mut v = Vec::with_capacity(todo.len());
+            for &p in &todo {
+                v.push((p, scanner.send_probe(src, dst, p, kind)));
+            }
+            v
+        };
         // ── collect: poll the channels until an ADAPTIVE window elapses ──
         // The window shrinks toward ~10×RTT once a few replies have been seen
         // (shared across hosts in a sweep via the scanner's RTT EWMA) — exactly

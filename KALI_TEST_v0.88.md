@@ -61,6 +61,18 @@ coincidere (open/closed/filtered). Poi confronta con nmap.
 > posto (uscita anticipata). Se il fast è ancora molto più lento del default su
 > host firewallati → riportamelo.
 
+> **v0.88.2 — batch `sendmmsg` ATTIVO (il vero win di throughput).** Su Linux,
+> con `--fast-engine` + evasione passiva, il motore ora manda i probe di ogni
+> round con **un solo `sendmmsg(2)` ogni ≤1024 porte** invece di N `send_to`.
+> Stessi pacchetti sul filo (il kernel costruisce l'header IP come il path
+> Layer4; i segmenti TCP vengono dallo stesso `build_tcp_segment`). **Conferma
+> che il path batch si attiva:** `sudo $RM --sS --fast-engine -F $SERVER
+> --trace-raw 2>&1 | grep 'sendmmsg burst'` → deve stampare righe
+> `sendmmsg burst <ip> → N ports (N queued)`. **Atteso in F2:** ora il fast
+> dovrebbe **raggiungere/battere** il default anche su sweep `-F` /24 e
+> full-65535 (dove v0.88.1 restava 1.1–1.2× indietro). Se con evasione attiva
+> (`--evasion …`) o su scan non-raw il path resta quello per-probe → corretto.
+
 ```sh
 hyperfine -w1 -r5 \
   "sudo $RM --sS -F $NET --no-builtin-scripts" \

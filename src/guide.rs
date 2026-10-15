@@ -255,7 +255,7 @@ pub fn print_guide() {
     line("                      filtered su LAN non costa più l'intero timeout");
     line("--scan-delay MS       Ritardo fra probe per host");
     line("--adaptive            Rate limiting adattivo (auto-tune)");
-    line("--fast-engine         [sperimentale] motore raw burst-send + collect async");
+    line("--fast-engine         [sperimentale] motore raw burst-send + collect async (Linux: batch sendmmsg)");
     line("                      per --sS/--sU-family (meno thread; opt-in, in bench vs default)");
     example("rustymap -t4 --max-parallel 1000 10.0.0.0/24");
     example("sudo rustymap --sS --fast-engine -F 10.0.0.0/24   # engine sperimentale");

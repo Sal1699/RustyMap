@@ -4,6 +4,45 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.88.2] - 2026-10-15
+
+**Fase 30 — Linux `sendmmsg(2)` batched burst for `--fast-engine`.** The real
+throughput lever: collapse N per-probe `send_to` syscalls into ~N/1024
+`sendmmsg` calls. No new flags (same `--fast-engine`). 611/611 tests.
+
+### Added
+- **`sendmmsg` burst path** (`raw_scan::linux_batch`, `#[cfg(target_os =
+  "linux")]`). When `--fast-engine` is on, evasion is passive, and the OS is
+  Linux, the fast engine's per-round send loop is replaced by a single
+  `sendmmsg(2)` per up to 1024 probes on a dedicated send-only `SOCK_RAW` /
+  `IPPROTO_TCP` socket. `IP_HDRINCL` is left **off**, so the kernel builds the
+  IP header exactly as pnet's Layer4 sender does, and the TCP segments come
+  from the **same** `evasion::build_tcp_segment` call as the per-probe path —
+  so the packets on the wire are identical; only the syscall count drops.
+  Replies are demuxed by the existing pnet receiver thread via the unchanged
+  `(dst_ip, port)` pending map; the batch socket is never read from.
+- `RawTcpScanner::batch_eligible` (passive-evasion + Linux gate) and
+  `send_probe_batch` (bulk pending-insert + segment build, mirroring
+  `send_probe`). `--trace-raw` prints `sendmmsg burst … (N queued)` when the
+  batch path engages.
+
+### Notes
+- **Gated to passive evasion.** Decoys, fragmentation, TTL tricks, source
+  spoof, IP options, rotation (all `needs_layer3`) and per-probe timing jitter
+  keep the per-probe path — batching would change their on-wire timing/headers.
+  Custom source port, padding and bad-checksum ride inside the TCP segment, so
+  they stay batch-safe.
+- **Degrades safely.** A partial/failed `sendmmsg` (send-buffer pressure) just
+  leaves unsent ports to the normal retransmit round (`--max-retries`).
+- **Cross-verified without Kali where possible.** Windows build + 611 tests
+  green (the module is `cfg`-excluded there); the Linux FFI (every `libc`
+  symbol, `mmsghdr`/`sockaddr_in`/`iovec` field, and the `sendmmsg` signature)
+  was type-checked in isolation for `x86_64-unknown-linux-gnu` (`cargo check`,
+  no link). The full raw path still needs **Kali** to compile end-to-end
+  (`cargo build --release`) and to confirm (a) `--fast-engine` correctness ==
+  default path and (b) throughput — now expecting fast ≥ default on the SYN
+  `-F` /24 sweep and full-65535, which v0.88.1 left ~1.1–1.2× behind.
+
 ## [0.88.1] - 2026-10-15
 
 **Fase 30 follow-up — adaptive collect window for `--fast-engine`.** Fixes a
