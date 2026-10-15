@@ -255,10 +255,14 @@ pub fn print_guide() {
     line("                      filtered su LAN non costa più l'intero timeout");
     line("--scan-delay MS       Ritardo fra probe per host");
     line("--adaptive            Rate limiting adattivo (auto-tune)");
-    line("--fast-engine         [sperimentale] motore raw burst-send + collect async (Linux: batch sendmmsg)");
-    line("                      per --sS/--sU-family (meno thread; opt-in, in bench vs default)");
+    line("  Motore raw (scan --sS/--sA/--sW/--sF/--sN/--sX/--sM):");
+    line("  il motore veloce (burst-send + collect async; su Linux batch sendmmsg) è ora");
+    line("  il DEFAULT — più veloce di nmap sugli scenari testati (sweep/full-port/SYN/ACK).");
+    line("--legacy-engine       torna al vecchio path per-probe (send→attendi→prossimo)");
+    line("--fast-engine         [deprecato] no-op: il motore veloce è già il default");
     example("rustymap -t4 --max-parallel 1000 10.0.0.0/24");
-    example("sudo rustymap --sS --fast-engine -F 10.0.0.0/24   # engine sperimentale");
+    example("sudo rustymap --sS -F 10.0.0.0/24                 # motore veloce (default)");
+    example("sudo rustymap --sS -F --legacy-engine 10.0.0.0/24 # path per-probe legacy");
     example("rustymap -t1 --scan-delay 500 10.0.0.5   # low-and-slow");
     example("rustymap --adaptive 10.0.0.0/24");
 

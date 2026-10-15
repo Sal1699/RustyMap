@@ -4,6 +4,38 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.88.3] - 2026-10-15
+
+**Fase 30 capstone — the fast raw engine is now the DEFAULT.** After the Kali
+validation (`VALIDATION_0.88.2.md`): F1 correctness == default path, F2 the
+fast engine beats both the default engine and nmap on every scenario (SYN `-F`
+/24 sweep flipped from 3.0× slower in v0.88.0 to 1.13× faster; full-65535
+1.76×; SYN 1-1000 2.29×; ACK 1.43×). 611/611 tests.
+
+### Changed
+- **Raw TCP scans (`--sS`/`--sA`/`--sW`/`--sF`/`--sN`/`--sX`/`--sM`) now use the
+  fast engine by default on all platforms** (burst-send + adaptive-collect; on
+  Linux the `sendmmsg(2)` batch). No flag needed.
+
+### Added
+- **`--legacy-engine`**: opt out of the fast engine and use the original
+  per-probe path (synchronous send→block→next, one thread per port chunk) — a
+  troubleshooting fallback. If both `--legacy-engine` and `--fast-engine` are
+  given, `--legacy-engine` wins.
+
+### Deprecated
+- **`--fast-engine`** is now a **no-op** (the fast engine is the default). The
+  flag is kept for backward compatibility and prints a one-line note pointing
+  at `--legacy-engine`.
+
+### Notes
+- Non-Linux (Windows/macOS) uses the fast engine's burst+adaptive-collect path
+  without the `sendmmsg` batch (same logic, validated on Linux; raw scans there
+  need admin/root anyway). `--legacy-engine` restores the old path everywhere.
+- Residuals (non-blocking, tracked for Fase 31): on lossy/rate-limited hosts
+  both engines find fewer ports than nmap (retransmit/pacing); FIN/NULL/Xmas
+  show ±1-2 port timing variance inherent to those scan types.
+
 ## [0.88.2] - 2026-10-15
 
 **Fase 30 — Linux `sendmmsg(2)` batched burst for `--fast-engine`.** The real

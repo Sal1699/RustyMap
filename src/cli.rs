@@ -571,11 +571,18 @@ pub struct Cli {
     #[arg(long = "max-retries", default_value_t = 2u8)]
     pub max_retries: u8,
 
-    /// Experimental fast raw engine (Fase 30): burst-send + async poll-collect
-    /// for --sS/--sU-family raw scans, instead of one thread per port chunk.
-    /// Opt-in while it's benchmarked vs the default path.
+    /// [DEPRECATED — now the default] The fast raw engine (Fase 30:
+    /// burst-send + async poll-collect; on Linux a sendmmsg(2) batch) is the
+    /// default for raw TCP scans on all platforms, so this flag is a no-op kept
+    /// for backward compatibility. Use --legacy-engine to opt out.
     #[arg(long = "fast-engine")]
     pub fast_engine: bool,
+
+    /// Opt out of the fast raw engine: use the original per-probe path
+    /// (synchronous send→block→next, one thread per port chunk). Fallback for
+    /// troubleshooting. If both this and --fast-engine are given, this wins.
+    #[arg(long = "legacy-engine")]
+    pub legacy_engine: bool,
 
     /// IP protocol scan — discover which IP protocols (TCP/UDP/ICMP/GRE/…) the target supports
     #[arg(long = "sO", group = "scan_type")]
