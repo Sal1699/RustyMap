@@ -222,3 +222,40 @@ Workflow:
 3. Make one change; re-run the relevant bench with `--baseline pre`.
 4. Keep it only if it's a real, correctness-preserving win; note it in the
    CHANGELOG.
+
+---
+
+## Fase 37 — speed consolidation + regression gate (v0.95.0)
+
+Consolidates the Fase 30 native engine and Fase 31 congestion control, and
+formalises the perf posture.
+
+### Concrete wins in this release
+- **Process-global DNS cache** (`src/dns_cache.rs`): reverse (PTR) lookups are
+  memoised behind a single shared `hickory` resolver instead of a fresh
+  resolver per call-site. A repeated IP across phases (`-R`, `-sL`,
+  cloud-fingerprint, reporting) is a cache hit, not another round-trip —
+  noticeable on `/24`+ sweeps with `-R`.
+
+### Regression gate (release-blocking)
+A release is **blocked** if `--fast-engine` (or the default raw path) is more
+than **10% slower than nmap** on any of the four reference scenarios, measured
+with `hyperfine` in the same session (nmap as the control — if the control
+swings >2× the run is noisy, re-run):
+
+| Scenario | Command shape |
+|----------|---------------|
+| SYN sweep /24 | `--sS -F <net/24>` vs `nmap -sS -F` |
+| Full-TCP host | `--sS -p 1-65535 <host>` vs `nmap -sS -p-` |
+| Service detect | `--sV` on ~50 hosts vs `nmap -sV` |
+| OS detect | `-O` on ~10 hosts vs `nmap -O` |
+
+The harness is `benches/lab_compare.rs` (Criterion micro-baselines, >10% gate)
+plus the hyperfine e2e table above. Numbers are recorded per Kali run in the
+`VALIDATION_*.md` reports and summarised here.
+
+### Still to do on Kali (needs `perf`/root)
+- **Flamegraph of the hot paths** (`cargo flamegraph` under load) to pick the
+  next lock-free / allocation wins — profiling the raw send/collect loop and the
+  `nmap-os-db` scorer needs a Linux target and privileges, so it is the Kali
+  step rather than a Windows-dev-box change.

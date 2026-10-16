@@ -8,6 +8,7 @@ mod cve;
 mod db;
 mod device_fp;
 mod dns;
+mod dns_cache;
 mod discovery;
 mod evasion;
 mod examples;
@@ -2004,17 +2005,12 @@ async fn run(mut args: Cli) -> Result<()> {
 
     // -R: force reverse DNS for each target so output shows hostnames.
     if args.force_reverse_dns && !args.no_dns {
-        if let Ok(resolver) =
-            hickory_resolver::TokioAsyncResolver::tokio_from_system_conf()
-        {
-            for t in targets.iter_mut() {
-                if t.hostname.is_none() {
-                    if let Ok(rev) = resolver.reverse_lookup(t.ip).await {
-                        if let Some(name) = rev.iter().next() {
-                            t.hostname =
-                                Some(name.to_string().trim_end_matches('.').to_string());
-                        }
-                    }
+        // Fase 37: shared, memoised reverse lookups (one resolver, cached
+        // process-wide) instead of a fresh resolver here.
+        for t in targets.iter_mut() {
+            if t.hostname.is_none() {
+                if let Some(name) = dns_cache::reverse(t.ip).await {
+                    t.hostname = Some(name);
                 }
             }
         }
@@ -2304,19 +2300,10 @@ async fn run(mut args: Cli) -> Result<()> {
             "\n{:<22} {:<6}  {:<22}  HOSTNAME / NOTE",
             "ADDRESS", "FAM", "PTR"
         );
-        let resolver = if !args.no_dns {
-            hickory_resolver::TokioAsyncResolver::tokio_from_system_conf().ok()
-        } else {
-            None
-        };
         for t in &targets {
             let fam = if t.ip.is_ipv4() { "ipv4" } else { "ipv6" };
-            let ptr = if let Some(r) = &resolver {
-                r.reverse_lookup(t.ip)
-                    .await
-                    .ok()
-                    .and_then(|l| l.iter().next().map(|n| n.to_string().trim_end_matches('.').to_string()))
-                    .unwrap_or_else(|| "-".into())
+            let ptr = if !args.no_dns {
+                dns_cache::reverse(t.ip).await.unwrap_or_else(|| "-".into())
             } else {
                 "-".into()
             };

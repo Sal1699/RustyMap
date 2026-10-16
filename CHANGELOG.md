@@ -4,6 +4,31 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.95.0] - 2026-10-16
+
+**Fase 37 — speed consolidation + regression gate.** 647/647 tests (+2). Last
+of the 9 feature phases (29→37); the v1.0 portfolio-polish cut (Fase 26) is the
+only remaining step and needs explicit sign-off.
+
+### Added
+- **Process-global DNS cache** (`dns_cache`): reverse (PTR) lookups now go
+  through one shared `hickory` resolver with a process-wide memo, instead of a
+  fresh resolver per call-site. A repeated IP across phases (`-R`, `-sL`,
+  cloud-fingerprint, reporting) becomes a cache hit — a measurable win on `/24`+
+  sweeps with reverse DNS. `-R` and `-sL` reverse lookups rewired through it.
+
+### Changed / docs
+- `PERFORMANCE.md` gains a formal **regression gate**: a release is blocked if
+  the raw engine is >10% slower than nmap on any of the four reference
+  scenarios (SYN `/24`, full-TCP host, `-sV` ~50 hosts, `-O` ~10 hosts),
+  measured same-session with nmap as the control. Harness: `benches/lab_compare.rs`
+  + the hyperfine e2e table.
+
+### Still to do on Kali
+- Flamegraph profiling of the raw send/collect loop and the `nmap-os-db` scorer
+  (`cargo flamegraph` under load) to pick the next lock-free/allocation wins —
+  needs a Linux target + `perf`, so it is a Kali step, not a Windows-dev change.
+
 ## [0.94.0] - 2026-10-16
 
 **Fase 36 — reports & output: SARIF export + service categorisation.** 645/645
