@@ -41,6 +41,7 @@ impl DnsCache {
     }
 
     /// (hits, misses) — surfaced for perf diagnostics.
+    #[allow(dead_code)]
     pub fn stats(&self) -> (u64, u64) {
         (self.hits, self.misses)
     }
@@ -74,7 +75,9 @@ pub async fn reverse(ip: IpAddr) -> Option<String> {
     name
 }
 
-/// Process-wide (hits, misses) for the reverse-DNS cache.
+/// Process-wide (hits, misses) for the reverse-DNS cache. Reserved for perf
+/// diagnostics / a future `--scan-stats` line.
+#[allow(dead_code)]
 pub fn global_stats() -> (u64, u64) {
     cache().lock().unwrap().stats()
 }

@@ -114,13 +114,17 @@ pub fn secrets_in_body(body: &str) -> Vec<String> {
 }
 
 /// SSTI reflection check: did a `7*7`-style probe get evaluated to `49` in the
-/// response (and not merely echoed back as the literal expression)?
+/// response (and not merely echoed back as the literal expression)? Reserved
+/// for the active-probe pass (the detection logic is unit-tested here).
+#[allow(dead_code)]
 pub fn ssti_reflected(body: &str, probe: &str) -> bool {
     body.contains("49") && !body.contains(probe)
 }
 
 /// Open-redirect check: does the `Location` header send the client to the
-/// attacker-controlled host we injected?
+/// attacker-controlled host we injected? Reserved for the active-probe pass
+/// (the detection logic is unit-tested here).
+#[allow(dead_code)]
 pub fn open_redirect_vulnerable(location: &str, payload_host: &str) -> bool {
     let l = location.trim().to_lowercase();
     let p = payload_host.to_lowercase();

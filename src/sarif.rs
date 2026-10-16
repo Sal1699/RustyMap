@@ -37,7 +37,7 @@ pub fn to_sarif(hosts: &[HostResult], findings: &[Finding], version: &str) -> St
     let mut rules: BTreeMap<String, Value> = BTreeMap::new();
     let mut results: Vec<Value> = Vec::new();
 
-    let mut add_rule = |rules: &mut BTreeMap<String, Value>, id: &str, desc: &str| {
+    let add_rule = |rules: &mut BTreeMap<String, Value>, id: &str, desc: &str| {
         rules.entry(id.to_string()).or_insert_with(|| {
             json!({
                 "id": id,
