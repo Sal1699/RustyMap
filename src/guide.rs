@@ -87,7 +87,10 @@ pub fn print_guide() {
     line("                      actuator-heapdump/swagger/graphql/backup/ssh-key),");
     line("                      metodi HTTP pericolosi (PUT/DELETE/TRACE), CORS");
     line("                      reflection, flag cookie. Soft-404 baseline per");
-    line("                      sopprimere i falsi positivi sui server catch-all");
+    line("                      sopprimere i falsi positivi sui server catch-all.");
+    line("                      Fase 33: tech-fingerprint (CMS/framework/lib/versione),");
+    line("                      analisi CSP/COOP/COEP, scoperta endpoint da HTML/JS,");
+    line("                      secret leak nel body");
     line("--tls-scan            HTTPS/TLS: matrice versioni 1.0-1.3, ALPN (h2/");
     line("                      http1.1), HSTS, fingerprint attivo JARM, e");
     line("                      certificato (subject/issuer/SAN/scadenza + flag");

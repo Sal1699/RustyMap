@@ -140,6 +140,7 @@ mod tls_probe;
 mod tls_scan;
 mod topology_svg;
 mod web_crawl;
+mod web_modern;
 mod web_scan;
 mod wizard;
 mod top_ports;

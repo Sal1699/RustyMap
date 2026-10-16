@@ -268,6 +268,91 @@ static RULES: Lazy<Vec<WebRule>> = Lazy::new(|| {
             version: None,
             category: Other,
         },
+        // ── Fase 33: expanded frameworks / libs / servers ──
+        WebRule {
+            name: "React",
+            marker: Regex::new(r"(?i)data-reactroot|react(?:-dom)?(?:\.production)?\.min\.js|__REACT_DEVTOOLS").unwrap(),
+            version: None,
+            category: Framework,
+        },
+        WebRule {
+            name: "Vue.js",
+            marker: Regex::new(r"(?i)data-v-[0-9a-f]{8}|vue(?:\.runtime)?(?:\.global)?(?:\.prod)?\.js|__vue__").unwrap(),
+            version: Some(Regex::new(r"(?i)vue@([\d.]+)").unwrap()),
+            category: Framework,
+        },
+        WebRule {
+            name: "Angular",
+            marker: Regex::new(r"(?i)ng-version=|_nghost-|angular(?:\.min)?\.js").unwrap(),
+            version: Some(Regex::new(r#"(?i)ng-version="([\d.]+)""#).unwrap()),
+            category: Framework,
+        },
+        WebRule {
+            name: "Svelte",
+            marker: Regex::new(r"(?i)svelte-[0-9a-z]{6}|__svelte").unwrap(),
+            version: None,
+            category: Framework,
+        },
+        WebRule {
+            name: "Laravel",
+            marker: Regex::new(r"(?i)laravel_session|x-powered-by:\s*php.*laravel|/vendor/laravel/").unwrap(),
+            version: None,
+            category: Framework,
+        },
+        WebRule {
+            name: "Django",
+            marker: Regex::new(r"(?i)csrftoken|__admin__|x-frame-options:\s*deny.*wsgi|django").unwrap(),
+            version: None,
+            category: Framework,
+        },
+        WebRule {
+            name: "Ruby on Rails",
+            marker: Regex::new(r"(?i)x-powered-by:\s*phusion passenger|csrf-param|_rails|x-runtime:").unwrap(),
+            version: None,
+            category: Framework,
+        },
+        WebRule {
+            name: "ASP.NET",
+            marker: Regex::new(r"(?i)x-aspnet-version|x-powered-by:\s*asp\.net|__viewstate").unwrap(),
+            version: Some(Regex::new(r"(?i)x-aspnet-version:\s*([\d.]+)").unwrap()),
+            category: Framework,
+        },
+        WebRule {
+            name: "Spring",
+            marker: Regex::new(r"(?i)x-application-context|jsessionid|/webjars/|org\.springframework").unwrap(),
+            version: None,
+            category: Framework,
+        },
+        WebRule {
+            name: "jQuery",
+            marker: Regex::new(r"(?i)jquery(?:-|\.)[\d.]+(?:\.min)?\.js|jquery\.js").unwrap(),
+            version: Some(Regex::new(r"(?i)jquery[-/]([\d.]+)(?:\.min)?\.js").unwrap()),
+            category: JsLibrary,
+        },
+        WebRule {
+            name: "Bootstrap",
+            marker: Regex::new(r"(?i)bootstrap(?:\.min)?\.(?:css|js)|class=.(?:container-fluid|col-md-)").unwrap(),
+            version: Some(Regex::new(r"(?i)bootstrap[@/]([\d.]+)").unwrap()),
+            category: JsLibrary,
+        },
+        WebRule {
+            name: "Cloudflare",
+            marker: Regex::new(r"(?i)server:\s*cloudflare|cf-ray:|__cf_bm").unwrap(),
+            version: None,
+            category: Cdn,
+        },
+        WebRule {
+            name: "Vercel",
+            marker: Regex::new(r"(?i)server:\s*vercel|x-vercel-id:").unwrap(),
+            version: None,
+            category: Cloud,
+        },
+        WebRule {
+            name: "Netlify",
+            marker: Regex::new(r"(?i)server:\s*netlify|x-nf-request-id:").unwrap(),
+            version: None,
+            category: Cloud,
+        },
     ]
 });
 

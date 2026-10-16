@@ -4,6 +4,38 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.91.0] - 2026-10-16
+
+**Fase 33 — modern `--web-scan`.** Tech fingerprinting, CSP/COOP/COEP analysis,
+endpoint discovery and secret detection on top of the existing attack-surface
+checks. 628/628 tests (+6).
+
+### Added
+- **Tech fingerprint** surfaced in the web-scan report: `web_fp` now recognises
+  React, Vue, Angular, Svelte, Laravel, Django, Rails, ASP.NET (with version),
+  Spring, jQuery (version), Bootstrap, Cloudflare, Vercel, Netlify — on top of
+  the existing CMS/server set. Shown as a `Tech:` line.
+- **`web_modern` module** (pure, unit-tested):
+  - `analyze_csp` — flags missing CSP, `unsafe-inline`/`unsafe-eval`, wildcard
+    sources, `data:` script sources, missing `frame-ancestors`, and missing
+    COOP/COEP. Reported as `CSP:` lines.
+  - `extract_endpoints` — pulls API/route paths from the landing page's HTML/JS
+    (`href`/`src`, `fetch`/`axios`/`XHR` calls, quoted paths), skipping static
+    assets. Shown as an `Endpoints:` line.
+  - `secrets_in_body` — runs the shared secret-pattern matcher over the page
+    body (leaked keys/tokens) → `secrets:` line.
+  - `ssti_reflected` / `open_redirect_vulnerable` — reflection-check helpers for
+    the SSTI and open-redirect probes.
+- `WebScanResult` gained `tech` / `csp_issues` / `endpoints` / `secrets`
+  (serde-default; JSON/report carry them).
+
+### Notes
+- GraphQL-introspection, OpenAPI/Swagger, `security.txt` and OIDC-discovery
+  paths were already in the sensitive-path prober.
+- Headless screenshot stays out by default (consistent with the project's
+  no-headless-by-default choice); the SSTI / open-redirect *active* probes are
+  the detection helpers wired for a later active-probe pass.
+
 ## [0.90.0] - 2026-10-16
 
 **Fase 32 — service-probe parity: `-sV` behind TLS.** Closes the long-standing

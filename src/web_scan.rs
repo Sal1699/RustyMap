@@ -108,6 +108,18 @@ pub struct WebScanResult {
     /// were suppressed to avoid false positives (v0.82 bug #6). New v0.82.
     #[serde(default)]
     pub catch_all: bool,
+    /// Wappalyzer-style tech fingerprint (CMS/framework/lib/server). Fase 33.
+    #[serde(default)]
+    pub tech: Vec<String>,
+    /// CSP / COOP / COEP weaknesses. Fase 33.
+    #[serde(default)]
+    pub csp_issues: Vec<String>,
+    /// Endpoints/API paths discovered in the landing page's HTML/JS. Fase 33.
+    #[serde(default)]
+    pub endpoints: Vec<String>,
+    /// Secret-pattern hits in the landing page body (keys/tokens). Fase 33.
+    #[serde(default)]
+    pub secrets: Vec<String>,
 }
 
 /// Grade the response's security headers A–F and list what's missing.
@@ -416,6 +428,17 @@ pub async fn scan_port(ip: IpAddr, port: u16, sni: Option<String>, dur: Duration
         }
     }
 
+    // Fase 33: tech fingerprint + CSP/COOP/COEP analysis + endpoint & secret
+    // discovery from the landing page (headers + body already in hand).
+    let fp_input = format!("{}\n{}", headers, body);
+    let tech: Vec<String> = crate::web_fp::detect(&fp_input)
+        .into_iter()
+        .map(|h| h.label())
+        .collect();
+    let csp_issues = crate::web_modern::analyze_csp(&hlow);
+    let endpoints = crate::web_modern::extract_endpoints(&body);
+    let secrets = crate::web_modern::secrets_in_body(&body);
+
     Some(WebScanResult {
         port,
         scheme: scheme.to_string(),
@@ -428,6 +451,10 @@ pub async fn scan_port(ip: IpAddr, port: u16, sni: Option<String>, dur: Duration
         risky_methods,
         cors,
         catch_all,
+        tech,
+        csp_issues,
+        endpoints,
+        secrets,
     })
 }
 
@@ -477,6 +504,27 @@ pub fn print_report(host: &str, results: &[WebScanResult]) {
         }
         if r.exposures.is_empty() {
             println!("    {}", "no sensitive paths exposed".dimmed());
+        }
+        if !r.tech.is_empty() {
+            println!("    Tech          : {}", r.tech.join(", ").cyan());
+        }
+        for c in &r.csp_issues {
+            println!("    {} {}", "CSP:".dimmed(), c.yellow());
+        }
+        if !r.secrets.is_empty() {
+            println!("    {} {}", "secrets:".red(), r.secrets.join(", ").red());
+        }
+        if !r.endpoints.is_empty() {
+            let shown: Vec<_> = r.endpoints.iter().take(12).cloned().collect();
+            println!(
+                "    Endpoints     : {}{}",
+                shown.join(", ").dimmed(),
+                if r.endpoints.len() > shown.len() {
+                    format!(" (+{} more)", r.endpoints.len() - shown.len())
+                } else {
+                    String::new()
+                }
+            );
         }
     }
 }
