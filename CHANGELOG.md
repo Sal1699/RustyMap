@@ -4,6 +4,57 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.89.0] - 2026-10-16
+
+**Fase 31 — congestion control for the raw fast engine.** A cwnd-style
+in-flight window with AIMD + a precise rate pacer, so `--fast-engine` stops
+flooding on big scans and backs off on rate-limiting hosts. 617/617 tests
+(+6). No behaviour change to the default per-probe path or the connect path
+(which already has `--adaptive`).
+
+### Added
+- **`CongestionWindow`** (`rate.rs`): a TCP-style window bounding how many
+  probes the fast engine keeps in flight. Slow-start ramp, then AIMD — a wave
+  that drops a large fraction of probes **on a host that is otherwise
+  answering** halves the window (rate-limit/congestion back-off, so lost
+  "open" results are recovered on the next, gentler wave); a clean wave grows
+  it. A silent/filtered host (no replies at all) is **not** treated as
+  congestion, so a filtered sweep still finishes fast. Clamped to
+  `[min, max]`.
+- **`RatePacer`** (`rate.rs`): a single-threaded token-bucket making
+  `--max-rate` a precise packets/sec ceiling on the fast engine (not just the
+  old `scan-delay` approximation).
+- **`--min-rate PPS`**: raises the congestion-window floor so back-off can't
+  throttle the fast engine below roughly this rate.
+- The fast engine now sends each retransmit round in **cwnd-sized waves**
+  instead of one unbounded burst. `--max-parallel` caps the window.
+
+### Why
+- Fixes the v0.88.3 full-port instability at the root: the old fast engine
+  burst *every* port at once (up to 65535), outrunning the single receiver and
+  tripping host RST rate-limiting → dropped replies, lost opens, σ≈19s
+  variance. A bounded, self-tuning window keeps the wire busy without
+  overrunning it.
+- Delivers the lab-tracked "router loses open under flood" item: on a
+  rate-limiting host the window shrinks and the dropped opens come back.
+
+### Still partial / deferred
+- **ICMP type-3 rate-limit signal** (code 13 admin-prohibited / code 4 frag /
+  code 3 port-unreach) is **not yet wired** — the back-off is driven by reply
+  drops only. Capturing ICMP alongside the TCP raw socket needs a separate
+  receiver and is untestable on the Windows dev box; deferred as a tuning
+  follow-up.
+- The congestion window applies to `--fast-engine` only; the default per-probe
+  path keeps its thread-bounded parallelism. Re-promoting the (now
+  congestion-controlled) fast engine to default is a separate step, after a
+  Kali re-bench confirms the full-port stability.
+
+### Verification
+- 617/617 tests incl. new `rate.rs` unit tests (slow-start, AIMD back-off,
+  filtered-host-stays-fast, min floor, pacer maths). The raw path itself needs
+  **Kali** (admin/root) to exercise — the window logic is pure and unit-tested;
+  the wiring is compile-verified.
+
 ## [0.88.4] - 2026-10-15
 
 **Revert the default-flip — the fast raw engine is OPT-IN again.** The Kali run

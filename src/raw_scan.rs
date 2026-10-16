@@ -703,12 +703,16 @@ pub fn run_raw_tcp_scan(
 /// v0.88.0 is the cross-platform restructure. The Linux `sendmmsg` batched
 /// burst (collapsing N send syscalls into ~N/50) is the v0.88.1 step, to be
 /// built + benchmarked on Kali. Opt-in until it beats the default path in lab.
+#[allow(clippy::too_many_arguments)]
 pub fn run_raw_tcp_fast(
     target: Target,
     ports: Arc<Vec<u16>>,
     kind: RawTcpKind,
     scanner: Arc<RawTcpScanner>,
     timeout: Duration,
+    max_window: usize,
+    min_rate: u32,
+    max_rate: u32,
 ) -> HostResult {
     let start = Instant::now();
     let dst = match target.ip {
@@ -730,9 +734,27 @@ pub fn run_raw_tcp_fast(
     let mut state: HashMap<u16, PortState> = HashMap::new();
     let mut todo: Vec<u16> = ports.iter().copied().collect();
 
+    // Fase 31 congestion control: bound how many probes are in flight at once
+    // with a cwnd-style window (AIMD) instead of bursting every port. A
+    // full-65535 burst used to outrun the single receiver / trip host RST
+    // rate-limiting, dropping replies and spiking variance (v0.88.3 lab run).
+    // The window ramps in slow-start, backs off when a *responding* host starts
+    // dropping (so lost opens are recovered on the next gentler wave), and a
+    // `--max-rate` pacer caps packets/sec. `--max-parallel` caps the window,
+    // `--min-rate` raises its floor.
+    let cw_max = max_window.max(1);
+    let cw_min = if min_rate > 0 {
+        ((min_rate as usize) / 100).clamp(16.min(cw_max), cw_max)
+    } else {
+        16.min(cw_max)
+    };
+    let cw_init = (cw_max / 8).clamp(cw_min, cw_max);
+    let mut cwnd = crate::rate::CongestionWindow::new(cw_init, cw_min, cw_max);
+    let mut pacer = crate::rate::RatePacer::new(max_rate);
+
     // Fase 30 (Linux): when evasion is passive, swap the per-probe send loop
-    // for a single `sendmmsg(2)` burst (N sends → ~N/1024 syscalls) — the real
-    // throughput lever. Built once per host, reused across retransmit rounds.
+    // for a single `sendmmsg(2)` burst per wave (N sends → ~N/1024 syscalls) —
+    // the real throughput lever. Built once per host, reused across waves/rounds.
     // Any other platform, or active evasion, keeps the per-probe path below.
     #[cfg(target_os = "linux")]
     let batch: Option<linux_batch::LinuxBatchSender> = if scanner.batch_eligible() {
@@ -745,73 +767,89 @@ pub fn run_raw_tcp_fast(
         if todo.is_empty() {
             break;
         }
-        // ── burst: send every pending probe without waiting ──
-        let burst_start = Instant::now();
-        #[cfg(target_os = "linux")]
-        let mut pend: Vec<(u16, mpsc::Receiver<Response>)> = match batch {
-            Some(ref b) => scanner.send_probe_batch(b, src, dst, &todo, kind),
-            None => {
-                let mut v = Vec::with_capacity(todo.len());
-                for &p in &todo {
+        // Send this round's ports in congestion-window-sized waves.
+        let round_ports = todo.clone();
+        let mut idx = 0usize;
+        while idx < round_ports.len() {
+            let wsize = cwnd.window().max(1);
+            let end = (idx + wsize).min(round_ports.len());
+            let wave = &round_ports[idx..end];
+            idx = end;
+
+            // Honour --max-rate before putting this wave on the wire.
+            pacer.pace(wave.len());
+
+            // ── burst the wave without waiting ──
+            let burst_start = Instant::now();
+            #[cfg(target_os = "linux")]
+            let mut pend: Vec<(u16, mpsc::Receiver<Response>)> = match batch {
+                Some(ref b) => scanner.send_probe_batch(b, src, dst, wave, kind),
+                None => {
+                    let mut v = Vec::with_capacity(wave.len());
+                    for &p in wave {
+                        v.push((p, scanner.send_probe(src, dst, p, kind)));
+                    }
+                    v
+                }
+            };
+            #[cfg(not(target_os = "linux"))]
+            let mut pend: Vec<(u16, mpsc::Receiver<Response>)> = {
+                let mut v = Vec::with_capacity(wave.len());
+                for &p in wave {
                     v.push((p, scanner.send_probe(src, dst, p, kind)));
                 }
                 v
-            }
-        };
-        #[cfg(not(target_os = "linux"))]
-        let mut pend: Vec<(u16, mpsc::Receiver<Response>)> = {
-            let mut v = Vec::with_capacity(todo.len());
-            for &p in &todo {
-                v.push((p, scanner.send_probe(src, dst, p, kind)));
-            }
-            v
-        };
-        // ── collect: poll the channels until an ADAPTIVE window elapses ──
-        // The window shrinks toward ~10×RTT once a few replies have been seen
-        // (shared across hosts in a sweep via the scanner's RTT EWMA) — exactly
-        // like the per-probe path. This matters because the loop below only
-        // breaks early once EVERY pending port has replied (`pend.is_empty()`);
-        // a dropped/filtered port never replies, so on a firewalled host `pend`
-        // stays non-empty and — with a fixed deadline — the round would burn the
-        // full `--timeout`. Adapting the window keeps firewalled sweeps from
-        // pinning at the worst case while open/closed ports still exit early.
-        let eff = crate::rate::adaptive_timeout(
-            timeout,
-            scanner.mean_rtt(),
-            crate::rate::timeout_floor(timeout),
-        );
-        let deadline = Instant::now() + eff;
-        let mut rtt_recorded = false;
-        while Instant::now() < deadline && !pend.is_empty() {
-            let mut still: Vec<(u16, mpsc::Receiver<Response>)> = Vec::with_capacity(pend.len());
-            for (p, rx) in pend.into_iter() {
-                match rx.try_recv() {
-                    Ok(resp) => {
-                        scanner.clear_pending(dst, p);
-                        // Feed the RTT EWMA once per round (first reply ≈ host
-                        // RTT for a fast burst) so the window adapts.
-                        if !rtt_recorded {
-                            scanner.record_rtt(burst_start.elapsed());
-                            rtt_recorded = true;
+            };
+
+            // ── collect: poll the channels until an ADAPTIVE window elapses ──
+            // The window shrinks toward ~10×RTT once a few replies have been
+            // seen (shared across hosts via the scanner's RTT EWMA). The loop
+            // breaks early once every pending port has replied; a dropped/
+            // filtered port never replies, so the adaptive window keeps a
+            // firewalled wave from burning the full `--timeout`.
+            let eff = crate::rate::adaptive_timeout(
+                timeout,
+                scanner.mean_rtt(),
+                crate::rate::timeout_floor(timeout),
+            );
+            let deadline = Instant::now() + eff;
+            let mut rtt_recorded = false;
+            let mut replies = 0usize;
+            while Instant::now() < deadline && !pend.is_empty() {
+                let mut still: Vec<(u16, mpsc::Receiver<Response>)> = Vec::with_capacity(pend.len());
+                for (p, rx) in pend.into_iter() {
+                    match rx.try_recv() {
+                        Ok(resp) => {
+                            scanner.clear_pending(dst, p);
+                            replies += 1;
+                            // First reply ≈ host RTT for the wave → feed the EWMA.
+                            if !rtt_recorded {
+                                scanner.record_rtt(burst_start.elapsed());
+                                rtt_recorded = true;
+                            }
+                            let st = response_to_state(resp, kind);
+                            // Only SYN-ACK / RST are terminal; "Other" → retransmit.
+                            if matches!(st, PortState::Open | PortState::Closed | PortState::Unfiltered) {
+                                state.insert(p, st);
+                            }
                         }
-                        let st = response_to_state(resp, kind);
-                        // Only SYN-ACK / RST are terminal; "Other" → retransmit.
-                        if matches!(st, PortState::Open | PortState::Closed | PortState::Unfiltered) {
-                            state.insert(p, st);
-                        }
+                        Err(mpsc::TryRecvError::Empty) => still.push((p, rx)),
+                        Err(mpsc::TryRecvError::Disconnected) => scanner.clear_pending(dst, p),
                     }
-                    Err(mpsc::TryRecvError::Empty) => still.push((p, rx)),
-                    Err(mpsc::TryRecvError::Disconnected) => scanner.clear_pending(dst, p),
                 }
+                pend = still;
+                if pend.is_empty() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(1));
             }
-            pend = still;
-            if pend.is_empty() {
-                break;
+            for (p, _rx) in pend {
+                scanner.clear_pending(dst, p);
             }
-            thread::sleep(Duration::from_millis(1));
-        }
-        for (p, _rx) in pend {
-            scanner.clear_pending(dst, p);
+
+            // Feed the wave outcome to the congestion window: a high drop ratio
+            // on a host that is answering → back off; a clean wave → grow.
+            cwnd.feed(wave.len(), replies);
         }
         todo = ports.iter().copied().filter(|p| !state.contains_key(p)).collect();
     }

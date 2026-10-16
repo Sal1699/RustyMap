@@ -944,6 +944,12 @@ pub struct Cli {
     #[arg(long = "max-rate", value_name = "PPS", default_value_t = 0)]
     pub max_rate: u32,
 
+    /// Floor for the raw fast-engine congestion window: keep sending at roughly
+    /// at least N packets/sec even when back-off kicks in (0 = no floor). Fase
+    /// 31 congestion control; only affects `--fast-engine`.
+    #[arg(long = "min-rate", value_name = "PPS", default_value_t = 0)]
+    pub min_rate: u32,
+
     /// Skip the CVE database baked into the binary (only use --cve-db)
     #[arg(long = "no-builtin-cves")]
     pub no_builtin_cves: bool,

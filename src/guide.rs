@@ -64,7 +64,8 @@ pub fn print_guide() {
     line("--iL FILE             Legge target da file (uno per riga, # commenti)");
     line("--oX FILE             Output XML compatibile nmap (zenmap/msf)");
     line("--decoy-random N      Aggiunge N decoy IP casuali ai --decoys");
-    line("--max-rate PPS        Cap a PPS pacchetti/sec (per-host, via scan-delay)");
+    line("--max-rate PPS        Cap a PPS pacchetti/sec (--fast-engine: pacer preciso; altrove via scan-delay)");
+    line("--min-rate PPS        Floor della finestra di congestione del --fast-engine (Fase 31)");
     line("--sF                  TCP FIN scan");
     line("--sN                  TCP NULL scan (nessun flag)");
     line("--sX                  TCP Xmas scan (FIN+PSH+URG)");
@@ -256,9 +257,10 @@ pub fn print_guide() {
     line("--scan-delay MS       Ritardo fra probe per host");
     line("--adaptive            Rate limiting adattivo (auto-tune)");
     line("--fast-engine         [sperimentale, opt-in] motore raw burst-send + collect async");
-    line("                      (Linux: batch sendmmsg) per --sS/--sA/--sW/--sF/--sN/--sX/--sM;");
-    line("                      veloce su sweep/SYN. OPT-IN finché la Fase 31 non lo irrobustisce");
-    line("                      sul full-port sotto carico (lì il path default per-probe è più stabile)");
+    line("                      (Linux: batch sendmmsg) per --sS/--sA/--sW/--sF/--sN/--sX/--sM.");
+    line("                      Fase 31: finestra di congestione (cwnd AIMD) limita i probe in volo");
+    line("                      — niente più flood sul full-port; --max-parallel la cappa, --max-rate");
+    line("                      la pace, --min-rate la floora. Da ri-validare prima di renderlo default.");
     example("rustymap -t4 --max-parallel 1000 10.0.0.0/24");
     example("sudo rustymap --sS --fast-engine -F 10.0.0.0/24   # engine sperimentale opt-in");
     example("rustymap -t1 --scan-delay 500 10.0.0.5   # low-and-slow");

@@ -179,6 +179,120 @@ impl AdaptiveLimiter {
     }
 }
 
+/// Minimum wall-clock span that `count` packets may occupy at `max_pps`
+/// packets/second (`0` = unlimited → zero). Pure helper behind [`RatePacer`],
+/// split out so the pacing maths is unit-testable without a clock.
+pub fn min_send_span(max_pps: u32, count: usize) -> Duration {
+    if max_pps == 0 || count == 0 {
+        return Duration::ZERO;
+    }
+    let per = Duration::from_nanos(1_000_000_000 / max_pps as u64);
+    per.saturating_mul(count as u32)
+}
+
+/// A send-rate ceiling honouring `--max-rate` (packets/second). Single-threaded
+/// (one per host scan in the raw fast engine), so it needs no locking: it
+/// tracks the earliest instant the next packet may leave and sleeps when the
+/// caller is ahead of schedule. `max_pps == 0` disables it (no-op).
+pub struct RatePacer {
+    max_pps: u32,
+    next_at: Option<std::time::Instant>,
+}
+
+impl RatePacer {
+    pub fn new(max_pps: u32) -> Self {
+        Self { max_pps, next_at: None }
+    }
+
+    /// Block (sleep) as needed so that emitting `count` packets now does not
+    /// exceed the ceiling, then reserve their slot. No-op when unlimited.
+    pub fn pace(&mut self, count: usize) {
+        if self.max_pps == 0 || count == 0 {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let start = match self.next_at {
+            Some(t) if t > now => {
+                std::thread::sleep(t - now);
+                t
+            }
+            _ => now,
+        };
+        self.next_at = Some(start + min_send_span(self.max_pps, count));
+    }
+}
+
+/// A TCP-style congestion window bounding how many probes the raw **fast
+/// engine** keeps in flight at once. Before Fase 31 the fast engine burst
+/// *every* port in one shot — on a full-65535 scan that outran the single
+/// receiver and tripped host RST rate-limiting, dropping replies (lost
+/// "open" results) and spiking variance (v0.88.3 lab run). The window ramps up
+/// in slow-start, then AIMD: a wave that drops a large fraction of probes **on
+/// a host that is otherwise answering** is read as congestion / rate-limiting
+/// and halves the window (so the next, gentler wave recovers the lost opens);
+/// a clean wave grows it. A silent/filtered host (no replies at all) is *not*
+/// treated as congestion — the window keeps growing so a filtered sweep still
+/// finishes fast. Clamped to `[min, max]`; `max` comes from `--max-parallel`
+/// and `min` is raised by `--min-rate`.
+pub struct CongestionWindow {
+    cwnd: f64,
+    ssthresh: f64,
+    min: f64,
+    max: f64,
+    slow_start: bool,
+    replies_seen: u64,
+}
+
+impl CongestionWindow {
+    pub fn new(initial: usize, min: usize, max: usize) -> Self {
+        let min = (min.max(1)) as f64;
+        let max = (max as f64).max(min);
+        let cwnd = (initial as f64).clamp(min, max);
+        Self { cwnd, ssthresh: max, min, max, slow_start: true, replies_seen: 0 }
+    }
+
+    /// How many probes to send in the next wave.
+    pub fn window(&self) -> usize {
+        self.cwnd.round().clamp(self.min, self.max) as usize
+    }
+
+    fn grow(&mut self) {
+        if self.slow_start {
+            self.cwnd *= 2.0;
+            if self.cwnd >= self.ssthresh {
+                self.slow_start = false;
+            }
+        } else {
+            self.cwnd += 1.0;
+        }
+    }
+
+    /// Feed the outcome of a wave: `sent` probes went out and `replies` of them
+    /// got a definitive answer (the rest are drops this wave). See the struct
+    /// doc for the policy.
+    pub fn feed(&mut self, sent: usize, replies: usize) {
+        if sent == 0 {
+            return;
+        }
+        self.replies_seen += replies as u64;
+        let drops = sent.saturating_sub(replies);
+        let ratio = drops as f64 / sent as f64;
+        if self.replies_seen == 0 {
+            // Nothing has ever replied → silent/filtered host, not congestion.
+            // Keep growing so a fully-filtered sweep finishes quickly.
+            self.grow();
+        } else if ratio > 0.20 {
+            // Congestion / rate-limiting on a responsive host → back off.
+            self.ssthresh = (self.cwnd / 2.0).max(self.min);
+            self.cwnd = self.ssthresh;
+            self.slow_start = false;
+        } else if ratio < 0.05 {
+            self.grow();
+        }
+        self.cwnd = self.cwnd.clamp(self.min, self.max);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +348,68 @@ mod tests {
         assert!(lim.mean_rtt().is_none());
         lim.record(false, Duration::from_millis(10));
         assert_eq!(lim.mean_rtt(), Some(Duration::from_millis(10)));
+    }
+
+    #[test]
+    fn min_send_span_is_zero_when_unlimited() {
+        assert_eq!(min_send_span(0, 10_000), Duration::ZERO);
+        assert_eq!(min_send_span(1000, 0), Duration::ZERO);
+    }
+
+    #[test]
+    fn min_send_span_scales_with_rate_and_count() {
+        // 1000 pps → 1 ms/packet → 1000 packets span ~1 s.
+        assert_eq!(min_send_span(1000, 1000), Duration::from_millis(1000));
+        // 100 pps → 10 ms/packet → 50 packets span ~0.5 s.
+        assert_eq!(min_send_span(100, 50), Duration::from_millis(500));
+    }
+
+    #[test]
+    fn cwnd_slow_starts_and_clamps_to_max() {
+        let mut w = CongestionWindow::new(64, 16, 512);
+        assert_eq!(w.window(), 64);
+        // Clean waves double the window (slow-start) up to max.
+        w.feed(64, 64); // 64 -> 128
+        assert_eq!(w.window(), 128);
+        w.feed(128, 128); // -> 256
+        assert_eq!(w.window(), 256);
+        w.feed(256, 256); // -> 512 (max)
+        assert_eq!(w.window(), 512);
+        w.feed(512, 512); // stays clamped at max
+        assert_eq!(w.window(), 512);
+    }
+
+    #[test]
+    fn cwnd_backs_off_on_congestion_when_responsive() {
+        let mut w = CongestionWindow::new(256, 16, 512);
+        w.feed(256, 256); // responsive + clean → grows to 512
+        assert_eq!(w.window(), 512);
+        // A wave that drops most probes on a host that has been answering →
+        // multiplicative decrease (~halve).
+        w.feed(512, 100);
+        assert!(w.window() < 512, "expected backoff, got {}", w.window());
+        assert!(w.window() >= 16);
+    }
+
+    #[test]
+    fn cwnd_does_not_collapse_on_fully_filtered_host() {
+        // No probe ever replies → not congestion; the window must keep growing
+        // so a filtered sweep finishes fast rather than crawling at the floor.
+        let mut w = CongestionWindow::new(64, 16, 512);
+        for _ in 0..4 {
+            w.feed(64, 0);
+        }
+        assert_eq!(w.window(), 512);
+    }
+
+    #[test]
+    fn cwnd_respects_min_floor() {
+        let mut w = CongestionWindow::new(64, 50, 512);
+        w.feed(64, 64); // responsive
+        // Hammer it with congestion; it must never drop below the floor.
+        for _ in 0..20 {
+            w.feed(w.window(), 0);
+        }
+        assert!(w.window() >= 50, "window {} fell below floor", w.window());
     }
 }

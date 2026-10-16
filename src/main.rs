@@ -2565,7 +2565,7 @@ async fn run(mut args: Cli) -> Result<()> {
             if args.fast_engine {
                 eprintln!("[fast-engine] opt-in raw engine active (burst-send + async collect)");
             }
-            let result = run_raw_tcp(targets, port_list.clone(), kind, scanner, timeout_dur, parallel, args.fast_engine).await;
+            let result = run_raw_tcp(targets, port_list.clone(), kind, scanner, timeout_dur, parallel, args.fast_engine, args.min_rate, args.max_rate).await;
             // Post-scan sanity check: if we sent packets but rx_count is 0,
             // the kernel (or a firewall) is silently swallowing responses
             // before they reach our raw socket. IPv6 conntrack drops the
@@ -3917,6 +3917,8 @@ async fn run_raw_tcp(
     timeout_dur: std::time::Duration,
     parallel: usize,
     fast: bool,
+    min_rate: u32,
+    max_rate: u32,
 ) -> Vec<HostResult> {
     let mut out = Vec::with_capacity(targets.len());
     for t in targets {
@@ -3924,8 +3926,12 @@ async fn run_raw_tcp(
         let scanner_arc = Arc::clone(&scanner_arc);
         let r = tokio::task::spawn_blocking(move || {
             if fast {
-                // Fase 30 experimental engine: burst-send + async poll-collect.
-                raw_scan::run_raw_tcp_fast(t, ports, kind, scanner_arc, timeout_dur)
+                // Fase 30 engine + Fase 31 congestion window: cwnd-bounded
+                // burst-send + async poll-collect, --max-parallel caps the
+                // window, --max-rate paces it, --min-rate floors it.
+                raw_scan::run_raw_tcp_fast(
+                    t, ports, kind, scanner_arc, timeout_dur, parallel, min_rate, max_rate,
+                )
             } else {
                 raw_scan::run_raw_tcp_scan(t, ports, kind, scanner_arc, timeout_dur, parallel)
             }
