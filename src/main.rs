@@ -67,6 +67,7 @@ mod container_scan;
 mod detect_preview;
 mod explain;
 mod ipa_scan;
+mod mobile_device;
 mod mobile_secrets;
 mod dns_advanced;
 mod dns_security;
@@ -1547,6 +1548,43 @@ async fn run(mut args: Cli) -> Result<()> {
         let dur = std::time::Duration::from_secs(3);
         let findings = iot_discover::discover(&h, dur).await?;
         iot_discover::print_findings(&h, &findings);
+        return Ok(());
+    }
+    if let Some(host) = &args.mobile_discover {
+        if host.contains('/') {
+            return Err(exit::config_err(format!(
+                "--mobile-discover probes a single host, not a CIDR — got '{}'. \
+                 Pass one IP, e.g. --mobile-discover 192.168.1.50",
+                host
+            )));
+        }
+        let ip: std::net::IpAddr = match host.parse() {
+            Ok(ip) => ip,
+            Err(_) => match tokio::net::lookup_host((host.as_str(), 0)).await {
+                Ok(mut it) => match it.next() {
+                    Some(sa) => sa.ip(),
+                    None => return Err(exit::config_err(format!("cannot resolve '{}'", host))),
+                },
+                Err(e) => return Err(exit::config_err(format!("cannot resolve '{}': {}", host, e))),
+            },
+        };
+        let dur = std::time::Duration::from_secs(3);
+        println!("Mobile-device probe of {}", host);
+        match mobile_device::probe(ip, dur, &[]).await {
+            Some(d) => {
+                println!("  OS     : {}", d.os);
+                println!("  Finding: {}", d.kind);
+                for e in &d.evidence {
+                    println!("  - {}", e);
+                }
+                exit::note_findings(true);
+            }
+            None => println!(
+                "  no mobile-device management service (ADB 5555 / lockdownd 62078) reachable; \
+                 for Apple mDNS also try --iot-discover {}",
+                host
+            ),
+        }
         return Ok(());
     }
     if let Some(host) = &args.container_scan {

@@ -45,6 +45,34 @@ pub struct ApkReport {
     pub network_security_config: Option<String>,
     pub pinning_libraries: Vec<String>,
     pub secrets: Vec<SecretFinding>,
+    /// Known ad / analytics / attribution SDKs embedded in the APK (Fase 34).
+    pub trackers: Vec<String>,
+}
+
+/// Classpath markers for common third-party ad/analytics/attribution SDKs.
+const TRACKERS: &[(&str, &str)] = &[
+    ("com/google/android/gms/ads", "Google AdMob"),
+    ("com/google/android/gms/analytics", "Google Analytics"),
+    ("com/google/firebase", "Firebase"),
+    ("com/facebook/", "Facebook SDK"),
+    ("com/flurry", "Flurry"),
+    ("com/appsflyer", "AppsFlyer"),
+    ("io/branch/referral", "Branch"),
+    ("com/adjust/sdk", "Adjust"),
+    ("com/mixpanel", "Mixpanel"),
+    ("com/amplitude", "Amplitude"),
+    ("com/onesignal", "OneSignal"),
+    ("com/crashlytics", "Crashlytics"),
+];
+
+/// Detect embedded trackers/SDKs by scanning raw entry bytes for their
+/// classpath markers (DEX stores class names with `/` separators).
+fn detect_trackers(hay: &[u8]) -> Vec<&'static str> {
+    TRACKERS
+        .iter()
+        .filter(|(needle, _)| hay.windows(needle.len()).any(|w| w == needle.as_bytes()))
+        .map(|(_, name)| *name)
+        .collect()
 }
 
 const DANGEROUS_PERMS: &[&str] = &[
@@ -138,7 +166,14 @@ pub fn scan(path: &Path) -> Result<ApkReport> {
                 }
             }
         }
+        for t in detect_trackers(&buf) {
+            let s = t.to_string();
+            if !report.trackers.contains(&s) {
+                report.trackers.push(s);
+            }
+        }
     }
+    report.trackers.sort();
 
     classify_strings(&all_strings, &mut report);
     Ok(report)
@@ -360,6 +395,9 @@ pub fn print_report(r: &ApkReport) {
     if !r.pinning_libraries.is_empty() {
         println!("  pinning libraries   : {}", r.pinning_libraries.join(", ").green());
     }
+    if !r.trackers.is_empty() {
+        println!("  trackers / SDKs     : {}", r.trackers.join(", ").yellow());
+    }
     if r.secrets.is_empty() {
         println!("  secrets             : {}", "none detected".green());
     } else {
@@ -373,6 +411,15 @@ pub fn print_report(r: &ApkReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_known_trackers_in_bytes() {
+        let blob = b"....Lcom/google/android/gms/ads/AdView;...Lcom/facebook/login/X;...";
+        let hits = detect_trackers(blob);
+        assert!(hits.contains(&"Google AdMob"));
+        assert!(hits.contains(&"Facebook SDK"));
+        assert!(!hits.contains(&"Flurry"));
+    }
 
     fn build_min_axml(strings: &[&str]) -> Vec<u8> {
         // Build a tiny AXML with just an XML chunk header + a UTF-8

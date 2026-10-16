@@ -4,6 +4,32 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.92.0] - 2026-10-16
+
+**Fase 34 — mobile: network device detection + deeper APK static.** 634/634
+tests (+6).
+
+### Added
+- **`--mobile-discover HOST`** — detect a mobile *device* on the network
+  (`mobile_device`): Android ADB-over-WiFi (tcp/5555, an unauthenticated shell
+  surface), iOS lockdownd (tcp/62078), and Apple mDNS service types
+  (`_airplay`/`_raop`/`_companion-link`/`_apple-mobdev`). The classifier is a
+  pure, unit-tested function (ADB wins over AirPlay mDNS as the stronger
+  actionable signal); a reachable device sets exit 1. One host (not a CIDR);
+  for Apple-mDNS-only devices it points at `--iot-discover`.
+- **APK tracker/SDK detection** (`--apk-scan`): flags embedded ad/analytics/
+  attribution SDKs by classpath marker — Google AdMob/Analytics, Firebase,
+  Facebook, Flurry, AppsFlyer, Branch, Adjust, Mixpanel, Amplitude, OneSignal,
+  Crashlytics. New `ApkReport.trackers`, shown as a `trackers / SDKs:` line.
+
+### Notes
+- `apk_scan` already surfaced dangerous permissions, exported components,
+  `usesCleartextTraffic`/`debuggable`/`allowBackup` flags, network-security-
+  config / cert-pinning references and embedded secrets — those were not
+  duplicated.
+- Device detection is TCP-based for ADB/lockdownd; Apple-mDNS classification is
+  supported by the classifier and fed by `--iot-discover` data.
+
 ## [0.91.0] - 2026-10-16
 
 **Fase 33 — modern `--web-scan`.** Tech fingerprinting, CSP/COOP/COEP analysis,

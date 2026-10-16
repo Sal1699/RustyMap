@@ -391,7 +391,8 @@ pub fn print_guide() {
     line("--cloud-metadata      Probe IMDS 169.254.169.254 (AWS/GCP/Azure/OpenStack)");
     line("--cloud-metadata-via URL  Probe IMDS via SSRF prefix sul target");
     line("--cloud-fingerprint D Identifica AWS/GCP/Azure/Cloudflare/Akamai/Fastly da DNS");
-    line("--apk-scan FILE       Static APK: manifest perms+components, dex secrets+pinning");
+    line("--apk-scan FILE       Static APK: manifest perms+components, dex secrets+pinning,");
+    line("                      tracker/SDK rilevati (AdMob/Firebase/Facebook/AppsFlyer…)");
     line("--ipa-scan FILE       Static IPA: Info.plist (ATS, URL schemes), binary secrets");
     line("--compliance FW       Eval findings vs framework: pci-dss|hipaa|nist-800-53|iso-27001|cis");
     line("                      Failed controls includono remediation per-finding-kind");
@@ -413,6 +414,7 @@ pub fn print_guide() {
     line("--threat-intel-match  Confronta target con IoC cached → flag matches");
     line("--ics-scan HOST       ICS/SCADA: Modbus 502, S7 102, DNP3 20000, EnIP 44818, BACnet 47808");
     line("--iot-discover HOST   IoT unicast: mDNS 5353, SSDP 1900, CoAP 5683");
+    line("--mobile-discover HOST  Device mobile: Android ADB 5555, iOS lockdownd 62078, Apple mDNS");
     line("--container-scan HOST Docker (2375/6) + K8s API (6443/8443) + Kubelet (10250/55) + etcd + Consul");
     line("--detect-preview      Anteprima statica: cosa vedrebbe un defender della tua scan");
     line("--delay-jitter PCT    Randomizza ±N% lo --scan-delay (anti-pattern semplici)");
@@ -466,6 +468,7 @@ pub fn print_guide() {
     example("rustymap --notify 'jira://alice:tok@jira.example.com/SEC?type=Bug'");
     example("rustymap --ics-scan 10.0.0.50          # PLC enumeration");
     example("rustymap --iot-discover 192.168.1.42   # camera / hub probe");
+    example("rustymap --mobile-discover 192.168.1.50   # phone/tablet (ADB/lockdownd)");
     example("rustymap --container-scan node.k8s.lab # Docker/K8s/etcd/Consul");
     example("rustymap --detect-preview --sS -T 5 10.0.0.5  # mostra impatto IDS");
     example("rustymap --scan-delay 500 --delay-jitter 30 10.0.0.0/24");

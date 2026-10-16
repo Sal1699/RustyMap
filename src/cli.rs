@@ -1271,6 +1271,11 @@ pub struct Cli {
     #[arg(long = "iot-discover", value_name = "HOST")]
     pub iot_discover: Option<String>,
 
+    /// Detect a mobile DEVICE on the network (Fase 34): Android ADB (tcp/5555),
+    /// iOS lockdownd (tcp/62078), Apple mDNS. One host, not a CIDR.
+    #[arg(long = "mobile-discover", value_name = "HOST")]
+    pub mobile_discover: Option<String>,
+
     /// Container & orchestrator surface — Docker remote API
     /// (2375/2376), Kubernetes API (6443/8443), Kubelet (10250/10255),
     /// etcd (2379/2380), Consul (8500). Tags each finding UNAUTHED /
