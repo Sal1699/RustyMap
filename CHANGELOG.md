@@ -4,6 +4,30 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.93.0] - 2026-10-16
+
+**Fase 35 — evasion & camouflage: JA3/JA4 + random-order fragmentation.**
+641/641 tests (+7).
+
+### Added
+- **`ja3` module + `--ja3 BROWSER`**: computes the JA3 (MD5) and JA4 TLS
+  *client* fingerprints and ships real-browser profiles (Chrome/Firefox/Safari).
+  `--ja3 chrome|firefox|safari|all` prints the canonical JA3 string + JA3 hash +
+  JA4 for comparison against a captured handshake or to craft mimicry. GREASE
+  code points are excluded per spec.
+- **`--frag-random-order`**: emit IP fragments in random order (implies
+  `--fragment`) to defeat naive reassembly-order IDS heuristics; also enabled by
+  the `ghost` preset. `EvasionConfig.frag_random_order` + `fragment_ip_ordered`.
+
+### Notes
+- Active on-the-wire JA3 *mimicry* (making our own probe handshakes present a
+  browser fingerprint) is **out of scope** here: rustls/reqwest control our
+  ClientHello, so this release delivers the computation + reference DB, not CH
+  injection. Documented as the remaining mimicry partial.
+- Existing evasion (decoys, overlap fragmentation, TTL jitter, source-port,
+  `--stack-profile`, bad-checksum, IP options, rotation, browser UA) is
+  unchanged; this adds JA3/JA4 and fragment-order randomisation on top.
+
 ## [0.92.0] - 2026-10-16
 
 **Fase 34 — mobile: network device detection + deeper APK static.** 634/634

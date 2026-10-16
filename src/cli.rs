@@ -792,6 +792,10 @@ pub struct Cli {
     #[arg(long = "frag-overlap")]
     pub frag_overlap: bool,
 
+    /// Emit IP fragments in random order (Fase 35; implies --fragment)
+    #[arg(long = "frag-random-order")]
+    pub frag_random_order: bool,
+
     /// Vault file path (encrypted credentials store)
     #[arg(long = "vault", default_value = "rustymap-vault.json")]
     pub vault_path: String,
@@ -1275,6 +1279,11 @@ pub struct Cli {
     /// iOS lockdownd (tcp/62078), Apple mDNS. One host, not a CIDR.
     #[arg(long = "mobile-discover", value_name = "HOST")]
     pub mobile_discover: Option<String>,
+
+    /// Print the JA3/JA4 TLS client fingerprint of a real browser (Fase 35):
+    /// chrome | firefox | safari | all. Reference for mimicry / comparison.
+    #[arg(long = "ja3", value_name = "BROWSER")]
+    pub ja3: Option<String>,
 
     /// Container & orchestrator surface — Docker remote API
     /// (2375/2376), Kubernetes API (6443/8443), Kubelet (10250/10255),

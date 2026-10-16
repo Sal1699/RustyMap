@@ -161,6 +161,7 @@ impl EvasionPreset {
                 fragment: true,
                 frag_mtu: 8,
                 frag_overlap: true,
+                frag_random_order: true,
                 stack_profile: StackProfile::Linux6,
                 jitter: JitterMode::Gaussian(120),
                 rotate: true,
@@ -291,6 +292,9 @@ pub struct EvasionConfig {
     pub rotate: bool,
     // Overlap fragmentation (technique 2)
     pub frag_overlap: bool,
+    /// Emit IP fragments in random order (Fase 35) — defeats reassembly-order
+    /// heuristics in simple IDS. The fragments themselves are unchanged.
+    pub frag_random_order: bool,
     // Custom TCP flags (technique 7 — protocol exceptions)
     pub custom_flags: Option<u8>,
     /// Send a short dummy SYN from each decoy before the real probe,
@@ -316,6 +320,7 @@ impl Default for EvasionConfig {
             jitter: JitterMode::None,
             rotate: false,
             frag_overlap: false,
+            frag_random_order: false,
             custom_flags: None,
             decoy_preping: false,
         }
@@ -614,6 +619,23 @@ pub fn fragment_ip(ip_bytes: &[u8], frag_payload_size: u16, overlap: bool) -> Ve
     frags
 }
 
+/// Like [`fragment_ip`], but optionally shuffles the transmission order
+/// (Fase 35). The fragments themselves are byte-for-byte identical; only the
+/// order on the wire changes, which defeats naive reassembly-order IDS logic.
+pub fn fragment_ip_ordered(
+    ip_bytes: &[u8],
+    frag_payload_size: u16,
+    overlap: bool,
+    random_order: bool,
+) -> Vec<Vec<u8>> {
+    let mut frags = fragment_ip(ip_bytes, frag_payload_size, overlap);
+    if random_order && frags.len() > 1 {
+        use rand::seq::SliceRandom;
+        frags.shuffle(&mut rand::thread_rng());
+    }
+    frags
+}
+
 // ── Sending Helpers ──────────────────────────────────────────────
 
 /// Send an IP packet (optionally fragmented) via Layer3 transport.
@@ -624,7 +646,7 @@ pub fn send_ip_raw(
     cfg: &EvasionConfig,
 ) -> std::io::Result<()> {
     if cfg.fragment {
-        for f in &fragment_ip(ip_bytes, cfg.frag_mtu, cfg.frag_overlap) {
+        for f in &fragment_ip_ordered(ip_bytes, cfg.frag_mtu, cfg.frag_overlap, cfg.frag_random_order) {
             let pkt = Ipv4Packet::new(f).unwrap();
             tx.send_to(pkt, IpAddr::V4(dst))?;
         }
@@ -749,5 +771,33 @@ mod ua_tests {
     fn random_ua_is_from_the_pool() {
         let ua = random_user_agent();
         assert!(ua.starts_with("Mozilla/5.0"));
+    }
+
+    #[test]
+    fn fragment_order_preserved_without_random() {
+        // 20-byte IPv4 header + 40-byte payload → fragments at mtu 8.
+        let mut pkt = vec![0u8; 60];
+        pkt[0] = 0x45; // IPv4, IHL 5
+        pkt[3] = 60; // total length low byte
+        let ordered = fragment_ip_ordered(&pkt, 8, false, false);
+        let plain = fragment_ip(&pkt, 8, false);
+        assert!(ordered.len() > 1, "should fragment");
+        assert_eq!(ordered, plain, "non-random must match fragment_ip exactly");
+    }
+
+    #[test]
+    fn fragment_random_keeps_same_set() {
+        let mut pkt = vec![0u8; 100];
+        pkt[0] = 0x45;
+        pkt[3] = 100;
+        let plain = fragment_ip(&pkt, 8, false);
+        let shuffled = fragment_ip_ordered(&pkt, 8, false, true);
+        // Same number of fragments and same multiset of bytes, order aside.
+        assert_eq!(plain.len(), shuffled.len());
+        let mut a = plain.clone();
+        a.sort();
+        let mut b = shuffled.clone();
+        b.sort();
+        assert_eq!(a, b, "random order must not add/drop/alter fragments");
     }
 }

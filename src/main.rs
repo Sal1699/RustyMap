@@ -21,6 +21,7 @@ mod idle_scan;
 mod iflist;
 mod ip_proto_scan;
 mod ipv6_intel;
+mod ja3;
 mod jarm;
 mod json_out;
 mod kernel_guard;
@@ -1548,6 +1549,19 @@ async fn run(mut args: Cli) -> Result<()> {
         let dur = std::time::Duration::from_secs(3);
         let findings = iot_discover::discover(&h, dur).await?;
         iot_discover::print_findings(&h, &findings);
+        return Ok(());
+    }
+    if let Some(browser) = &args.ja3 {
+        if browser.to_lowercase() != "all"
+            && browser.to_lowercase() != "list"
+            && ja3::profile(browser).is_none()
+        {
+            return Err(exit::config_err(format!(
+                "--ja3: unknown browser '{}' (chrome|firefox|safari|all)",
+                browser
+            )));
+        }
+        ja3::report(browser);
         return Ok(());
     }
     if let Some(host) = &args.mobile_discover {
@@ -4243,6 +4257,10 @@ fn build_evasion_config(args: &Cli) -> Result<evasion::EvasionConfig> {
     if args.frag_overlap {
         cfg.frag_overlap = true;
         cfg.fragment = true; // overlap implies fragmentation
+    }
+    if args.frag_random_order {
+        cfg.frag_random_order = true;
+        cfg.fragment = true; // random order implies fragmentation
     }
     if let Some(ref s) = args.scanflags {
         let flags = evasion::parse_scanflags(s).map_err(|e| anyhow!("--scanflags: {}", e))?;

@@ -313,7 +313,9 @@ pub fn print_guide() {
     line("-f, --fragment            Frammenta IP in pezzi piccoli");
     line("--mtu N                   Dim. frammento (multiplo di 8)");
     line("--frag-overlap            Frammenti sovrapposti (avanzato)");
+    line("--frag-random-order       Invia i frammenti in ordine casuale (Fase 35, anti-IDS)");
     line("--badsum                  Checksum TCP invalido (rileva stateful FW/IDS)");
+    line("--ja3 BROWSER             Stampa JA3/JA4 di chrome|firefox|safari|all (fingerprint TLS)");
     line("--jitter MS               Jitter gaussiano fra probe");
     line("--rotate-evasion          Ruota TTL/src-port/padding per probe");
     line("--randomize-ports         Ordine porte casuale");
@@ -322,6 +324,8 @@ pub fn print_guide() {
     example("rustymap --sS --scanflags SYN,ECE -f --mtu 8 10.0.0.5");
     example("rustymap --sS --decoys 10.0.0.1,10.0.0.2 --decoy-preping 10.0.0.5");
     example("rustymap --sS --ttl-jitter 8 --rotate-evasion 10.0.0.0/24");
+    example("rustymap --sS --evasion ghost --frag-random-order 10.0.0.5");
+    example("rustymap --ja3 chrome   # fingerprint TLS browser di riferimento");
 
     category("OUTPUT & PERSISTENCE");
     section("OUTPUT");
