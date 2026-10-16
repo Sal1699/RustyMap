@@ -859,6 +859,77 @@ async fn dns_version_probe(addr: SocketAddr, dur: Duration) -> Option<ServiceInf
     Some(classify_dns_version(&txt))
 }
 
+/// Split a server token like `lighttpd/1.4.59` or `nginx 1.18.0` into
+/// (product, version). No separator → the whole string is the product.
+fn split_product_version(s: &str) -> (String, Option<String>) {
+    let s = s.trim();
+    if let Some((p, v)) = s.split_once('/') {
+        let v = v.trim();
+        return (p.trim().to_string(), (!v.is_empty()).then(|| v.to_string()));
+    }
+    if let Some((p, v)) = s.split_once(' ') {
+        let v = v.trim();
+        if v.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+            return (p.trim().to_string(), Some(v.to_string()));
+        }
+    }
+    (s.to_string(), None)
+}
+
+/// Extract a service from a decrypted HTTP response (the `Server:` header), used
+/// for `-sV` behind TLS. Returns a bare `http` marker when the response is HTTP
+/// but carries no `Server` header.
+fn http_server_from_banner(banner: &[u8]) -> Option<ServiceInfo> {
+    let text = String::from_utf8_lossy(banner);
+    if !text.starts_with("HTTP/") {
+        return None;
+    }
+    for line in text.lines() {
+        let l = line.trim();
+        let val = l
+            .strip_prefix("Server:")
+            .or_else(|| l.strip_prefix("server:"))
+            .map(str::trim);
+        if let Some(v) = val {
+            if !v.is_empty() {
+                let (product, version) = split_product_version(v);
+                return Some(ServiceInfo {
+                    product: Some(product),
+                    version,
+                    extra: None,
+                    banner: Some(v.to_string()),
+                    tls: None,
+                });
+            }
+        }
+    }
+    Some(ServiceInfo {
+        product: Some("http".into()),
+        version: None,
+        extra: None,
+        banner: None,
+        tls: None,
+    })
+}
+
+/// The application-layer payload to send over a freshly handshaken TLS stream
+/// to elicit a service banner. Web ports get an HTTP GET; other TLS ports are
+/// read-only (many greet on connect).
+fn tls_app_payload(port: u16, sni: Option<&str>) -> Vec<u8> {
+    let web = matches!(port, 443 | 4443 | 8443 | 9443 | 8000 | 8008 | 8081 | 8888);
+    if web {
+        let host = sni.unwrap_or("localhost");
+        format!(
+            "GET / HTTP/1.0\r\nHost: {}\r\nUser-Agent: {}\r\nConnection: close\r\n\r\n",
+            host,
+            crate::evasion::http_user_agent()
+        )
+        .into_bytes()
+    } else {
+        Vec::new()
+    }
+}
+
 pub async fn probe(
     ip: IpAddr,
     port: u16,
@@ -896,9 +967,37 @@ pub async fn probe(
     // The TLS handshake adds a full RTT per port; gate it behind
     // intensity ≥ 7 (--version-intensity, default 5). Users who want it
     // every time can pass --version-intensity 7+ or --version-all.
+    //
+    // Fase 32: as well as the cert, probe the service BEHIND TLS so `-sV`
+    // names e.g. lighttpd-on-443 instead of a bare "ssl/https". We send an
+    // app-layer payload (HTTP GET on web ports, read-only elsewhere) over the
+    // decrypted stream and run the reply through the same matchers.
     if intensity >= 7 && crate::tls_probe::likely_tls(port) {
-        if let Some(tls) = crate::tls_probe::probe(ip, port, timeout_dur, sni).await {
-            let mut info = best.unwrap_or_default();
+        let payload = tls_app_payload(port, sni);
+        if let Some((tls, banner)) =
+            crate::tls_probe::probe_app(ip, port, timeout_dur, sni, &payload).await
+        {
+            let mut info = best.clone().unwrap_or_default();
+            if info.product.is_none() && !banner.is_empty() {
+                // Prefer an HTTP Server header; fall back to the generic
+                // signature matchers (SSH/loaded nmap-service-probes/etc.).
+                let decoded =
+                    http_server_from_banner(&banner).or_else(|| match_signatures(&banner));
+                if let Some(d) = decoded {
+                    if info.product.is_none() {
+                        info.product = d.product;
+                    }
+                    if info.version.is_none() {
+                        info.version = d.version;
+                    }
+                    if info.extra.is_none() {
+                        info.extra = d.extra;
+                    }
+                    if info.banner.is_none() {
+                        info.banner = d.banner;
+                    }
+                }
+            }
             info.tls = Some(tls);
             return Some(info);
         }
@@ -949,6 +1048,54 @@ async fn probe_once(addr: SocketAddr, p: &Probe, dur: Duration) -> Option<Servic
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_product_version_variants() {
+        assert_eq!(
+            split_product_version("lighttpd/1.4.59"),
+            ("lighttpd".to_string(), Some("1.4.59".to_string()))
+        );
+        assert_eq!(
+            split_product_version("nginx 1.18.0"),
+            ("nginx".to_string(), Some("1.18.0".to_string()))
+        );
+        // No version token.
+        assert_eq!(split_product_version("Apache"), ("Apache".to_string(), None));
+        // Trailing descriptive words are not a version.
+        assert_eq!(
+            split_product_version("Microsoft-IIS"),
+            ("Microsoft-IIS".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn http_server_header_behind_tls() {
+        let resp = b"HTTP/1.1 200 OK\r\nServer: lighttpd/1.4.59\r\nContent-Type: text/html\r\n\r\n";
+        let info = http_server_from_banner(resp).unwrap();
+        assert_eq!(info.product.as_deref(), Some("lighttpd"));
+        assert_eq!(info.version.as_deref(), Some("1.4.59"));
+    }
+
+    #[test]
+    fn http_without_server_header_marks_http() {
+        let resp = b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+        let info = http_server_from_banner(resp).unwrap();
+        assert_eq!(info.product.as_deref(), Some("http"));
+    }
+
+    #[test]
+    fn non_http_banner_is_not_http() {
+        assert!(http_server_from_banner(b"220 smtp ready\r\n").is_none());
+    }
+
+    #[test]
+    fn tls_payload_is_http_on_web_ports_only() {
+        assert!(tls_app_payload(443, Some("h")).starts_with(b"GET / HTTP/1.0"));
+        assert!(tls_app_payload(8443, None).starts_with(b"GET "));
+        // imaps / smtps greet on connect → no payload.
+        assert!(tls_app_payload(993, None).is_empty());
+        assert!(tls_app_payload(465, None).is_empty());
+    }
 
     #[test]
     fn ssh_openssh_normalised() {

@@ -4,6 +4,31 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.90.0] - 2026-10-16
+
+**Fase 32 — service-probe parity: `-sV` behind TLS.** Closes the long-standing
+gap where a TLS-wrapped service (lighttpd on 443, services on 8443, …) showed
+only as `ssl/https`. 622/622 tests (+5).
+
+### Added
+- **`-sV` now identifies the service *behind* TLS.** At `--version-intensity ≥ 7`
+  (or `--version-all`/`-A`), for TLS ports the scanner completes the handshake,
+  sends an application-layer payload over the decrypted stream (an HTTP `GET` on
+  web ports; read-only on ports that greet on connect such as 465/993/995), and
+  runs the reply through the same matchers — so it reports e.g.
+  `lighttpd 1.4.59` instead of a bare `ssl/https`. `tls_probe::probe_app`
+  returns the decrypted banner alongside the cert; `service_probe` extracts the
+  HTTP `Server` header (`split_product_version`) or falls back to the generic
+  signature / loaded-`nmap-service-probes` matchers.
+
+### Notes
+- `--nmap-service-probes FILE` (already present) consumes `match`/`softmatch`
+  rules from a user-supplied GPLv2 file; the DB's own `Probe`/`ports`/`rarity`
+  **send** directives are still not replayed (we match against the banners our
+  built-in probes collect) — documented as the remaining service-probe partial.
+- The TLS app-probe only runs at intensity ≥ 7 (a handshake per port is a full
+  RTT), so default `-sV` speed is unchanged.
+
 ## [0.89.0] - 2026-10-16
 
 **Fase 31 — congestion control for the raw fast engine.** A cwnd-style

@@ -190,6 +190,55 @@ pub async fn probe(
     Some(info)
 }
 
+/// Like [`probe`], but also drives an application-layer exchange over the TLS
+/// stream and returns the decrypted banner alongside the cert info. This is how
+/// `-sV` identifies the service *behind* TLS (e.g. lighttpd on 443, RTSP/rsync
+/// over TLS) instead of reporting a bare "ssl/https" (Fase 32). `payload` is
+/// written after the handshake (empty = read-only, for services that greet on
+/// connect); up to ~2 KiB of the reply is read within `dur`.
+pub async fn probe_app(
+    ip: IpAddr,
+    port: u16,
+    dur: Duration,
+    sni: Option<&str>,
+    payload: &[u8],
+) -> Option<(TlsInfo, Vec<u8>)> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let cfg = build_config();
+    let connector = TlsConnector::from(cfg);
+    let addr = SocketAddr::new(ip, port);
+    let tcp = timeout(dur, TcpStream::connect(addr)).await.ok()?.ok()?;
+    let server_name = match sni {
+        Some(h) => ServerName::try_from(h.to_string()).ok()?,
+        None => ServerName::try_from(ip.to_string()).ok()?,
+    };
+    let mut tls = timeout(dur, connector.connect(server_name, tcp)).await.ok()?.ok()?;
+
+    // Pull the cert/version info before the (mutable) app-layer exchange.
+    let mut info = {
+        let (_, conn) = tls.get_ref();
+        let mut i = conn
+            .peer_certificates()
+            .and_then(|chain| chain.first())
+            .map(|leaf| parse_leaf(leaf.as_ref()))
+            .unwrap_or_default();
+        i.negotiated = conn.protocol_version().map(|v| version_label(v).to_string());
+        i
+    };
+    let _ = &mut info;
+
+    if !payload.is_empty() {
+        let _ = timeout(dur, tls.write_all(payload)).await;
+    }
+    let mut buf = [0u8; 2048];
+    let mut banner = Vec::new();
+    if let Ok(Ok(n)) = timeout(dur, tls.read(&mut buf)).await {
+        banner.extend_from_slice(&buf[..n]);
+    }
+    Some((info, banner))
+}
+
 const TLS_PORTS: &[u16] = &[443, 465, 636, 853, 993, 995, 5061, 8443, 9443];
 
 pub fn likely_tls(port: u16) -> bool {

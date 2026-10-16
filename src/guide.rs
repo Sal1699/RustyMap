@@ -271,9 +271,12 @@ pub fn print_guide() {
     line("                      (protocolli binari: SMB 445/139 → dialetto +");
     line("                       OS build/host/dominio via NTLMSSP, MSRPC 135 →");
     line("                       bind DCE/RPC, VMware authd 902)");
-    line("--version-intensity N Aggressività 0-9 (default 5; ≥7 attiva probe TLS)");
+    line("--version-intensity N Aggressività 0-9 (default 5; ≥7 attiva probe TLS");
+    line("                       + -sV DIETRO TLS: identifica il servizio dentro HTTPS/");
+    line("                       8443 ecc. — es. lighttpd-on-443, non più 'ssl/https')");
     line("--version-light       Alias di --version-intensity 2");
     line("--version-all         Alias di --version-intensity 9");
+    line("--nmap-service-probes FILE  Carica nmap-service-probes (match/softmatch extra)");
     line("--osscan-limit        -O solo su host con almeno una porta open/closed");
     line("                      (su porte TLS aggancia anche cert + protocollo;");
     line("                       con HTTP aperto estrae vendor/model/firmware");
