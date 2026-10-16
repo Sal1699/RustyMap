@@ -44,6 +44,24 @@ pub struct Desc {
     pub risk: Risk,
 }
 
+/// Coarse service category for a port, for grouping in reports/output (Fase
+/// 36). Deliberately broad buckets a reader scans at a glance.
+pub fn category(port: u16) -> &'static str {
+    match port {
+        22 | 23 | 3389 | 5900..=5902 | 5985 | 5986 | 512 | 513 | 514 => "remote-access",
+        80 | 443 | 8080 | 8443 | 8000 | 8008 | 8888 | 4443 | 9443 => "web",
+        3306 | 5432 | 1433 | 1521 | 27017 | 6379 | 9200 | 5984 | 9042 | 11211 | 7000 | 8086 => {
+            "database"
+        }
+        21 | 445 | 139 | 2049 | 873 => "file-share",
+        25 | 465 | 587 | 110 | 995 | 143 | 993 => "mail",
+        53 | 67 | 68 | 123 | 161 | 162 | 389 | 636 | 88 => "infra/directory",
+        502 | 20000 | 44818 | 47808 | 102 | 2404 => "ics/ot",
+        5555 | 62078 => "mobile-device",
+        _ => "other",
+    }
+}
+
 /// Look up the description + risk for a port. `None` when we have nothing
 /// useful to say (the row then shows no NOTE).
 pub fn describe(port: u16) -> Option<Desc> {
@@ -160,6 +178,17 @@ pub fn describe(port: u16) -> Option<Desc> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn categories_bucket_correctly() {
+        assert_eq!(category(443), "web");
+        assert_eq!(category(3306), "database");
+        assert_eq!(category(22), "remote-access");
+        assert_eq!(category(445), "file-share");
+        assert_eq!(category(502), "ics/ot");
+        assert_eq!(category(5555), "mobile-device");
+        assert_eq!(category(65000), "other");
+    }
 
     #[test]
     fn known_high_risk_db() {

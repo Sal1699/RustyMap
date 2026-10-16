@@ -1241,6 +1241,10 @@ pub struct Cli {
     #[arg(long = "siem-out", value_name = "FILE")]
     pub siem_out: Option<String>,
 
+    /// Write findings + open ports as SARIF 2.1.0 to FILE (CI code-scanning). Fase 36.
+    #[arg(long = "sarif", value_name = "FILE")]
+    pub sarif: Option<String>,
+
     /// [ALPHA — requires --experimental-confirm] Sync MISP IoCs from
     /// URL into the local cache and exit. Pair with --misp-api-key.
     /// Pull-only; no de-duplication across syncs; minimal rate-limit

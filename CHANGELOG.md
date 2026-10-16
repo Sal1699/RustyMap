@@ -4,6 +4,28 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.94.0] - 2026-10-16
+
+**Fase 36 — reports & output: SARIF export + service categorisation.** 645/645
+tests (+4).
+
+### Added
+- **`--sarif FILE`** — write the scan as **SARIF 2.1.0** JSON (`sarif` module):
+  each finding (CVE hit, weak/expired TLS, exposed service, script finding)
+  becomes a `result` with a mapped level (`error`/`warning`/`note`) and a
+  declared rule; each open port becomes an informational `note` tagged with its
+  service category. Drops straight into GitHub code-scanning / Azure DevOps and
+  other SARIF viewers.
+- **`portdesc::category(port)`** — coarse service buckets (web / database /
+  remote-access / file-share / mail / infra-directory / ics-ot / mobile-device
+  / other) used to group/tag results.
+
+### Notes
+- Interactive-HTML enhancements (filter/charts/navigable topology), a visual
+  scan diff and JSON-lines streaming remain for the v1.0 portfolio polish
+  (Fase 26); the existing `--oH`/`--oMd` reports and CEF/LEEF/ECS/Syslog SIEM
+  exporters are unchanged.
+
 ## [0.93.0] - 2026-10-16
 
 **Fase 35 — evasion & camouflage: JA3/JA4 + random-order fragmentation.**

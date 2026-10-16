@@ -412,6 +412,7 @@ pub fn print_guide() {
     line("--history-clear       Tronca lo storico delle scansioni");
     line("--siem-format FMT     Output SIEM: cef|leef|ecs|syslog");
     line("--siem-out FILE       File destinazione SIEM events (richiede --siem-format)");
+    line("--sarif FILE          Report SARIF 2.1.0 per CI code-scanning (findings + porte)");
     line("--threat-intel-misp U Sync IoC MISP nel cache locale");
     line("--misp-api-key KEY    API key MISP");
     line("--misp-days N         Giorni di lookback MISP (default 30)");
@@ -464,6 +465,7 @@ pub fn print_guide() {
     example("rustymap --sV --auth-audit --save-profile lab.toml 10.0.0.5");
     example("rustymap --history 50");
     example("rustymap --siem-format ecs --siem-out events.jsonl 10.0.0.0/24");
+    example("rustymap --sS --sV --sarif scan.sarif 10.0.0.0/24   # per GitHub code-scanning");
     example("rustymap --siem-format cef --siem-out events.cef --auth-audit 10.0.0.5");
     example("rustymap --threat-intel-misp https://misp.lab.example --misp-api-key XXX");
     example("rustymap --threat-intel-match --auth-audit 10.0.0.0/24");

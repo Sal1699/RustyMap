@@ -45,6 +45,7 @@ mod raw_scan;
 mod report;
 mod scanner;
 mod scripting;
+mod sarif;
 mod self_test;
 mod service_probe;
 mod shutdown;
@@ -3548,6 +3549,15 @@ async fn run(mut args: Cli) -> Result<()> {
         }
     } else if args.siem_format.is_some() ^ args.siem_out.is_some() {
         eprintln!("[!] --siem-format and --siem-out must be used together");
+    }
+    if let Some(out) = &args.sarif {
+        sarif::write(
+            std::path::Path::new(out),
+            &sorted,
+            &compliance_findings,
+            env!("CARGO_PKG_VERSION"),
+        )?;
+        println!("[sarif] SARIF 2.1.0 written to {}", out);
     }
     if let Some(p) = &args.output_svg {
         topology_svg::write(std::path::Path::new(p), &sorted)?;
