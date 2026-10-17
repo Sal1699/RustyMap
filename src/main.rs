@@ -2233,9 +2233,60 @@ async fn run(mut args: Cli) -> Result<()> {
     }
 
     if args.ping_only {
-        for t in &targets {
-            println!("RustyMap scan report for {}", t.display());
-            println!("Host is up.");
+        // Richer host-discovery output: for each up host show PTR (shared DNS
+        // cache), latency and MAC + vendor hint from the ARP sweep — not just
+        // "Host is up". The enriched fields also ride into --oN/--oG/--oJ so a
+        // `-sn` sweep is a useful inventory, closer to `nmap -sn` + more.
+        let mut hosts: Vec<HostResult> = Vec::with_capacity(targets.len());
+        println!("RustyMap host-discovery report — {} host(s) up\n", targets.len());
+        println!(
+            "  {:<20} {:<4} {:>9}  {:<17}  HOSTNAME / VENDOR",
+            "ADDRESS", "FAM", "LATENCY", "MAC"
+        );
+        for t in targets.iter_mut() {
+            // Keep a known hostname, else reverse-resolve (unless --no-dns).
+            if t.hostname.as_deref().map(str::is_empty).unwrap_or(true) && !args.no_dns {
+                if let Some(name) = dns_cache::reverse(t.ip).await {
+                    t.hostname = Some(name);
+                }
+            }
+            let (mac_arr, rtt): (Option<[u8; 6]>, Option<std::time::Duration>) = match t.ip {
+                std::net::IpAddr::V4(v) => (
+                    arp_alive.get(&v).map(|m| [m.0, m.1, m.2, m.3, m.4, m.5]),
+                    arp_rtt.get(&v).copied(),
+                ),
+                _ => (None, None),
+            };
+            let fam = if t.ip.is_ipv4() { "v4" } else { "v6" };
+            let lat = rtt
+                .map(|r| format!("{:.1}ms", r.as_secs_f64() * 1000.0))
+                .unwrap_or_else(|| "-".into());
+            let mac_str = mac_arr
+                .map(|m| {
+                    format!(
+                        "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                        m[0], m[1], m[2], m[3], m[4], m[5]
+                    )
+                })
+                .unwrap_or_else(|| "-".into());
+            let vendor = mac_arr
+                .and_then(|m| crate::device_fp::is_mobile_oui(&m))
+                .map(|v| format!(" [{}]", v))
+                .unwrap_or_default();
+            let host = t.hostname.clone().filter(|h| !h.is_empty()).unwrap_or_default();
+            println!(
+                "  {:<20} {:<4} {:>9}  {:<17}  {}{}",
+                t.ip, fam, lat, mac_str, host, vendor
+            );
+            hosts.push(HostResult {
+                target: t.clone(),
+                up: true,
+                ports: Vec::new(),
+                elapsed: rtt.unwrap_or_default(),
+                os: None,
+                device: None,
+                mac: mac_arr,
+            });
         }
         let elapsed = t_start.elapsed().as_secs_f64();
         println!(
@@ -2246,22 +2297,9 @@ async fn run(mut args: Cli) -> Result<()> {
         );
         audit.event("scan_end", json!({ "mode": "ping_only", "up": targets.len() }));
 
-        // -sn still honours the interop output flags (like `nmap -sn -oA`):
-        // write the up hosts as port-less HostResults. Report formats
-        // (HTML/MD/PDF/template) are skipped — a bare ping sweep has nothing
-        // to render — with a note so the flag isn't silently ignored.
-        let hosts: Vec<HostResult> = targets
-            .iter()
-            .map(|t| HostResult {
-                target: t.clone(),
-                up: true,
-                ports: Vec::new(),
-                elapsed: std::time::Duration::from_secs(0),
-                os: None,
-                device: None,
-                mac: None,
-            })
-            .collect();
+        // -sn still honours the interop output flags (like `nmap -sn -oA`).
+        // Report formats (HTML/MD/PDF/template) are skipped below — a bare
+        // ping sweep has nothing to render.
         if let Some(p) = &args.output_normal {
             output::write_normal(p, &hosts, elapsed)?;
         }

@@ -4,6 +4,23 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.97.0] - 2026-10-17
+
+**Toward v1.0 — richer `--sn`, and 4 features promoted to Production.** 649/649.
+
+### Changed
+- **`--sn` host discovery is now an inventory, not just "Host is up".** Each up
+  host prints a row with **PTR hostname** (via the shared DNS cache), **latency**
+  and **MAC + vendor hint** (from the ARP sweep, on-LAN hosts), plus the address
+  family. The enriched hostname/MAC also ride into `--oN`/`--oG`/`--oJ`/`--oJL`
+  so a `-sn` sweep produces a useful machine-readable inventory.
+- **Maturity matrix — Beta → Production** for `-O`, `--sV`, `--tls-grade`,
+  `--ssh-audit`, on the strength of recorded lab agreement with the reference
+  tools (nmap `-O`/`-sV`, sslscan, ssh-audit) across prior runs. `--smb-audit`
+  stays Beta (only the firewall-reject path was validated, not a live-SMB
+  negotiate); the brute adapters and the Alpha set still need their lab runs
+  (see `KALI_MATURITY_CHECKLIST.md`).
+
 ## [0.96.0] - 2026-10-17
 
 **Toward v1.0 — closing deferred items. JSON-lines output (`--oJL`).** First of

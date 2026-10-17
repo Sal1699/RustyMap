@@ -240,7 +240,8 @@ pub fn print_guide() {
 
     section("HOST DISCOVERY");
     line("--Pn                  Salta discovery (tratta tutti gli host come up)");
-    line("--sn                  Solo ping, niente port scan (onora --oN/--oG/--oJ/--oX)");
+    line("--sn                  Solo ping/discovery (no port scan): per host up mostra PTR,");
+    line("                      latenza, MAC+vendor (ARP on-LAN); onora --oN/--oG/--oJ/--oJL/--oX");
     line("--PE                  ICMP echo ping (raw, admin)");
     line("--PR                  ARP discovery (LAN only; auto-detect same /24)");
     line("--PS, --PA, --PU      Variant ping types (alias)");
