@@ -517,7 +517,7 @@ pub fn print_guide() {
 
     category("EXTENSIONS");
     section("SCRIPTING & CVE");
-    line("~300 script Rhai built-in in ~25 categorie (http/db/ics/ssh/tls/mail/vpn…)");
+    line("~600 script Rhai built-in in ~25 categorie (http/db/ics/ssh/tls/mail/vpn…)");
     line("  filtrabili con --script-category / --script-tag (NSE-style)");
     line("--script PATH         Esegui script Rhai (file o directory *.rhai)");
     line("--cve-db FILE         Correla servizi a CVE (usa con --sV)");

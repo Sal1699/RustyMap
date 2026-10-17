@@ -1,0 +1,20 @@
+// @name: ftp-servu-banner
+// @description: Serv-U FTP
+// @category: ftp
+// @severity: info
+// @tags: ftp, banner, version
+// @author: rustymap
+for p in host.ports {
+    if p.state != "open" { continue; }
+    if p.port != 21 { continue; }
+    let svc = p.service;
+    if type_of(svc) != "map" { continue; }
+    let s = "";
+    if type_of(svc.banner) == "string" { s += svc.banner.to_lower() + " "; }
+    if type_of(svc.product) == "string" { s += svc.product.to_lower() + " "; }
+    if type_of(svc.version) == "string" { s += svc.version.to_lower() + " "; }
+    if s == "" { continue; }
+    if s.contains("serv-u") {
+        findings.push(#{ severity: "info", port: 21, message: `Serv-U FTP: ${s.trim()}` });
+    }
+}

@@ -4,6 +4,36 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.99.0] - 2026-10-17
+
+**Script engine 307 → 607 — nmap-NSE-count parity (user request #6).** 651/651
+tests; all 607 pass the `all_builtin_scripts_parse` gate.
+
+### Added
+- **+300 built-in Rhai scripts** (307 → 607, ~nmap's ~600 NSE count), generated
+  only in the two **FP-safe patterns** the v0.87.1 lab run hardened:
+  - **HTTP detect (183 new):** soft-404-guarded — fetch a random nonce path
+    first and suppress the hit if the server is a catch-all returning the same
+    marker, so a 200-to-everything box doesn't false-positive. Covers dev/CI
+    (Nexus/Artifactory/SonarQube/Confluence/Jira/TeamCity/Harbor/Rancher/Argo
+    CD/Gitea…), monitoring (Grafana/Nagios/LibreNMS/Netdata/Zabbix…), data/ML
+    (Superset/Metabase/NiFi/Airflow/Jupyter/MLflow/Ray…), self-hosted apps,
+    network/security gear (pfSense/MikroTik/UniFi/Citrix/F5/Palo Alto…),
+    cameras, and more.
+  - **Banner/version (117 new):** match the `-sV` banner/product/version (never
+    assert on a bare open port) — SSH/FTP/SMTP/IMAP/POP3/DNS/LDAP/ICS/DB
+    (MariaDB/Postgres/Mongo/Redis/Cassandra/Oracle/MSSQL/…) and more.
+- All carry `@category`/`@severity`/`@tags` metadata, so they're filterable via
+  `--script-category` / `--script-tag` / `--script-catalog` like the rest.
+
+### Notes
+- Generated from two templates derived from working, lab-hardened examples;
+  every script is parse-verified. A few `/`-path detectors with short markers
+  were tightened (`ray`→`ray dashboard`, `axis`→`axis-cgi`, `plane`→`makeplane`,
+  `outline`→`outline wiki`). **Kali should re-run the script sweep** (like the
+  v0.87→v0.87.1 pass) to catch any residual substring false-positives on the
+  generic-marker detectors; fixes land in a follow-up patch.
+
 ## [0.98.0] - 2026-10-17
 
 **New capability — `--port-script`: run any external script per open port.**
