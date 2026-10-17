@@ -240,7 +240,6 @@ pub struct CongestionWindow {
     min: f64,
     max: f64,
     slow_start: bool,
-    replies_seen: u64,
 }
 
 impl CongestionWindow {
@@ -248,7 +247,7 @@ impl CongestionWindow {
         let min = (min.max(1)) as f64;
         let max = (max as f64).max(min);
         let cwnd = (initial as f64).clamp(min, max);
-        Self { cwnd, ssthresh: max, min, max, slow_start: true, replies_seen: 0 }
+        Self { cwnd, ssthresh: max, min, max, slow_start: true }
     }
 
     /// How many probes to send in the next wave.
@@ -274,15 +273,19 @@ impl CongestionWindow {
         if sent == 0 {
             return;
         }
-        self.replies_seen += replies as u64;
         let drops = sent.saturating_sub(replies);
         let ratio = drops as f64 / sent as f64;
-        if self.replies_seen == 0 {
-            // Nothing has ever replied → silent/filtered host, not congestion.
-            // Keep growing so a fully-filtered sweep finishes quickly.
+        if replies == 0 {
+            // A wave with NO replies at all is filtered/silent, not congestion
+            // — so grow, don't back off. Backing off here pinned the window at
+            // the floor on a mostly-filtered host that had answered a few ports
+            // (lab v0.95.0 .3: 1 open, rest filtered → cwnd collapsed → ~50 min
+            // full-port). Congestion is a wave that WAS answering and then lost
+            // a large fraction (the rate-limiting fingerprint) — handled below.
             self.grow();
         } else if ratio > 0.20 {
-            // Congestion / rate-limiting on a responsive host → back off.
+            // Mixed wave losing a large fraction → congestion / rate-limiting
+            // on a responding host → multiplicative decrease to recover opens.
             self.ssthresh = (self.cwnd / 2.0).max(self.min);
             self.cwnd = self.ssthresh;
             self.slow_start = false;
@@ -406,10 +409,30 @@ mod tests {
     fn cwnd_respects_min_floor() {
         let mut w = CongestionWindow::new(64, 50, 512);
         w.feed(64, 64); // responsive
-        // Hammer it with congestion; it must never drop below the floor.
+        // Hammer it with MIXED congestion waves (some replies, heavy loss) —
+        // the real back-off path — it must never drop below the floor.
         for _ in 0..20 {
-            w.feed(w.window(), 0);
+            let win = w.window();
+            w.feed(win, 1); // 1 reply, rest dropped → ratio high → MD
         }
         assert!(w.window() >= 50, "window {} fell below floor", w.window());
+    }
+
+    #[test]
+    fn cwnd_all_drop_wave_does_not_back_off() {
+        // A mostly-filtered host that answered a few ports, then a wave of only
+        // filtered ports (0 replies) must NOT collapse the window (lab .3).
+        let mut w = CongestionWindow::new(64, 16, 512);
+        w.feed(64, 10); // responsive wave → grows
+        let before = w.window();
+        for _ in 0..5 {
+            w.feed(w.window(), 0); // all-filtered waves
+        }
+        assert!(
+            w.window() >= before,
+            "all-drop waves must not shrink the window ({} -> {})",
+            before,
+            w.window()
+        );
     }
 }

@@ -4,6 +4,32 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.95.2] - 2026-10-17
+
+**Congestion-window no longer collapses on a filtered-but-responsive host.**
+Follow-up to the v0.95.1 Kali re-test. 648/648 tests (+1).
+
+### Fixed
+- The v0.95.1 re-test confirmed the hang fixes (`.13` silent host 11h → 3.1s;
+  `--host-timeout` ceiling exact), but a *mostly-filtered* host that answered a
+  few ports then had thousands of filtered ports (`.3`: 1 open, rest filtered)
+  still took ~50 min on a full-port scan with no `--host-timeout`. Cause:
+  `CongestionWindow` treated every all-filtered wave as congestion (drop ratio
+  ≈ 1.0 with `replies_seen > 0`) and multiplicatively decreased, pinning the
+  window at the floor → thousands of tiny waves. Now a wave with **zero
+  replies** is treated as filtered/silent → the window **grows** (it is not
+  congestion); back-off is reserved for a *mixed* wave that was answering and
+  then lost a large fraction (the actual rate-limiting fingerprint). A
+  filtered full-port host now runs at a large window → seconds/low-minutes
+  instead of ~50 min, even without `--host-timeout`.
+
+### Notes
+- Rate-limit recovery is preserved: a wave still carrying replies but losing
+  >20% still halves the window to recover dropped opens on the next wave.
+- Needs a Kali re-check of the `.3`-type case (full-port, mostly filtered, no
+  `--host-timeout`) — expected to drop from ~50 min to ≲1 min. This clears the
+  last foot-gun before the fast engine can become the default.
+
 ## [0.95.1] - 2026-10-17
 
 **Fixes from the v0.95.0 Kali validation (`VALIDATION_0.95.md`).** The feature
