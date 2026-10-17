@@ -4,6 +4,24 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.98.0] - 2026-10-17
+
+**New capability — `--port-script`: run any external script per open port.**
+User request #5. 651/651 tests (+2).
+
+### Added
+- **`--port-script <CMD>`** (`port_script` module) — runs a user-supplied
+  script/command of *any* language once per OPEN port. The program is executed
+  directly (no shell → no injection surface) as `CMD <ip> <port> tcp` with
+  `RUSTYMAP_IP`/`RUSTYMAP_PORT`/`RUSTYMAP_PROTO`/`RUSTYMAP_HOST` in the
+  environment; non-empty stdout (collapsed, bounded to 300 chars) becomes a
+  `port-script` finding that flows into the summary, SARIF, reports and the exit
+  code. The language-agnostic counterpart to the built-in Rhai scripts — drop in
+  a `.sh`/`.py`/binary (shebang or real executable).
+- Safety rails: opt-in (the flag), no shell, stderr suppressed, stdout capped at
+  64 KiB and bounded in the finding, and a per-invocation `--timeout` that kills
+  a hung script.
+
 ## [0.97.0] - 2026-10-17
 
 **Toward v1.0 — richer `--sn`, and 4 features promoted to Production.** 649/649.

@@ -979,6 +979,13 @@ pub struct Cli {
     #[arg(long = "force-scripts")]
     pub force_scripts: bool,
 
+    /// Run an external script/command (ANY language) once per OPEN port. The
+    /// program is executed directly (no shell) as `CMD <ip> <port> tcp` with
+    /// RUSTYMAP_IP/PORT/PROTO/HOST in the env; non-empty stdout becomes a
+    /// finding. Bounded by --timeout per invocation. Runs your code — opt-in.
+    #[arg(long = "port-script", value_name = "CMD")]
+    pub port_script: Option<String>,
+
     /// Print common usage recipes and exit
     #[arg(long = "examples")]
     pub examples: bool,

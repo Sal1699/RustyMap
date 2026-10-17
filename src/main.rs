@@ -35,6 +35,7 @@ mod npcap;
 mod os_db;
 mod os_fp;
 mod output;
+mod port_script;
 mod portdesc;
 mod ports;
 mod profile;
@@ -3463,6 +3464,18 @@ async fn run(mut args: Cli) -> Result<()> {
             }
             Ok(Err(e)) => eprintln!("[!] script error: {}", e),
             Err(e) => eprintln!("[!] script task panicked: {}", e),
+        }
+    }
+
+    // --port-script: run a user-supplied external script/command (any language)
+    // once per open port (user request #5). Findings flow into the summary,
+    // SARIF, reports and the exit code like any other finding.
+    if let Some(cmd) = &args.port_script {
+        let pf = port_script::run(&sorted, cmd, timeout_dur);
+        if !pf.is_empty() {
+            exit::note_findings(true);
+            audit.event("port_script", json!({ "script": cmd, "findings": pf.len() }));
+            compliance_findings.extend(pf);
         }
     }
 

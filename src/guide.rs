@@ -526,6 +526,9 @@ pub fn print_guide() {
     line("                      scan di default/`--sV`/`-A`, non sui port-scan raw");
     line("                      espliciti (--sS/--sT -F) né sugli sweep >8 host —");
     line("                      così un port-scan resta veloce come nmap");
+    line("--port-script CMD     Esegue uno script/comando esterno (qualsiasi linguaggio)");
+    line("                      per OGNI porta aperta: CMD <ip> <port> tcp + env RUSTYMAP_*;");
+    line("                      lo stdout non vuoto diventa un finding. Opt-in, no shell.");
     line("--no-builtin-cves     Disabilita il DB CVE baked nel binario");
     line("--nmap-os-db FILE     Carica nmap-os-db (GPLv2, runtime): con -O attiva il");
     line("                      matching probabilistico completo (MatchPoints, ~6500");
