@@ -4,6 +4,42 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.95.1] - 2026-10-17
+
+**Fixes from the v0.95.0 Kali validation (`VALIDATION_0.95.md`).** The feature
+run passed 32→37; 31 passed on responsive hosts but a full-port scan of a
+fully-filtered host could run for hours. 647/647 tests.
+
+### Fixed
+- **B1/B3 — no per-host time ceiling on the raw path (full-port hang).**
+  `--host-timeout` was only honoured by the connect path; the raw SYN/stealth
+  scan (where the hang was) ran in a blocking thread no `tokio::timeout` could
+  stop. It is now a **cooperative deadline** passed into `run_raw_tcp_fast` /
+  `run_raw_tcp_scan` and checked at each wave / per-port boundary; on expiry the
+  host finalizes with its resolved ports (the rest as filtered). `--max-rate` /
+  `--min-rate` cap rate, not total time — `--host-timeout` is the time ceiling.
+- **B1 (automatic) — silence-shrink in the fast engine.** The per-wave collect
+  window used the full `--timeout` on every wave of a non-replying host. Now the
+  first wave gets the full timeout (a fair chance to reveal RTT) and, if the
+  host has answered *nothing*, later waves drop to the timeout floor — a
+  filtered port stays filtered whether we wait 150 ms or 1.5 s, so a silent
+  full-port host finishes in seconds, not hours. The moment any reply arrives it
+  reverts to the RTT-adaptive window.
+- **B2 — `--legacy-engine` re-added.** Removed in v0.88.4; restored as the
+  explicit opt-out (forces the per-probe engine, wins over `--fast-engine`), so
+  scripts don't break and it is ready as the opt-out when the fast engine is
+  promoted.
+
+### Notes
+- **B4** (`port_expand 1-65535` bench +26.7%): not a code change — the bench's
+  `parse_ports` is a self-contained inline copy and `benches/` was untouched
+  since v0.89.0, so the delta is Criterion noise from the concurrent long scan
+  session. Documented in `PERFORMANCE.md`.
+- **B5** (`--sL` double-dash vs nmap `-sL`): intended — RustyMap scan-type flags
+  are double-dash; `-sL` would collide with clap short-flag parsing.
+- **fast-engine default promotion** still waits: re-run the v0.95.0 full-port
+  cases with `--host-timeout` set and confirm the hang is gone, then promote.
+
 ## [0.95.0] - 2026-10-16
 
 **Fase 37 — speed consolidation + regression gate.** 647/647 tests (+2). Last

@@ -54,7 +54,7 @@ pub fn print_guide() {
     line("--randomize-hosts     Randomizza l'ordine degli host");
     line("--oA PREFIX           Scrive tutti i formati (txt/gnmap/json/html/md)");
     line("-R                    Forza reverse DNS su ogni IP target");
-    line("--host-timeout SEC    Abbandona host dopo N secondi (solo --sT, 0=off)");
+    line("--host-timeout SEC    Abbandona host dopo N secondi (--sT e scan raw --sS/…, 0=off)");
     line("--stats-every SEC     Stampa progress ogni N secondi durante lo scan");
     line("--data-string STR     Payload ASCII custom sui pacchetti raw");
     line("--data-hex HEX        Payload hex custom sui pacchetti raw");
@@ -264,6 +264,7 @@ pub fn print_guide() {
     line("                      Fase 31: finestra di congestione (cwnd AIMD) limita i probe in volo");
     line("                      — niente più flood sul full-port; --max-parallel la cappa, --max-rate");
     line("                      la pace, --min-rate la floora. Da ri-validare prima di renderlo default.");
+    line("--legacy-engine       forza il motore per-probe legacy (default attuale; vince su --fast-engine)");
     example("rustymap -t4 --max-parallel 1000 10.0.0.0/24");
     example("sudo rustymap --sS --fast-engine -F 10.0.0.0/24   # engine sperimentale opt-in");
     example("rustymap -t1 --scan-delay 500 10.0.0.5   # low-and-slow");

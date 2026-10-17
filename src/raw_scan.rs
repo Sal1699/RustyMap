@@ -571,6 +571,7 @@ fn classify(flags: u8, window: u16) -> Response {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_raw_tcp_scan(
     target: Target,
     ports: Arc<Vec<u16>>,
@@ -578,8 +579,16 @@ pub fn run_raw_tcp_scan(
     scanner: Arc<RawTcpScanner>,
     timeout: Duration,
     parallel: usize,
+    host_timeout: Duration,
 ) -> HostResult {
     let start = Instant::now();
+    // --host-timeout ceiling (lab v0.95.0 B1): each worker stops at this
+    // deadline; ports not yet probed are simply omitted. 0 = off.
+    let host_deadline = if host_timeout.is_zero() {
+        None
+    } else {
+        Some(start + host_timeout)
+    };
     let dst = match target.ip {
         IpAddr::V4(v) => v,
         IpAddr::V6(_) => {
@@ -625,6 +634,12 @@ pub fn run_raw_tcp_scan(
             let max_retries = crate::scanner::max_retries();
             let mut results = Vec::with_capacity(end - begin);
             for &p in &s_ports[begin..end] {
+                // --host-timeout: stop this worker once the ceiling is hit.
+                if let Some(dl) = host_deadline {
+                    if Instant::now() >= dl {
+                        break;
+                    }
+                }
                 // Retransmit on no-response before concluding Filtered/
                 // OpenFiltered — the way nmap does (--max-retries). A single
                 // dropped SYN (or a dropped RST on a stealth scan) over a
@@ -713,8 +728,17 @@ pub fn run_raw_tcp_fast(
     max_window: usize,
     min_rate: u32,
     max_rate: u32,
+    host_timeout: Duration,
 ) -> HostResult {
     let start = Instant::now();
+    // --host-timeout ceiling: a cooperative deadline checked at wave/round
+    // boundaries so a fully-filtered full-port scan can't run for hours
+    // (lab v0.95.0 B1). 0 = off.
+    let host_deadline = if host_timeout.is_zero() {
+        None
+    } else {
+        Some(start + host_timeout)
+    };
     let dst = match target.ip {
         IpAddr::V4(v) => v,
         IpAddr::V6(_) => {
@@ -751,6 +775,14 @@ pub fn run_raw_tcp_fast(
     let cw_init = (cw_max / 8).clamp(cw_min, cw_max);
     let mut cwnd = crate::rate::CongestionWindow::new(cw_init, cw_min, cw_max);
     let mut pacer = crate::rate::RatePacer::new(max_rate);
+    // Silence-shrink (lab v0.95.0 B1): give the host a full `--timeout` on the
+    // first wave to learn its RTT, but once it has answered *nothing* we stop
+    // burning the full timeout on every subsequent wave — a filtered port stays
+    // filtered whether we wait 150 ms or 1.5 s, so a silent full-port host
+    // finishes in ~seconds instead of hours. The moment any reply arrives we
+    // switch to the normal RTT-adaptive window.
+    let mut host_replied = false;
+    let mut waves_done = 0usize;
 
     // Fase 30 (Linux): when evasion is passive, swap the per-probe send loop
     // for a single `sendmmsg(2)` burst per wave (N sends → ~N/1024 syscalls) —
@@ -763,7 +795,7 @@ pub fn run_raw_tcp_fast(
         None
     };
 
-    for _ in 0..=max_retries {
+    'rounds: for _ in 0..=max_retries {
         if todo.is_empty() {
             break;
         }
@@ -771,6 +803,13 @@ pub fn run_raw_tcp_fast(
         let round_ports = todo.clone();
         let mut idx = 0usize;
         while idx < round_ports.len() {
+            // --host-timeout: stop this host cleanly; unresolved ports are
+            // finalized as no-reply (filtered) below.
+            if let Some(dl) = host_deadline {
+                if Instant::now() >= dl {
+                    break 'rounds;
+                }
+            }
             let wsize = cwnd.window().max(1);
             let end = (idx + wsize).min(round_ports.len());
             let wave = &round_ports[idx..end];
@@ -807,11 +846,19 @@ pub fn run_raw_tcp_fast(
             // breaks early once every pending port has replied; a dropped/
             // filtered port never replies, so the adaptive window keeps a
             // firewalled wave from burning the full `--timeout`.
-            let eff = crate::rate::adaptive_timeout(
-                timeout,
-                scanner.mean_rtt(),
-                crate::rate::timeout_floor(timeout),
-            );
+            let floor = crate::rate::timeout_floor(timeout);
+            let eff = if host_replied {
+                // Host answers → shrink toward ~10×RTT as usual.
+                crate::rate::adaptive_timeout(timeout, scanner.mean_rtt(), floor)
+            } else if waves_done == 0 {
+                // First wave: full timeout, a fair chance to reveal the RTT.
+                timeout
+            } else {
+                // Host has answered nothing so far → don't burn the full timeout
+                // on every wave; a filtered port won't become open by waiting.
+                floor
+            };
+            waves_done += 1;
             let deadline = Instant::now() + eff;
             let mut rtt_recorded = false;
             let mut replies = 0usize;
@@ -850,6 +897,9 @@ pub fn run_raw_tcp_fast(
             // Feed the wave outcome to the congestion window: a high drop ratio
             // on a host that is answering → back off; a clean wave → grow.
             cwnd.feed(wave.len(), replies);
+            if replies > 0 {
+                host_replied = true;
+            }
         }
         todo = ports.iter().copied().filter(|p| !state.contains_key(p)).collect();
     }

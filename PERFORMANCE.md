@@ -259,3 +259,11 @@ plus the hyperfine e2e table above. Numbers are recorded per Kali run in the
   next lock-free / allocation wins — profiling the raw send/collect loop and the
   `nmap-os-db` scorer needs a Linux target and privileges, so it is the Kali
   step rather than a Windows-dev-box change.
+
+### Note — `port_expand 1-65535` bench variance (v0.95.0 lab, B4)
+The v0.95.0 Kali run saw `port_expand 1-65535` at +26.7% vs the prior baseline,
+above the 10% gate. This is **measurement noise, not a regression**: the bench's
+`parse_ports` is a self-contained inline copy and `benches/lab_compare.rs` has
+not changed since v0.89.0, and the run executed Criterion concurrently with
+multi-hour filtered full-port scans. 8/10 benches improved the same run. Re-run
+on an idle box before treating any `port_expand` delta as real.

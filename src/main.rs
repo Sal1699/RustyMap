@@ -2598,15 +2598,15 @@ async fn run(mut args: Cli) -> Result<()> {
             }
             let any_v6 = targets.iter().any(|t| t.ip.is_ipv6());
             let scanner = Arc::new(RawTcpScanner::new(evasion_cfg)?);
-            // v0.88.4: the fast engine is OPT-IN again (reverted the v0.88.3
-            // default-flip). The Kali run (VALIDATION_0.88.3.md) showed the
-            // fast burst can outpace the receiver on full-port scans under
-            // load; keep the stable per-probe path as default until Fase 31
-            // adds congestion control.
-            if args.fast_engine {
-                eprintln!("[fast-engine] opt-in raw engine active (burst-send + async collect)");
+            // Fast engine is OPT-IN (per-probe is the default); --fast-engine
+            // selects it, --legacy-engine forces the per-probe path and wins
+            // if both are given (v0.95.1 re-added it for forward-compat — it
+            // becomes the real opt-out once the fast engine is re-promoted).
+            let use_fast = args.fast_engine && !args.legacy_engine;
+            if use_fast {
+                eprintln!("[fast-engine] opt-in raw engine active (burst-send + async collect, cwnd)");
             }
-            let result = run_raw_tcp(targets, port_list.clone(), kind, scanner, timeout_dur, parallel, args.fast_engine, args.min_rate, args.max_rate).await;
+            let result = run_raw_tcp(targets, port_list.clone(), kind, scanner, timeout_dur, parallel, use_fast, args.min_rate, args.max_rate, std::time::Duration::from_secs(args.host_timeout_secs)).await;
             // Post-scan sanity check: if we sent packets but rx_count is 0,
             // the kernel (or a firewall) is silently swallowing responses
             // before they reach our raw socket. IPv6 conntrack drops the
@@ -3969,6 +3969,7 @@ async fn run_raw_tcp(
     fast: bool,
     min_rate: u32,
     max_rate: u32,
+    host_timeout: std::time::Duration,
 ) -> Vec<HostResult> {
     let mut out = Vec::with_capacity(targets.len());
     for t in targets {
@@ -3981,9 +3982,12 @@ async fn run_raw_tcp(
                 // window, --max-rate paces it, --min-rate floors it.
                 raw_scan::run_raw_tcp_fast(
                     t, ports, kind, scanner_arc, timeout_dur, parallel, min_rate, max_rate,
+                    host_timeout,
                 )
             } else {
-                raw_scan::run_raw_tcp_scan(t, ports, kind, scanner_arc, timeout_dur, parallel)
+                raw_scan::run_raw_tcp_scan(
+                    t, ports, kind, scanner_arc, timeout_dur, parallel, host_timeout,
+                )
             }
         })
         .await

@@ -573,12 +573,17 @@ pub struct Cli {
 
     /// Opt-in fast raw engine (Fase 30): burst-send + async poll-collect for
     /// the --sS/--sA/--sW/--sF/--sN/--sX/--sM raw scans (on Linux a sendmmsg(2)
-    /// batch), instead of one thread per port chunk. Faster on sweeps and SYN
-    /// ranges; kept OPT-IN until Fase 31 (congestion control) hardens it on
-    /// full-port scans under load, where the default per-probe path is more
-    /// stable.
+    /// batch) with a congestion window (Fase 31). Faster on sweeps and SYN
+    /// ranges; opt-in pending the full-port re-validation before it becomes
+    /// default.
     #[arg(long = "fast-engine")]
     pub fast_engine: bool,
+
+    /// Force the legacy per-probe raw engine (the current default). Wins over
+    /// --fast-engine if both are given; the explicit opt-out once the fast
+    /// engine is promoted to default.
+    #[arg(long = "legacy-engine")]
+    pub legacy_engine: bool,
 
     /// IP protocol scan — discover which IP protocols (TCP/UDP/ICMP/GRE/…) the target supports
     #[arg(long = "sO", group = "scan_type")]
