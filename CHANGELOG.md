@@ -4,6 +4,26 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.96.0] - 2026-10-17
+
+**Toward v1.0 — closing deferred items. JSON-lines output (`--oJL`).** First of
+the Fase 36 reporting leftovers. 649/649 tests (+1).
+
+### Added
+- **`--oJL FILE`** — JSON-lines (ndjson): one compact JSON object per host,
+  newline-separated, stream-friendly for `jq` and log pipelines. Shares the
+  per-host JSON shape with `--oJ` (refactored into `json_out::host_to_json`);
+  `json_out::to_jsonl_string` is unit-tested (one valid JSON object per line).
+
+### Notes
+- Part of the post-roadmap "toward v1.0" work (the 9 feature phases 29→37 are
+  done; the v1.0 cut itself is not greenlit). Remaining Fase 36 reporting item:
+  interactive HTML (filters/charts). Other deferred/partial items tracked:
+  ICMP rate-limit signal (Fase 31), `nmap-service-probes` send-directives
+  (Fase 32); JA3 active mimicry (Fase 35) stays out (rustls controls our
+  ClientHello) and mobile positive-detection (Fase 34) is code-complete pending
+  a test device.
+
 ## [0.95.2] - 2026-10-17
 
 **Congestion-window no longer collapses on a filtered-but-responsive host.**

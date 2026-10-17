@@ -2272,6 +2272,10 @@ async fn run(mut args: Cli) -> Result<()> {
             let json = json_out::to_json_string(&hosts, &scan_type_str, started_at, elapsed)?;
             json_out::write_json(p, &json)?;
         }
+        if let Some(p) = &args.output_jsonl {
+            // JSON-lines: one object per host, stream-friendly (Fase 36).
+            json_out::write_json(p, &json_out::to_jsonl_string(&hosts)?)?;
+        }
         if let Some(p) = &args.output_xml {
             let args_line: String = std::env::args().collect::<Vec<_>>().join(" ");
             xml_out::write_xml_styled(
@@ -3470,6 +3474,10 @@ async fn run(mut args: Cli) -> Result<()> {
     if let Some(p) = &args.output_json {
         let json = json_out::to_json_string(&sorted, &scan_type_str, started_at, elapsed)?;
         json_out::write_json(p, &json)?;
+    }
+    if let Some(p) = &args.output_jsonl {
+        // JSON-lines: one object per host, stream-friendly (Fase 36).
+        json_out::write_json(p, &json_out::to_jsonl_string(&sorted)?)?;
     }
     if let Some(p) = &args.output_html {
         report::write_html(p, &sorted, &scan_type_str, started_at, elapsed, &diffs)?;

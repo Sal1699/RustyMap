@@ -53,6 +53,58 @@ struct JsonReport<'a> {
     hosts: Vec<JsonHost>,
 }
 
+/// Map one scan result to its JSON shape (shared by the full report and the
+/// JSON-lines writer).
+fn host_to_json(h: &HostResult) -> JsonHost {
+    JsonHost {
+        ip: h.target.ip.to_string(),
+        hostname: h.target.hostname.clone(),
+        up: h.up,
+        latency_secs: h.elapsed.as_secs_f64(),
+        device_class: h.device.as_ref().map(|d| d.class.as_str()),
+        vendor: h.device.as_ref().and_then(|d| d.vendor.clone()),
+        model: h.device.as_ref().and_then(|d| d.model.clone()),
+        firmware: h.device.as_ref().and_then(|d| d.firmware.clone()),
+        device_confidence: h.device.as_ref().map(|d| d.confidence),
+        ports: h
+            .ports
+            .iter()
+            .map(|p| {
+                // Enrich open ports with the same description + risk the rich
+                // console shows, so the JSON carries the verdict too.
+                let desc = if p.state == PortState::Open {
+                    portdesc::describe(p.port)
+                } else {
+                    None
+                };
+                JsonPort {
+                    port: p.port,
+                    protocol: "tcp",
+                    state: p.state.as_str(),
+                    service: service_name(p.port).unwrap_or("unknown"),
+                    note: desc.map(|d| d.text),
+                    risk: desc.map(|d| match d.risk {
+                        portdesc::Risk::High => "high",
+                        portdesc::Risk::Warn => "warn",
+                        portdesc::Risk::Info => "info",
+                    }),
+                }
+            })
+            .collect(),
+    }
+}
+
+/// JSON-lines (ndjson): one compact JSON object per host, newline-separated —
+/// stream-friendly for log pipelines / jq (Fase 36). Fase 36 closure.
+pub fn to_jsonl_string(hosts: &[HostResult]) -> Result<String> {
+    let mut out = String::new();
+    for h in hosts {
+        out.push_str(&serde_json::to_string(&host_to_json(h))?);
+        out.push('\n');
+    }
+    Ok(out)
+}
+
 pub fn to_json_string(
     hosts: &[HostResult],
     scan_type: &str,
@@ -60,45 +112,7 @@ pub fn to_json_string(
     elapsed_secs: f64,
 ) -> Result<String> {
     let up = hosts.iter().filter(|h| h.up).count();
-    let mapped: Vec<JsonHost> = hosts
-        .iter()
-        .map(|h| JsonHost {
-            ip: h.target.ip.to_string(),
-            hostname: h.target.hostname.clone(),
-            up: h.up,
-            latency_secs: h.elapsed.as_secs_f64(),
-            device_class: h.device.as_ref().map(|d| d.class.as_str()),
-            vendor: h.device.as_ref().and_then(|d| d.vendor.clone()),
-            model: h.device.as_ref().and_then(|d| d.model.clone()),
-            firmware: h.device.as_ref().and_then(|d| d.firmware.clone()),
-            device_confidence: h.device.as_ref().map(|d| d.confidence),
-            ports: h
-                .ports
-                .iter()
-                .map(|p| {
-                    // Enrich open ports with the same description + risk the
-                    // rich console shows, so the JSON carries the verdict too.
-                    let desc = if p.state == PortState::Open {
-                        portdesc::describe(p.port)
-                    } else {
-                        None
-                    };
-                    JsonPort {
-                        port: p.port,
-                        protocol: "tcp",
-                        state: p.state.as_str(),
-                        service: service_name(p.port).unwrap_or("unknown"),
-                        note: desc.map(|d| d.text),
-                        risk: desc.map(|d| match d.risk {
-                            portdesc::Risk::High => "high",
-                            portdesc::Risk::Warn => "warn",
-                            portdesc::Risk::Info => "info",
-                        }),
-                    }
-                })
-                .collect(),
-        })
-        .collect();
+    let mapped: Vec<JsonHost> = hosts.iter().map(host_to_json).collect();
 
     let report = JsonReport {
         tool: "rustymap",
@@ -168,6 +182,25 @@ mod tests {
                 p, json
             );
         }
+    }
+
+    #[test]
+    fn jsonl_one_object_per_host() {
+        let hosts = vec![
+            host_with_ports([10, 0, 0, 1], vec![80, 443]),
+            host_with_ports([10, 0, 0, 2], vec![22]),
+        ];
+        let jsonl = to_jsonl_string(&hosts).unwrap();
+        let lines: Vec<&str> = jsonl.lines().collect();
+        assert_eq!(lines.len(), 2, "one line per host");
+        for line in &lines {
+            // Each line is a standalone valid JSON object with an ip.
+            let v: serde_json::Value = serde_json::from_str(line).expect("valid JSON line");
+            assert!(v["ip"].is_string());
+            assert!(v["ports"].is_array());
+        }
+        assert!(lines[0].contains("10.0.0.1"));
+        assert!(lines[1].contains("10.0.0.2"));
     }
 
     #[test]

@@ -333,6 +333,7 @@ pub fn print_guide() {
     line("--oN FILE             Output testuale");
     line("--oG FILE             Output grepable");
     line("--oJ FILE             Output JSON (schema v1)");
+    line("--oJL FILE            Output JSON-lines (1 oggetto per host, ndjson; jq/pipeline)");
     line("--oH FILE             Report HTML");
     line("--oMd FILE            Report Markdown");
     line("--template TPL --oT FILE   Template Tera custom");

@@ -653,6 +653,11 @@ pub struct Cli {
     #[arg(long = "oJ")]
     pub output_json: Option<String>,
 
+    /// JSON-lines output (one compact JSON object per host, ndjson) to FILE —
+    /// stream-friendly for jq / log pipelines (Fase 36).
+    #[arg(long = "oJL")]
+    pub output_jsonl: Option<String>,
+
     /// SQLite database path for persistent scan history (default: rustymap.db)
     #[arg(long = "db")]
     pub db_path: Option<String>,
