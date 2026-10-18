@@ -4,6 +4,41 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.99.1] - 2026-10-18
+
+**Fixes from the v0.99.0 Kali run (`VALIDATION_0.99.md`).** 654/654 tests (+3);
+all 607 scripts still pass the parse gate.
+
+### Fixed
+- **FP-2 (MEDIUM) — `default-cred-likely` flagged `[high]` "Tomcat manager" on
+  lighttpd:8080.** Port 8080 fired *unless* `-sV` had positively identified a
+  non-Tomcat server, so with empty/unknown product it wrongly asserted Tomcat.
+  Now 8080 (the only ambiguous port) fires **only** on a positive Tomcat-family
+  product marker (tomcat/coyote/jboss/wildfly) — the v0.87.1 "no assertion on a
+  shared port without a positive marker" rule. Unambiguous ports (23/3306/…)
+  unchanged.
+- **FP-1 (LOW) — `Tech: Django, Django` on a Technicolor router.** The Django
+  `web_fp` rule keyed on the generic `csrftoken` cookie (used by routers and
+  many apps) and was **duplicated**, so it double-reported. Removed the
+  duplicate and tightened the marker to Django-specific tokens
+  (`csrfmiddlewaretoken` / `/static/admin/` / "django administration").
+- **SN-1 (MEDIUM) / SN-2 — `--sn` MAC always `-`.** When hosts were found via
+  TCP/ICMP discovery (or a proxy-ARP LAN), the ARP-sweep map didn't carry their
+  MACs to the output. `--sn` now also consults the **OS neighbor table**
+  (`ip neigh`, `arp -a` fallback) via `net_util::neighbor_macs` as a
+  discovery-path-independent MAC source. Parser `parse_neigh_table` is
+  unit-tested (Linux `ip neigh`, BSD/Windows `arp -a` paren/dash forms).
+
+### Maturity (from the run)
+- **`--cve-for` → Production** — lab-validated vs NVD (`OpenSSH 9.6p1` → 25 CVEs
+  incl. CVE-2024-6387). **`--smb-audit` stays Beta** (the test host was
+  firewalled → only the reject-path was re-validated, not a live SMB negotiate).
+- **`-O` → Beta (demoted, honest).** The emitted fingerprint is byte-identical
+  to nmap, but the match **without `--nmap-os-db`** fell back to a heuristic
+  that misread an OmniAccess AP as "VirtualBox Slirp NAT" (OS-1). Re-promote
+  after matching is validated on heterogeneous real hardware; pass
+  `--nmap-os-db` for accuracy meanwhile.
+
 ## [0.99.0] - 2026-10-17
 
 **Script engine 307 → 607 — nmap-NSE-count parity (user request #6).** 651/651

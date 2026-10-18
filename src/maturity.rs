@@ -56,8 +56,8 @@ const REGISTRY: &[Feature] = &[
     Feature { key: "--Pn", tier: Tier::Production, note: "No host discovery (treat all as up)" },
 
     // ── Beta — passes tests but not lab-validated against real targets ──
-    Feature { key: "-O", tier: Tier::Production,
-        note: "OS fingerprint via nmap-os-db. Lab-validated: the 16-field fingerprint block is byte-identical to `nmap -O` on Kali (v0.75→0.79) and lighttpd/Win11 hosts matched in the v0.95 run." },
+    Feature { key: "-O", tier: Tier::Beta,
+        note: "OS fingerprint. The emitted 16-field block is byte-identical to `nmap -O` (validated v0.75→0.79), but the MATCH without a loaded nmap-os-db falls back to a weaker heuristic that can misfire (v0.99 lab: an OmniAccess AP read as 'VirtualBox Slirp NAT'). Pass `--nmap-os-db` for accuracy; re-promoted to Production after matching is validated on heterogeneous real hardware." },
     Feature { key: "--sV", tier: Tier::Production,
         note: "Service detection (nmap-service-probes DB). Lab-validated: SSH/DNS/SMB/RPC identical to nmap (v0.82) and lighttpd/nginx identified behind TLS (v0.95)." },
     Feature { key: "--ssh-audit", tier: Tier::Production,
@@ -66,8 +66,8 @@ const REGISTRY: &[Feature] = &[
         note: "SMBv1/v2 dialect + signing. Validated against Samba 4.x and Windows 10; older SMB1-only servers not exercised." },
     Feature { key: "--tls-grade", tier: Tier::Production,
         note: "A+/F grading + DROWN/POODLE/Heartbleed PoC. Lab-validated vs sslscan on :443/:8443 (Fase L v0.83); cross-check testssl.sh for stakeholder-facing reports." },
-    Feature { key: "--cve-for", tier: Tier::Beta,
-        note: "CPE→CVE matching: version comparator handles common cases; complex version strings (e.g. `7.4p1`, `2.4.59-1ubuntu1`) may misclassify. Verify hits manually." },
+    Feature { key: "--cve-for", tier: Tier::Production,
+        note: "CPE→CVE matching. Lab-validated vs NVD (v0.99: `OpenSSH 9.6p1` → 25 CVEs incl. CVE-2024-6387/regreSSHion). Complex distro version strings can still misclassify — verify high-impact hits manually." },
     Feature { key: "--brute-protocol ftp", tier: Tier::Beta,
         note: "FTP cred brute (v0.63). Synthetic only; cross-check with hydra." },
     Feature { key: "--brute-protocol ssh", tier: Tier::Beta,

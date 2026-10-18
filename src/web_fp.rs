@@ -119,7 +119,7 @@ static RULES: Lazy<Vec<WebRule>> = Lazy::new(|| {
         },
         WebRule {
             name: "Django",
-            marker: Regex::new(r"(?i)csrftoken|__admin/|x-frame-options:\s*deny.*django").unwrap(),
+            marker: Regex::new(r"(?i)csrfmiddlewaretoken|/static/admin/|django administration").unwrap(),
             version: None,
             category: Framework,
         },
@@ -296,12 +296,6 @@ static RULES: Lazy<Vec<WebRule>> = Lazy::new(|| {
         WebRule {
             name: "Laravel",
             marker: Regex::new(r"(?i)laravel_session|x-powered-by:\s*php.*laravel|/vendor/laravel/").unwrap(),
-            version: None,
-            category: Framework,
-        },
-        WebRule {
-            name: "Django",
-            marker: Regex::new(r"(?i)csrftoken|__admin__|x-frame-options:\s*deny.*wsgi|django").unwrap(),
             version: None,
             category: Framework,
         },

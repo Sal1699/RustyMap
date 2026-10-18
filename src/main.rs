@@ -2244,6 +2244,10 @@ async fn run(mut args: Cli) -> Result<()> {
             "  {:<20} {:<4} {:>9}  {:<17}  HOSTNAME / VENDOR",
             "ADDRESS", "FAM", "LATENCY", "MAC"
         );
+        // Fallback MAC source (lab v0.99 SN-1): the OS neighbor table holds the
+        // MACs of hosts we just reached even when the ARP-sweep map didn't carry
+        // them to here (e.g. hosts found via TCP/ICMP discovery, proxy-ARP LANs).
+        let os_macs = net_util::neighbor_macs();
         for t in targets.iter_mut() {
             // Keep a known hostname, else reverse-resolve (unless --no-dns).
             if t.hostname.as_deref().map(str::is_empty).unwrap_or(true) && !args.no_dns {
@@ -2253,7 +2257,10 @@ async fn run(mut args: Cli) -> Result<()> {
             }
             let (mac_arr, rtt): (Option<[u8; 6]>, Option<std::time::Duration>) = match t.ip {
                 std::net::IpAddr::V4(v) => (
-                    arp_alive.get(&v).map(|m| [m.0, m.1, m.2, m.3, m.4, m.5]),
+                    arp_alive
+                        .get(&v)
+                        .map(|m| [m.0, m.1, m.2, m.3, m.4, m.5])
+                        .or_else(|| os_macs.get(&v).copied()),
                     arp_rtt.get(&v).copied(),
                 ),
                 _ => (None, None),

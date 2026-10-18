@@ -25,24 +25,20 @@ fn hint_for(p) {
     return "";
 }
 
-// Return true when the banner contradicts the port-based hint, so we
-// should NOT fire the finding. Currently only port 8080 is ambiguous
-// enough to need a banner check (it's used by everything HTTP).
-fn banner_contradicts_hint(port, product) {
+// Ambiguous ports (used by many HTTP servers) must NOT fire on a bare open
+// state — they require a POSITIVE -sV product marker, else we skip (v0.99.1
+// FP-2: lighttpd:8080 was wrongly flagged "Tomcat manager" when -sV had no/
+// non-Tomcat product). Protocol-unambiguous ports (23/3306/…) fire as before.
+fn needs_positive_marker(port) {
+    return port == 8080;
+}
+
+fn product_confirms(port, product) {
     if product == () { return false; }
     let p = product.to_string().to_lower();
     if port == 8080 {
-        // Tomcat / JBoss / WildFly / Coyote banners → genuine candidate
-        if p.contains("tomcat") || p.contains("coyote") || p.contains("jboss") || p.contains("wildfly") {
-            return false;
-        }
-        // Any other identified HTTP server (nginx, lighttpd, Apache,
-        // IIS, Caddy, OpenResty, …) means it's NOT a Tomcat manager.
-        if p.contains("nginx") || p.contains("lighttpd") || p.contains("apache")
-            || p.contains("iis") || p.contains("caddy") || p.contains("openresty")
-            || p.contains("traefik") || p.contains("haproxy") {
-            return true;
-        }
+        return p.contains("tomcat") || p.contains("coyote")
+            || p.contains("jboss") || p.contains("wildfly");
     }
     return false;
 }
@@ -52,7 +48,8 @@ for p in host.ports {
     let h = hint_for(p.port);
     if h == "" { continue; }
     let product = if p.service != () { p.service.product } else { () };
-    if banner_contradicts_hint(p.port, product) { continue; }
+    // On ambiguous ports, require a positive product match before asserting.
+    if needs_positive_marker(p.port) && !product_confirms(p.port, product) { continue; }
     findings.push(#{
         severity: "high",
         port: p.port,
