@@ -4,6 +4,25 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.99.2] - 2026-10-22
+
+**The two fixes the v0.99.1 re-test showed NOT fixed (SN-1, OS-1).** FP-1 and
+FP-2 were confirmed fixed in that run. 655/655 tests (+1).
+
+### Fixed
+- **SN-1 (MEDIUM) — `--sn` MAC still empty.** The v0.99.1 fallback spawned
+  `ip neigh` / `arp -a`, which returned nothing under `sudo` on Kali (`$PATH` /
+  net-tools). `net_util::neighbor_macs` now reads **`/proc/net/arp` directly**
+  (a plain file — no subprocess, always present) and only falls back to the
+  commands if that's empty; incomplete (all-zero) entries are dropped. The ARP
+  cache is warm after the sweep, so on-LAN hosts now get their MAC.
+- **OS-1 (MEDIUM) — `-O` reported a real AP as "VirtualBox/QEMU Slirp NAT".**
+  The Slirp heuristic (predictable ISN + NAT-gateway RST signature +
+  `W=0xFFFF`) set that as the **headline OS verdict**, but that combination also
+  occurs on real embedded-Linux stacks. It is now a **hint only, never the OS
+  family** — a real device will no longer be reported as a VM. Load
+  `--nmap-os-db` for the authoritative match.
+
 ## [0.99.1] - 2026-10-18
 
 **Fixes from the v0.99.0 Kali run (`VALIDATION_0.99.md`).** 654/654 tests (+3);

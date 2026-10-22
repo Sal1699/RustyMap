@@ -64,26 +64,34 @@ pub fn parse_neigh_table(output: &str) -> Vec<(Ipv4Addr, [u8; 6])> {
 }
 
 /// Read the OS neighbor table (post-scan it holds the MACs of hosts we just
-/// talked to) as an IPv4→MAC map. Tries `ip neigh` (Linux), falls back to
-/// `arp -a`. Empty on failure. Used as a `--sn` MAC fallback independent of
-/// which discovery path ran.
+/// talked to) as an IPv4→MAC map. Prefers `/proc/net/arp` on Linux — a plain
+/// file, so no subprocess / `$PATH` / net-tools dependency (lab v0.99 SN-1:
+/// the `ip neigh` / `arp -a` spawn returned nothing under sudo on Kali) — then
+/// falls back to `ip neigh` / `arp -a`. Incomplete (all-zero) entries are
+/// dropped. Used as a `--sn` MAC fallback independent of which discovery ran.
 pub fn neighbor_macs() -> HashMap<Ipv4Addr, [u8; 6]> {
-    use std::process::Command;
-    let text = Command::new("ip")
-        .arg("neigh")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .or_else(|| {
-            Command::new("arp")
-                .arg("-a")
-                .output()
-                .ok()
-                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        })
-        .unwrap_or_default();
-    parse_neigh_table(&text).into_iter().collect()
+    let mut text = std::fs::read_to_string("/proc/net/arp").unwrap_or_default();
+    if parse_neigh_table(&text).is_empty() {
+        use std::process::Command;
+        text = Command::new("ip")
+            .arg("neigh")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .or_else(|| {
+                Command::new("arp")
+                    .arg("-a")
+                    .output()
+                    .ok()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            })
+            .unwrap_or_default();
+    }
+    parse_neigh_table(&text)
+        .into_iter()
+        .filter(|(_, m)| *m != [0u8; 6]) // drop incomplete entries
+        .collect()
 }
 
 #[cfg(test)]
@@ -114,5 +122,18 @@ mod tests {
     #[test]
     fn skips_incomplete() {
         assert!(parse_neigh_table("? (192.168.1.9) at <incomplete> on eth0").is_empty());
+    }
+
+    #[test]
+    fn parses_proc_net_arp() {
+        // The /proc/net/arp layout: header line + columns; incomplete entries
+        // carry an all-zero MAC (filtered by neighbor_macs, not the parser).
+        let out = "IP address       HW type     Flags       HW address            Mask     Device\n\
+                   192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:ff     *        eth0\n\
+                   192.168.1.9      0x1         0x0         00:00:00:00:00:00     *        eth0";
+        let t = parse_neigh_table(out);
+        // Header line yields nothing; both data rows parse (zero-MAC too).
+        assert!(t.contains(&("192.168.1.1".parse().unwrap(), [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff])));
+        assert!(t.iter().all(|(ip, _)| *ip != "0.0.0.0".parse::<Ipv4Addr>().unwrap()));
     }
 }

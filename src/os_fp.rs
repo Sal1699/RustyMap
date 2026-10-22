@@ -508,11 +508,13 @@ fn refine_from_tcp_fp(host: &HostResult, guess: &mut OsGuess, timeout: Duration)
             let predictable = !matches!(isn, crate::tcp_fp::IsnClass::Random);
             let nat_sig = suite.as_ref().map_or(false, |s| s.nat_gateway_signature());
             if predictable && nat_sig && fp.window == 65535 {
-                guess.family = "VirtualBox/QEMU Slirp NAT (user-mode gateway)".into();
-                guess.confidence = guess.confidence.max(82);
-                guess
-                    .hints
-                    .push("heuristic: TTL 255 + DF clear + predictable ISN + W=0xFFFF → Slirp/QEMU NAT".into());
+                // This signature ALSO appears on real embedded Linux stacks, so
+                // it is recorded as a HINT only — never the headline OS verdict
+                // (lab v0.99 OS-1: an OmniAccess AP was mislabelled "VirtualBox
+                // Slirp NAT" at 88%). Load `--nmap-os-db` for the real match.
+                guess.hints.push(
+                    "heuristic: TTL 255 + DF clear + predictable ISN + W=0xFFFF → possible VirtualBox/QEMU Slirp NAT (verify; also seen on embedded Linux)".into(),
+                );
             }
         }
 
