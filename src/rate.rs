@@ -266,6 +266,15 @@ impl CongestionWindow {
         }
     }
 
+    /// Multiplicative decrease (halve toward the floor) and leave slow-start.
+    /// Driven by the drop-ratio branch of `feed`, and by the raw engine's ICMP
+    /// destination-unreachable signal (#4) regardless of drop ratio.
+    pub fn force_backoff(&mut self) {
+        self.ssthresh = (self.cwnd / 2.0).max(self.min);
+        self.cwnd = self.ssthresh;
+        self.slow_start = false;
+    }
+
     /// Feed the outcome of a wave: `sent` probes went out and `replies` of them
     /// got a definitive answer (the rest are drops this wave). See the struct
     /// doc for the policy.
@@ -286,9 +295,7 @@ impl CongestionWindow {
         } else if ratio > 0.20 {
             // Mixed wave losing a large fraction → congestion / rate-limiting
             // on a responding host → multiplicative decrease to recover opens.
-            self.ssthresh = (self.cwnd / 2.0).max(self.min);
-            self.cwnd = self.ssthresh;
-            self.slow_start = false;
+            self.force_backoff();
         } else if ratio < 0.05 {
             self.grow();
         }
@@ -416,6 +423,19 @@ mod tests {
             w.feed(win, 1); // 1 reply, rest dropped → ratio high → MD
         }
         assert!(w.window() >= 50, "window {} fell below floor", w.window());
+    }
+
+    #[test]
+    fn cwnd_force_backoff_halves_to_floor() {
+        let mut w = CongestionWindow::new(400, 16, 512);
+        let before = w.window();
+        w.force_backoff();
+        assert!(w.window() < before && w.window() >= 16);
+        // Repeated forced backoff never goes below the floor.
+        for _ in 0..10 {
+            w.force_backoff();
+        }
+        assert!(w.window() >= 16);
     }
 
     #[test]

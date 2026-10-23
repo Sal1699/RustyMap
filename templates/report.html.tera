@@ -99,6 +99,7 @@
       </tbody>
     </table>
     {% endif %}
+    {% if h.hidden_count > 0 %}<div class="hostmeta" style="opacity:.55">+{{ h.hidden_count }} closed/filtered port(s) scanned, not shown</div>{% endif %}
   </div>
   {% endfor %}
 

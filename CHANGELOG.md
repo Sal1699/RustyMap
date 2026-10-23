@@ -4,6 +4,38 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.1] - 2026-10-23
+
+**The last big-list item (#4 ICMP rate-limit) plus HTML report trim.** 658/658
+tests. This closes the "falli tutti insieme" set — every item the user listed
+is now implemented.
+
+### Added
+- **#4 — ICMP destination-unreachable now drives congestion back-off.** The raw
+  engine opens one shared, best-effort ICMP listener thread per scanner
+  (`icmp_receiver_loop`, counts type-3 packets). During the fast engine's wave
+  loop, any new destination-unreachable observed across a wave forces a cwnd
+  multiplicative decrease (`CongestionWindow::force_backoff`) *regardless* of
+  the drop ratio — admin-prohibited / port-unreachable / frag-needed is a direct
+  rate-limit signal, where a plain silent drop is not. Fail-safe: if the ICMP
+  channel can't be opened (e.g. Windows without privilege), the counter stays 0
+  and everything behaves exactly as in 0.100.0. One thread per scanner, not per
+  host, so there's no thread-per-host leak.
+
+### Changed
+- **HTML report (`--oH`) trimmed to the interesting ports.** A `/24` full-port
+  scan wrote a row for every closed/filtered port on every host, bloating the
+  file to ~4.1 MB for 20 hosts (lab v0.100). `report::to_view` now keeps only
+  `open` / `open|filtered` / `unfiltered` rows in the per-host table; the
+  summary counts are unchanged. An honest "`+N closed/filtered port(s) scanned,
+  not shown`" note is rendered under each host's table so the trim is visible,
+  not silent.
+
+### Notes
+- Still opt-in: the ICMP back-off only runs on the fast engine (`--fast-engine`),
+  which remains opt-in by design. NEEDS KALI validation: ICMP back-off behaviour
+  against a rate-limiting host, and the trimmed HTML size/rendering.
+
 ## [0.100.0] - 2026-10-23
 
 **Three of the four remaining big-list items (#8/#9, #2, #3).** 657/657 tests.

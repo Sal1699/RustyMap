@@ -3,10 +3,11 @@ use crate::net_util::source_ipv4_for;
 use crate::scanner::{HostResult, PortResult, PortState};
 use crate::target::Target;
 use anyhow::{anyhow, Result};
+use pnet::packet::icmp::IcmpTypes;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::tcp::{TcpFlags, TcpPacket};
 use pnet::transport::{
-    tcp_packet_iter, transport_channel,
+    icmp_packet_iter, tcp_packet_iter, transport_channel,
     TransportChannelType::{Layer3, Layer4},
     TransportProtocol::Ipv4,
     TransportReceiver, TransportSender,
@@ -95,6 +96,12 @@ pub struct RawTcpScanner {
     /// full `--timeout` (the SYN slow-ramp fix).
     ewma_rtt_us: std::sync::atomic::AtomicU64,
     rtt_samples: std::sync::atomic::AtomicU64,
+    /// Count of inbound ICMP destination-unreachable (type 3: admin-prohibited
+    /// / frag-needed / port-unreach) packets — a rate-limit signal for the
+    /// fast engine's congestion window (Fase 31 follow-up). Fed by a single
+    /// shared best-effort ICMP reader thread; stays 0 if the ICMP channel
+    /// couldn't be opened (no privilege / platform).
+    icmp_unreach: Arc<AtomicU64>,
 }
 
 impl RawTcpScanner {
@@ -126,6 +133,18 @@ impl RawTcpScanner {
         let pending_rx = Arc::clone(&pending);
         let rx_thread = thread::spawn(move || receiver_loop(rx, pending_rx));
 
+        // Best-effort ICMP listener (one shared thread, not per host → no
+        // thread-per-host leak). Counts destination-unreachable as a rate-limit
+        // signal for the cwnd. If the channel can't open, we just get no signal
+        // and everything else behaves exactly as before.
+        let icmp_unreach = Arc::new(AtomicU64::new(0));
+        if let Ok((_itx, irx)) =
+            transport_channel(4096, Layer4(Ipv4(IpNextHeaderProtocols::Icmp)))
+        {
+            let ctr = Arc::clone(&icmp_unreach);
+            thread::spawn(move || icmp_receiver_loop(irx, ctr));
+        }
+
         Ok(Self {
             tx4: Arc::new(Mutex::new(tx4)),
             tx3,
@@ -134,7 +153,15 @@ impl RawTcpScanner {
             _rx_thread: rx_thread,
             ewma_rtt_us: std::sync::atomic::AtomicU64::new(0),
             rtt_samples: std::sync::atomic::AtomicU64::new(0),
+            icmp_unreach,
         })
+    }
+
+    /// Running count of inbound ICMP destination-unreachable packets (0 if the
+    /// ICMP listener couldn't be opened). The fast engine reads the delta per
+    /// wave to detect rate-limiting.
+    fn icmp_unreach(&self) -> u64 {
+        self.icmp_unreach.load(Ordering::Relaxed)
     }
 
     /// Mean observed RTT once a few replies have arrived; `None` while warming
@@ -530,6 +557,17 @@ fn no_reply_state(kind: RawTcpKind) -> PortState {
     }
 }
 
+/// Shared ICMP reader: bumps `counter` on every destination-unreachable
+/// (type 3). One per scanner, detached; exits when the channel drops.
+fn icmp_receiver_loop(mut rx: TransportReceiver, counter: Arc<AtomicU64>) {
+    let mut iter = icmp_packet_iter(&mut rx);
+    while let Ok((packet, _addr)) = iter.next() {
+        if packet.get_icmp_type() == IcmpTypes::DestinationUnreachable {
+            counter.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
 fn receiver_loop(mut rx: TransportReceiver, pending: PendingMap) {
     let mut iter = tcp_packet_iter(&mut rx);
     while let Ok((packet, addr)) = iter.next() {
@@ -820,6 +858,7 @@ pub fn run_raw_tcp_fast(
 
             // ── burst the wave without waiting ──
             let burst_start = Instant::now();
+            let icmp_before = scanner.icmp_unreach();
             #[cfg(target_os = "linux")]
             let mut pend: Vec<(u16, mpsc::Receiver<Response>)> = match batch {
                 Some(ref b) => scanner.send_probe_batch(b, src, dst, wave, kind),
@@ -897,6 +936,13 @@ pub fn run_raw_tcp_fast(
             // Feed the wave outcome to the congestion window: a high drop ratio
             // on a host that is answering → back off; a clean wave → grow.
             cwnd.feed(wave.len(), replies);
+            // ICMP destination-unreachable arriving during this wave is a
+            // direct rate-limit signal (admin-prohibited / frag / port-unreach)
+            // → force a cwnd back-off regardless of the drop ratio (Fase 31
+            // ICMP signal, #4). No-op if the ICMP listener isn't available.
+            if scanner.icmp_unreach() > icmp_before {
+                cwnd.force_backoff();
+            }
             if replies > 0 {
                 host_replied = true;
             }

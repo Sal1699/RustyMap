@@ -45,6 +45,8 @@ struct HostView {
     device_confidence: Option<u8>,
     os: Option<String>,
     ports: Vec<PortView>,
+    /// Ports scanned but not shown (closed/filtered), for an honest note.
+    hidden_count: usize,
     diff: Option<DiffView>,
 }
 
@@ -68,6 +70,17 @@ fn to_view(hosts: &[HostResult], diffs: &HashMap<String, PortDiff>) -> Vec<HostV
             let ports: Vec<PortView> = h
                 .ports
                 .iter()
+                // Only the interesting states go in the report table — a /24
+                // with closed/filtered rows for every scanned port bloated the
+                // HTML to megabytes (lab v0.100: 4.1 MB for 20 hosts). The
+                // open attack surface is what a report is for; the summary
+                // still carries the counts.
+                .filter(|p| {
+                    matches!(
+                        p.state,
+                        PortState::Open | PortState::OpenFiltered | PortState::Unfiltered
+                    )
+                })
                 .map(|p| {
                     let desc = if p.state == PortState::Open {
                         crate::portdesc::describe(p.port)
@@ -92,6 +105,9 @@ fn to_view(hosts: &[HostResult], diffs: &HashMap<String, PortDiff>) -> Vec<HostV
                 })
                 .collect();
             let open_count = ports.iter().filter(|p| p.state == "open").count();
+            // Ports scanned but not shown (closed/filtered) — surfaced as a
+            // small note so the trimmed table stays honest.
+            let hidden_count = h.ports.len().saturating_sub(ports.len());
             let ip_s = h.target.ip.to_string();
             let diff = diffs.get(&ip_s).map(|d| DiffView {
                 new_open: d.new_open.clone(),
@@ -111,6 +127,7 @@ fn to_view(hosts: &[HostResult], diffs: &HashMap<String, PortDiff>) -> Vec<HostV
                 device_confidence: h.device.as_ref().map(|d| d.confidence),
                 os: h.os.as_ref().map(|o| format!("{} ({}%)", o.family, o.confidence)),
                 ports,
+                hidden_count,
                 diff,
             }
         })
