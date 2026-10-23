@@ -41,11 +41,21 @@
 
   <div class="summary">
     <strong>{{ hosts_up }}</strong>/{{ hosts_total }} hosts up &middot;
-    <strong>{{ open_ports_total }}</strong> open port(s) discovered
+    <strong>{{ open_ports_total }}</strong> open port(s) discovered<span id="riskSummary"></span>
+  </div>
+
+  <div class="filterbar">
+    <input id="filterText" type="search" placeholder="filter host / IP / service…" oninput="applyFilters()">
+    <label><input id="onlyOpen" type="checkbox" onchange="applyFilters()"> only hosts with open ports</label>
+    <span class="riskbtns">risk:
+      <button type="button" id="rb-all" class="active" onclick="setRisk('all')">all</button>
+      <button type="button" id="rb-warn" onclick="setRisk('warn')">&#9888;+</button>
+      <button type="button" id="rb-high" onclick="setRisk('high')">&#8252; only</button>
+    </span>
   </div>
 
   {% for h in hosts %}
-  <div class="host{% if not h.up %} down{% endif %}">
+  <div class="host{% if not h.up %} down{% endif %}" data-name="{{ h.ip }} {{ h.hostname | default(value='') }}" data-open="{{ h.open_count | default(value=0) }}">
     <h2>{{ h.ip }}{% if h.hostname %} ({{ h.hostname }}){% endif %}</h2>
     <div class="hostmeta">
       {% if h.up %}Up &middot; latency {{ h.latency_secs | round(precision=3) }}s &middot; {{ h.open_count }} open{% else %}Down{% endif %}
@@ -91,5 +101,44 @@
     {% endif %}
   </div>
   {% endfor %}
+
+  <style>
+    .filterbar{margin:12px 0;padding:10px;background:#f5f5f7;border-radius:6px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+    .filterbar input[type=search]{padding:5px 8px;min-width:220px;border:1px solid #ccc;border-radius:4px}
+    .riskbtns button{padding:3px 9px;margin-left:4px;border:1px solid #bbb;background:#fff;border-radius:4px;cursor:pointer}
+    .riskbtns button.active{background:#333;color:#fff;border-color:#333}
+    #riskSummary .rs-high{color:#c0392b;font-weight:bold}
+    #riskSummary .rs-warn{color:#b8860b;font-weight:bold}
+  </style>
+  <script>
+    function applyFilters(){
+      var q=(document.getElementById('filterText').value||'').toLowerCase();
+      var onlyOpen=document.getElementById('onlyOpen').checked;
+      document.querySelectorAll('.host').forEach(function(h){
+        var name=(h.getAttribute('data-name')||'').toLowerCase();
+        var open=parseInt(h.getAttribute('data-open')||'0',10);
+        var body=h.textContent.toLowerCase();
+        var match=(q===''||name.indexOf(q)>=0||body.indexOf(q)>=0);
+        h.style.display=(match&&(!onlyOpen||open>0))?'':'none';
+      });
+    }
+    function setRisk(mode){
+      ['all','warn','high'].forEach(function(x){
+        var b=document.getElementById('rb-'+x); if(b) b.classList.toggle('active',x===mode);
+      });
+      document.querySelectorAll('table tbody tr').forEach(function(tr){
+        var cell=tr.querySelector('td[class^="risk-"]');
+        var r=cell?cell.className.replace('risk-',''):'';
+        var show = mode==='all' ? true : (mode==='warn' ? (r==='high'||r==='warn') : r==='high');
+        tr.style.display=show?'':'none';
+      });
+    }
+    (function(){
+      var high=document.querySelectorAll('td.risk-high').length;
+      var warn=document.querySelectorAll('td.risk-warn').length;
+      var el=document.getElementById('riskSummary');
+      if(el) el.innerHTML=' &middot; <span class="rs-high">'+high+' high</span> / <span class="rs-warn">'+warn+' warn</span> finding(s)';
+    })();
+  </script>
 </body>
 </html>

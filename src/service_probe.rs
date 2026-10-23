@@ -964,6 +964,18 @@ pub async fn probe(
             }
         }
     }
+    // Fase 32 send-directives: when the user loaded `--nmap-service-probes`,
+    // replay nmap's OWN probe payloads for this port if the built-ins didn't
+    // name a product. Additive + gated — no DB loaded ⇒ no-op.
+    if best.as_ref().map_or(true, |b| b.product.is_none())
+        && crate::nmap_db::service_probe_defs().is_some()
+    {
+        if let Some(info) = db_probe(addr, timeout_dur).await {
+            if !info.is_empty() {
+                best = Some(info);
+            }
+        }
+    }
     // The TLS handshake adds a full RTT per port; gate it behind
     // intensity ≥ 7 (--version-intensity, default 5). Users who want it
     // every time can pass --version-intensity 7+ or --version-all.
@@ -1003,6 +1015,33 @@ pub async fn probe(
         }
     }
     best
+}
+
+/// Fase 32 send-directives: replay the loaded `nmap-service-probes` payloads
+/// for this port (plain TCP) and match the responses. No-op when no DB is
+/// loaded (`probe_payloads_for_port` returns empty).
+async fn db_probe(addr: SocketAddr, dur: Duration) -> Option<ServiceInfo> {
+    let payloads = crate::nmap_db::probe_payloads_for_port(addr.port(), false);
+    for payload in payloads {
+        let mut stream = match timeout(dur, TcpStream::connect(addr)).await {
+            Ok(Ok(s)) => s,
+            _ => continue,
+        };
+        if !payload.is_empty() {
+            let _ = timeout(dur, stream.write_all(&payload)).await;
+        }
+        let mut buf = vec![0u8; 2048];
+        if let Ok(Ok(n)) = timeout(dur, stream.read(&mut buf)).await {
+            if n > 0 {
+                if let Some(info) = match_signatures(&buf[..n]) {
+                    if !info.is_empty() {
+                        return Some(info);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 async fn probe_once(addr: SocketAddr, p: &Probe, dur: Duration) -> Option<ServiceInfo> {

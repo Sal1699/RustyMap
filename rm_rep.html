@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RustyMap report - 2026-10-23T18:49:01.208413900+02:00</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2em; background: #0f172a; color: #e2e8f0; }
+  h1 { color: #38bdf8; margin-bottom: 0.2em; }
+  .meta { color: #94a3b8; margin-bottom: 1.5em; font-size: 0.9em; }
+  .meta span { margin-right: 1.5em; }
+  .host { background: #1e293b; border-radius: 8px; padding: 1em 1.25em; margin-bottom: 1em; }
+  .host h2 { margin: 0 0 0.4em; font-size: 1.1em; color: #f1f5f9; }
+  .host.down h2 { color: #64748b; }
+  .hostmeta { color: #94a3b8; font-size: 0.85em; margin-bottom: 0.5em; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9em; }
+  th, td { text-align: left; padding: 4px 10px; border-bottom: 1px solid #334155; }
+  th { color: #cbd5e1; font-weight: 600; }
+  .state-open { color: #4ade80; font-weight: 600; }
+  .state-closed { color: #f87171; }
+  .state-filtered { color: #fbbf24; }
+  .state-open\|filtered { color: #22d3ee; }
+  .state-unfiltered { color: #c084fc; }
+  .risk-high { color: #f87171; font-weight: 600; }
+  .risk-warn { color: #fbbf24; }
+  .risk-info { color: #94a3b8; }
+  .summary { background: #1e293b; padding: 1em 1.25em; border-radius: 8px; margin-bottom: 1.5em; }
+  .summary strong { color: #38bdf8; }
+  .diff { background: #0b1220; border-left: 3px solid #38bdf8; padding: 0.5em 0.8em; margin: 0.6em 0 0.4em; font-size: 0.85em; }
+  .diff .new { color: #4ade80; }
+  .diff .gone { color: #f87171; }
+  .diff .changed { color: #fbbf24; }
+</style>
+</head>
+<body>
+  <h1>RustyMap 0.99.2</h1>
+  <div class="meta">
+    <span>Scan: <strong>Connect</strong></span>
+    <span>Started: 2026-10-23T18:49:01.208413900+02:00</span>
+    <span>Elapsed: 4.55s</span>
+  </div>
+
+  <div class="summary">
+    <strong>1</strong>/1 hosts up &middot;
+    <strong>1</strong> open port(s) discovered<span id="riskSummary"></span>
+  </div>
+
+  <div class="filterbar">
+    <input id="filterText" type="search" placeholder="filter host / IP / service…" oninput="applyFilters()">
+    <label><input id="onlyOpen" type="checkbox" onchange="applyFilters()"> only hosts with open ports</label>
+    <span class="riskbtns">risk:
+      <button type="button" id="rb-all" class="active" onclick="setRisk('all')">all</button>
+      <button type="button" id="rb-warn" onclick="setRisk('warn')">&#9888;+</button>
+      <button type="button" id="rb-high" onclick="setRisk('high')">&#8252; only</button>
+    </span>
+  </div>
+
+  
+  <div class="host" data-name="127.0.0.1 " data-open="1">
+    <h2>127.0.0.1</h2>
+    <div class="hostmeta">
+      Up &middot; latency 4.534s &middot; 1 open
+    </div>
+    
+    
+    
+    <div class="diff">
+      <strong>Diff vs previous scan:</strong>
+      
+       <span class="gone">−open: 445</span>
+      
+    </div>
+    
+    
+    <table>
+      <thead><tr><th>Port</th><th>Proto</th><th>State</th><th>Service</th><th>Version</th><th>Note</th></tr></thead>
+      <tbody>
+      
+        <tr>
+          <td>80</td>
+          <td>tcp</td>
+          <td class="state-filtered">filtered</td>
+          <td>http</td>
+          <td></td>
+          <td class="risk-"></td>
+        </tr>
+      
+        <tr>
+          <td>135</td>
+          <td>tcp</td>
+          <td class="state-open">open</td>
+          <td>msrpc</td>
+          <td></td>
+          <td class="risk-warn">&#9888; MSRPC endpoint mapper — Windows RPC; enumeration surface</td>
+        </tr>
+      
+        <tr>
+          <td>443</td>
+          <td>tcp</td>
+          <td class="state-filtered">filtered</td>
+          <td>https</td>
+          <td></td>
+          <td class="risk-"></td>
+        </tr>
+      
+      </tbody>
+    </table>
+    
+  </div>
+  
+
+  <style>
+    .filterbar{margin:12px 0;padding:10px;background:#f5f5f7;border-radius:6px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+    .filterbar input[type=search]{padding:5px 8px;min-width:220px;border:1px solid #ccc;border-radius:4px}
+    .riskbtns button{padding:3px 9px;margin-left:4px;border:1px solid #bbb;background:#fff;border-radius:4px;cursor:pointer}
+    .riskbtns button.active{background:#333;color:#fff;border-color:#333}
+    #riskSummary .rs-high{color:#c0392b;font-weight:bold}
+    #riskSummary .rs-warn{color:#b8860b;font-weight:bold}
+  </style>
+  <script>
+    function applyFilters(){
+      var q=(document.getElementById('filterText').value||'').toLowerCase();
+      var onlyOpen=document.getElementById('onlyOpen').checked;
+      document.querySelectorAll('.host').forEach(function(h){
+        var name=(h.getAttribute('data-name')||'').toLowerCase();
+        var open=parseInt(h.getAttribute('data-open')||'0',10);
+        var body=h.textContent.toLowerCase();
+        var match=(q===''||name.indexOf(q)>=0||body.indexOf(q)>=0);
+        h.style.display=(match&&(!onlyOpen||open>0))?'':'none';
+      });
+    }
+    function setRisk(mode){
+      ['all','warn','high'].forEach(function(x){
+        var b=document.getElementById('rb-'+x); if(b) b.classList.toggle('active',x===mode);
+      });
+      document.querySelectorAll('table tbody tr').forEach(function(tr){
+        var cell=tr.querySelector('td[class^="risk-"]');
+        var r=cell?cell.className.replace('risk-',''):'';
+        var show = mode==='all' ? true : (mode==='warn' ? (r==='high'||r==='warn') : r==='high');
+        tr.style.display=show?'':'none';
+      });
+    }
+    (function(){
+      var high=document.querySelectorAll('td.risk-high').length;
+      var warn=document.querySelectorAll('td.risk-warn').length;
+      var el=document.getElementById('riskSummary');
+      if(el) el.innerHTML=' &middot; <span class="rs-high">'+high+' high</span> / <span class="rs-warn">'+warn+' warn</span> finding(s)';
+    })();
+  </script>
+</body>
+</html>

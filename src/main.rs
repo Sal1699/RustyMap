@@ -4037,30 +4037,43 @@ async fn run_raw_tcp(
     max_rate: u32,
     host_timeout: std::time::Duration,
 ) -> Vec<HostResult> {
-    let mut out = Vec::with_capacity(targets.len());
-    for t in targets {
-        let ports = Arc::clone(&ports);
-        let scanner_arc = Arc::clone(&scanner_arc);
-        let r = tokio::task::spawn_blocking(move || {
-            if fast {
-                // Fase 30 engine + Fase 31 congestion window: cwnd-bounded
-                // burst-send + async poll-collect, --max-parallel caps the
-                // window, --max-rate paces it, --min-rate floors it.
-                raw_scan::run_raw_tcp_fast(
-                    t, ports, kind, scanner_arc, timeout_dur, parallel, min_rate, max_rate,
-                    host_timeout,
-                )
-            } else {
-                raw_scan::run_raw_tcp_scan(
-                    t, ports, kind, scanner_arc, timeout_dur, parallel, host_timeout,
-                )
+    // Scan hosts with BOUNDED CONCURRENCY instead of one-at-a-time (lab v0.99
+    // #8/#9: a /24 raw sweep was dominated by per-host wall time because the
+    // raw path ran hosts sequentially, unlike the connect path). The shared
+    // RawTcpScanner is safe across concurrent hosts — sends are Mutex-serialized
+    // and replies are demuxed by (ip,port). Concurrency is capped LOW because
+    // the per-probe path already spawns up to `parallel` OS threads *per host*;
+    // a high host-concurrency would explode the thread count.
+    let host_concurrency = match targets.len() {
+        0..=1 => 1,
+        2..=16 => 3,
+        _ => 4,
+    };
+    stream::iter(targets.into_iter())
+        .map(|t| {
+            let ports = Arc::clone(&ports);
+            let scanner_arc = Arc::clone(&scanner_arc);
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    if fast {
+                        // Fase 30 engine + Fase 31 congestion window.
+                        raw_scan::run_raw_tcp_fast(
+                            t, ports, kind, scanner_arc, timeout_dur, parallel, min_rate, max_rate,
+                            host_timeout,
+                        )
+                    } else {
+                        raw_scan::run_raw_tcp_scan(
+                            t, ports, kind, scanner_arc, timeout_dur, parallel, host_timeout,
+                        )
+                    }
+                })
+                .await
+                .expect("scan thread panicked")
             }
         })
+        .buffer_unordered(host_concurrency)
+        .collect()
         .await
-        .expect("scan thread panicked");
-        out.push(r);
-    }
-    out
 }
 
 async fn run_idle(

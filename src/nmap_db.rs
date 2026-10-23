@@ -267,17 +267,170 @@ pub struct ServiceMatch {
 
 static SERVICE_PROBES: OnceCell<Vec<ServiceMatch>> = OnceCell::new();
 
+/// A `Probe` directive from nmap-service-probes: the payload to SEND and which
+/// ports it targets (Fase 32 send-directives). Lets `-sV` actually replay
+/// nmap's probes, not just match against our built-in probes' banners.
+#[derive(Debug, Clone)]
+pub struct ServiceProbeDef {
+    pub name: String,
+    pub proto: String,
+    pub payload: Vec<u8>,
+    pub ports: Vec<u16>,
+    pub ssl_ports: Vec<u16>,
+    pub rarity: u8,
+}
+
+static SERVICE_PROBE_DEFS: OnceCell<Vec<ServiceProbeDef>> = OnceCell::new();
+
 pub fn load_service_probes<P: AsRef<Path>>(path: P) -> Result<(usize, usize)> {
     let body = fs::read_to_string(&path)
         .with_context(|| format!("read {:?}", path.as_ref()))?;
     let (entries, skipped) = parse_service_probes(&body);
     let n = entries.len();
     let _ = SERVICE_PROBES.set(entries);
+    let _ = SERVICE_PROBE_DEFS.set(parse_probe_defs(&body));
     Ok((n, skipped))
 }
 
 pub fn service_probes() -> Option<&'static [ServiceMatch]> {
     SERVICE_PROBES.get().map(|v| v.as_slice())
+}
+
+pub fn service_probe_defs() -> Option<&'static [ServiceProbeDef]> {
+    SERVICE_PROBE_DEFS.get().map(|v| v.as_slice())
+}
+
+/// The probe payloads to send to `port` (a `ssl`-wrapped port tries the
+/// sslports set too), most-common-first (lowest rarity), non-empty only,
+/// capped. Empty when no `--nmap-service-probes` file was loaded.
+pub fn probe_payloads_for_port(port: u16, ssl: bool) -> Vec<Vec<u8>> {
+    let defs = match service_probe_defs() {
+        Some(d) => d,
+        None => return Vec::new(),
+    };
+    let mut hits: Vec<&ServiceProbeDef> = defs
+        .iter()
+        .filter(|d| {
+            !d.payload.is_empty()
+                && (d.ports.contains(&port) || (ssl && d.ssl_ports.contains(&port)))
+        })
+        .collect();
+    hits.sort_by_key(|d| d.rarity);
+    hits.into_iter().take(6).map(|d| d.payload.clone()).collect()
+}
+
+/// Decode an nmap probe `q|…|` payload body: `\r \n \t \0 \a \f \v \\ \xHH`,
+/// everything else literal.
+fn decode_probe_payload(s: &str) -> Vec<u8> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'\\' && i + 1 < b.len() {
+            let c = b[i + 1];
+            match c {
+                b'r' => { out.push(b'\r'); i += 2; }
+                b'n' => { out.push(b'\n'); i += 2; }
+                b't' => { out.push(b'\t'); i += 2; }
+                b'0' => { out.push(0); i += 2; }
+                b'a' => { out.push(0x07); i += 2; }
+                b'f' => { out.push(0x0c); i += 2; }
+                b'v' => { out.push(0x0b); i += 2; }
+                b'\\' => { out.push(b'\\'); i += 2; }
+                b'x' if i + 3 < b.len() => {
+                    match std::str::from_utf8(&b[i + 2..i + 4]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                        Some(byte) => { out.push(byte); i += 4; }
+                        None => { out.push(c); i += 2; }
+                    }
+                }
+                _ => { out.push(c); i += 2; }
+            }
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Extract a `q<delim>…<delim>` payload from the tail of a Probe line.
+fn parse_q_string(s: &str) -> Vec<u8> {
+    let s = s.trim();
+    let bytes = s.as_bytes();
+    if bytes.len() < 2 || bytes[0] != b'q' {
+        return Vec::new();
+    }
+    let delim = bytes[1] as char;
+    let after = &s[2..];
+    match after.find(delim) {
+        Some(end) => decode_probe_payload(&after[..end]),
+        None => Vec::new(),
+    }
+}
+
+fn parse_port_list(s: &str) -> Vec<u16> {
+    let mut v = Vec::new();
+    for part in s.trim().split(',') {
+        let part = part.trim();
+        if let Some((a, b)) = part.split_once('-') {
+            if let (Ok(a), Ok(b)) = (a.trim().parse::<u16>(), b.trim().parse::<u16>()) {
+                for p in a..=b {
+                    v.push(p);
+                }
+            }
+        } else if let Ok(p) = part.parse::<u16>() {
+            v.push(p);
+        }
+    }
+    v
+}
+
+/// Parse the `Probe`/`ports`/`sslports`/`rarity` directives into send-ready
+/// probe defs (TCP only). The `match`/`softmatch` lines stay with
+/// `parse_service_probes` (the flat matcher).
+pub fn parse_probe_defs(body: &str) -> Vec<ServiceProbeDef> {
+    let mut defs = Vec::new();
+    let mut cur: Option<ServiceProbeDef> = None;
+    for line in body.lines() {
+        let l = line.trim();
+        if l.is_empty() || l.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = l.strip_prefix("Probe ") {
+            if let Some(d) = cur.take() {
+                defs.push(d);
+            }
+            let mut it = rest.splitn(3, char::is_whitespace);
+            let proto = it.next().unwrap_or("").to_string();
+            let name = it.next().unwrap_or("").to_string();
+            let payload = parse_q_string(it.next().unwrap_or(""));
+            cur = Some(ServiceProbeDef {
+                name,
+                proto,
+                payload,
+                ports: Vec::new(),
+                ssl_ports: Vec::new(),
+                rarity: 9,
+            });
+        } else if let Some(p) = l.strip_prefix("ports ") {
+            if let Some(d) = cur.as_mut() {
+                d.ports = parse_port_list(p);
+            }
+        } else if let Some(p) = l.strip_prefix("sslports ") {
+            if let Some(d) = cur.as_mut() {
+                d.ssl_ports = parse_port_list(p);
+            }
+        } else if let Some(r) = l.strip_prefix("rarity ") {
+            if let Some(d) = cur.as_mut() {
+                d.rarity = r.trim().parse().unwrap_or(9);
+            }
+        }
+    }
+    if let Some(d) = cur.take() {
+        defs.push(d);
+    }
+    defs.retain(|d| d.proto.eq_ignore_ascii_case("TCP"));
+    defs
 }
 
 /// Parse `match`/`softmatch` lines from nmap-service-probes. Returns
@@ -430,6 +583,42 @@ pub fn match_loaded_probes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decodes_probe_payload_escapes() {
+        assert_eq!(decode_probe_payload("GET / HTTP/1.0\\r\\n\\r\\n"), b"GET / HTTP/1.0\r\n\r\n");
+        assert_eq!(decode_probe_payload("\\x00\\x01\\xff"), vec![0x00, 0x01, 0xff]);
+        assert_eq!(decode_probe_payload("a\\tb\\\\c"), b"a\tb\\c");
+    }
+
+    #[test]
+    fn parses_probe_defs_block() {
+        let body = "\
+# comment
+Probe TCP GetRequest q|GET / HTTP/1.0\\r\\n\\r\\n|
+rarity 1
+ports 80,443,8080-8082
+sslports 443
+match http m|^HTTP/1\\.[01]| p/Apache/
+
+Probe UDP DNSStatusRequest q|\\x00\\x00|
+ports 53
+
+Probe TCP NULL q||
+ports 21,22";
+        let defs = parse_probe_defs(body);
+        // UDP probe dropped; two TCP probes kept.
+        assert_eq!(defs.len(), 2);
+        let get = &defs[0];
+        assert_eq!(get.name, "GetRequest");
+        assert_eq!(get.payload, b"GET / HTTP/1.0\r\n\r\n");
+        assert_eq!(get.rarity, 1);
+        assert!(get.ports.contains(&80) && get.ports.contains(&8081));
+        assert!(get.ssl_ports.contains(&443));
+        // probe_payloads_for_port needs a loaded static; test the def directly:
+        // GetRequest targets 8080-8082 and 443 via ssl.
+        assert!(get.ports.contains(&8082));
+    }
 
     #[test]
     fn parses_os_db_block() {

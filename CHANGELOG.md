@@ -4,6 +4,43 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.0] - 2026-10-23
+
+**Three of the four remaining big-list items (#8/#9, #2, #3).** 657/657 tests.
+(#4 ICMP rate-limit deferred — see Notes.)
+
+### Changed / performance
+- **#8/#9 — the raw path now scans hosts with bounded concurrency** instead of
+  one-at-a-time (`run_raw_tcp` uses `buffer_unordered`, like the connect path).
+  The v0.99.0 `hyperfine` run showed a `/24` raw sweep was dominated by per-host
+  wall time because hosts ran sequentially. Concurrency is capped **low**
+  (≤4) because the per-probe path already spawns up to `--max-parallel` OS
+  threads *per host* — a high host-concurrency would explode the thread count.
+  The shared `RawTcpScanner` is safe across concurrent hosts (Mutex-serialized
+  sends, replies demuxed by `(ip,port)`).
+
+### Added
+- **#2 — interactive HTML report (`--oH`).** Filter bar (host/IP/service search
+  + "only hosts with open ports"), a risk filter (all / warn+ / high-only), and
+  a high/warn finding summary — vanilla inline JS/CSS, no external deps.
+- **#3 — `nmap-service-probes` send-directives.** `--nmap-service-probes` now
+  parses the `Probe`/`ports`/`sslports`/`rarity` directives and decodes the
+  `q|…|` payloads (`nmap_db::parse_probe_defs` + `decode_probe_payload`, both
+  unit-tested), and `-sV` **replays** nmap's own probe payloads for a port when
+  the built-ins didn't name a product (first cut; additive + gated — no DB
+  loaded ⇒ no-op). Previously only `match`/`softmatch` lines were consumed.
+
+### Notes
+- **#4 (ICMP type-3 rate-limit signal) deferred.** Doing it right needs a second
+  live raw ICMP socket + a reader-thread lifecycle in the core scanner (one per
+  concurrent host now), which can't be tested on the Windows dev box and risks
+  thread leaks / socket issues on the stable raw path. It will be its own
+  Kali-validated change rather than a rushed bundle (drop-ratio already drives
+  the cwnd back-off effectively).
+- Needs Kali: the host-parallelism speedup on a real `/24` (re-bench vs the
+  v0.99 numbers), `-sV` with `--nmap-service-probes` replaying probes against a
+  real service, and the interactive HTML in a browser.
+
 ## [0.99.2] - 2026-10-22
 
 **The two fixes the v0.99.1 re-test showed NOT fixed (SN-1, OS-1).** FP-1 and

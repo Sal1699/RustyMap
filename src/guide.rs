@@ -281,7 +281,8 @@ pub fn print_guide() {
     line("                       8443 ecc. — es. lighttpd-on-443, non più 'ssl/https')");
     line("--version-light       Alias di --version-intensity 2");
     line("--version-all         Alias di --version-intensity 9");
-    line("--nmap-service-probes FILE  Carica nmap-service-probes (match/softmatch extra)");
+    line("--nmap-service-probes FILE  Carica nmap-service-probes: match/softmatch extra +");
+    line("                      replay dei Probe del DB (payload/ports/rarity) durante -sV");
     line("--osscan-limit        -O solo su host con almeno una porta open/closed");
     line("                      (su porte TLS aggancia anche cert + protocollo;");
     line("                       con HTTP aperto estrae vendor/model/firmware");
@@ -335,7 +336,7 @@ pub fn print_guide() {
     line("--oG FILE             Output grepable");
     line("--oJ FILE             Output JSON (schema v1)");
     line("--oJL FILE            Output JSON-lines (1 oggetto per host, ndjson; jq/pipeline)");
-    line("--oH FILE             Report HTML");
+    line("--oH FILE             Report HTML interattivo (filtro host/servizio, filtro rischio, riepilogo)");
     line("--oMd FILE            Report Markdown");
     line("--template TPL --oT FILE   Template Tera custom");
     line("-v / -vv / -vvv       Verbosita: RTT+reason+porte chiuse / colonne extra / log [net]/[probe]");
@@ -536,7 +537,7 @@ pub fn print_guide() {
     line("                      Con -O e SENZA questo flag, i path standard di sistema");
     line("                      (/usr/share/nmap/nmap-os-db, ~/nmap-os-db, …) vengono");
     line("                      caricati automaticamente");
-    line("--nmap-service-probes FILE  Carica nmap-service-probes (parse `match` lines)");
+    line("--nmap-service-probes FILE  Carica nmap-service-probes (match/softmatch + replay Probe)");
     line("--examples            Stampa 16 ricette pronte per casi comuni");
     line("--completions SHELL   Genera completion script (bash|zsh|fish|powershell)");
     line("--trace-raw           Logga ogni tx/rx pacchetto raw (debug --sS)");
