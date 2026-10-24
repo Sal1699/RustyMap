@@ -1,174 +1,159 @@
-# RustyMap — Kali Test Roadmap
+# RustyMap — Kali Test Roadmap (v0.100.1)
 
-Consolidated, runnable test plan for the Kali lab: everything still to confirm
-on real hardware, from the accumulated "needs Kali" items (v0.83→v0.86) to the
-⬜ commands never exercised. Companion to `COMMAND_COVERAGE.md` (the status
-matrix), `HYDRA_PARITY.md` (brute), and `LAB_VALIDATION.md` (the run log).
+Consolidated, runnable test plan for the Kali lab: **everything still to confirm
+on real hardware** at the current head. Ordered by priority — P0 is the freshly
+shipped code, P1 are the maturity promotions that get us toward v1.0 with the
+hosts you already have, P2/P3 need a specific target, P4 is perf/regression.
+
+Companion docs: `KALI_MATURITY_CHECKLIST.md` (tier-promotion detail),
+`COMMAND_COVERAGE.md` (status matrix), `HYDRA_PARITY.md` (brute cross-check),
+`LAB_VALIDATION.md` (the dated run log).
 
 **Flag syntax reminder:** scan/detection/output flags are DOUBLE-dash
-(`--sS --sV --sL --sn --Pn --sO --oN --oX`…). Real short flags only:
+(`--sS --sV --sL --sn --Pn --sO --oN --oX --oH --oJL`…). Real short flags only:
 `-A -O -F -p -v -D -f -S -e -n -t -d -b -r -R`.
 
 ## Prep
 
 ```sh
-# 1) Ottieni/aggiorna il repo su Kali e builda v0.86.0
-#    Prima volta: clona. Già clonato: il clone fallisce (|| true) e si prosegue.
 cd ~
 git clone https://github.com/Sal1699/RustyMap.git 2>/dev/null || true
-cd RustyMap || { echo "ERRORE: clone/clone-path non trovato"; }
+cd RustyMap
 git fetch origin --tags
-git checkout v0.86.0            # versione esatta sotto test (oppure: git pull origin main)
-cargo build --release          # ./target/release/rustymap (qualche minuto)
+git checkout v0.100.1          # or: git pull origin main
+cargo build --release
 RM=./target/release/rustymap
-$RM --version                  # deve stampare: rustymap 0.86.0
-
-# 2) (consigliato) allinea il `rustymap` su PATH al binario appena buildato,
-#    altrimenti un vecchio install resta e `rustymap --version` mostra la
-#    versione sbagliata (gli scan raw vanno comunque lanciati come root).
-install -m 0755 target/release/rustymap "$(command -v rustymap || echo /usr/local/bin/rustymap)"
-rustymap --version             # ora anche da PATH → rustymap 0.86.0
+$RM --version                  # must print: rustymap 0.100.1
+cargo test 2>&1 | tail -1      # must print: 658 passed; 0 failed
 
 # Lab targets (adjust to your /24)
-ROUTER=192.168.1.1     # TIM gateway (TLS 1.2, ~13 ports)
+ROUTER=192.168.1.1     # TIM gateway — OpenWrt-ish, TLS 1.2, rate-limits full-port
 SERVER=192.168.1.31    # SSH+DNS+HTTPS+rsync+8080
-WIN=192.168.1.64       # Win11, SMB firewalled
+WIN=192.168.1.64       # Win11 (SMB)
 NET=192.168.1.0/24
 ```
 
 Reference tools: `nmap 7.9x`, `sslscan`, `testssl.sh`, `hydra`,
-`crackmapexec`, `dig`/`dnsrecon`, `curl --http3`, `msfconsole`+`msfrpcd`.
+`crackmapexec`, `ssh-audit`, `dig`/`dnsrecon`, `tcpdump`. Raw scans
+(`--sS/--sU/-O`/stealth/`--fast-engine`) need `sudo`.
 
-**How to record:** write `VALIDATION_0.86.md` with the results, add a dated row
-to `LAB_VALIDATION.md`, and flip the matching `COMMAND_COVERAGE.md` cells
-⬜→🟡→✅. One `sudo` note: raw scans (`--sS/--sU/-O`/stealth/idle) need root.
-
----
-
-## P0 — Confirm the recent fixes (must-pass regressions, v0.83→v0.86)
-
-| # | Command | Expect | Compare |
-|---|---------|--------|---------|
-| 0.1 | `sudo $RM --sS -F $NET --progress` | **live determinate bar** with real %/ETA (ports done/total); hidden if piped | eyeball |
-| 0.2 | `sudo $RM --sS -F $SERVER --scan-stats 2` | `[stats]` lines with **non-zero** sent/replied/open/filtered | — |
-| 0.3 | `$RM --ssl-enum $ROUTER -p 443,8443` | enumerates ECDHE **+ DHE/RSA/CBC + exotic (ARIA/CAMELLIA/CCM/SEED)**; near sslscan count | `sslscan $ROUTER:8443` |
-| 0.4 | `$RM --smb-audit $WIN` | clear per-port verdict: "firewall reject"/"RST", not "bogus length" | — |
-| 0.5 | `$RM --ssl-enum $ROUTER; echo $?` | exit **1** (findings: weak/deprecated TLS) | — |
-| 0.6 | `$RM --sS --INVALID $SERVER; echo $?` | exit **3** (config error) | — |
-| 0.7 | `$RM --sn --oG up.gnmap $NET` | gnmap "Host: … Status: Up" for live hosts | `nmap -sn -oG` |
-| 0.8 | `$RM $ROUTER -p 1-1000 --sS` | device line should NOT say "Synology NAS" for the TIM gateway | — |
-| 0.9 | `$RM --msf-import lab --msf-url http://127.0.0.1:55553/api/ --msf-token T $SERVER -sV` (ws NOT pre-created) | auto-creates `lab`, pushes host+service+vuln | `msfconsole: workspace lab; hosts; services` |
-| 0.10 | `$RM --oH r.html --oMd r.md $SERVER -sV` then open both | tables show **Version + risk-Note + OS**; HTML risk colours | eyeball |
-| 0.11 | `sudo $RM --sS 2001:db8::1 -p 80` on a dual-stack host with no rule | zero-reply hint suggests **`ip6tables`** (not iptables) | — |
-| 0.12 | `sudo $RM --sS -F $SERVER` on a lossy/rate-limited host | fewer false-`filtered` than a single-probe run (retransmit) | `nmap -sS` |
+**How to record:** write `VALIDATION_0.100.1.md`, add a dated row to
+`LAB_VALIDATION.md`, flip the matching `COMMAND_COVERAGE.md` cells. Any bug →
+triage in the report, fix in a `0.100.x` patch, re-run.
 
 ---
 
-## P1 — Untested high-value features (⬜ → validate)
+## P0 — Fresh code in v0.100.1 (must-pass)
 
-### Service / OS / TLS depth
-| Command | Expect | Compare |
-|---------|--------|---------|
-| `$RM --smtp-audit $MAILHOST -p 25,465,587` | STARTTLS + AUTH mechanisms | `nmap --script smtp-*` |
-| `sudo $RM --sA $SERVER -p 1-1000` | filtered vs unfiltered (firewall ruleset map) | `nmap -sA` |
-| `sudo $RM --sW $SERVER -p 1-1000` | window-scan open/closed | `nmap -sW` |
-| `sudo $RM --sM $SERVER -p 1-1000` | Maimon results | `nmap -sM` |
-| `sudo $RM --sO $SERVER` | IP-protocol list | `nmap -sO` |
+| # | Command | Expect | How to verify |
+|---|---------|--------|---------------|
+| 0.1 | `sudo $RM --fast-engine -p- $ROUTER` | the fast engine **does not flood/stall** against a rate-limiting host; completes in minutes | `sudo tcpdump -ni <if> 'icmp[icmptype]==3'` in another shell — you should see type-3 packets AND the scan slow down (cwnd back-off), not keep hammering |
+| 0.2 | compare 0.1 cwnd behaviour with `--trace-raw` if available | back-off visible when ICMP type-3 arrives | eyeball the wave cadence |
+| 0.3 | `sudo $RM -p- $NET --oH report.html` | `report.html` is **small** (was ~4.1 MB for 20 hosts at v0.100.0), one row per *open/open-filtered/unfiltered* port only | `ls -lh report.html` |
+| 0.4 | open `report.html` in a browser | filter bar (host/service search + "only open"), risk filter (all/warn+/high), high/warn summary all work; each host shows **"+N closed/filtered port(s) scanned, not shown"** | eyeball + click |
+| 0.5 | `$RM --oH report.html $SERVER -sV` then diff summary counts vs `--oN` | open-port **counts unchanged** by the trim; summary still correct | compare |
 
-### Web depth (needs a real web app — e.g. DVWA/Juice Shop)
-| Command | Expect | Compare |
-|---------|--------|---------|
-| `$RM --web-scan $WEBAPP -p 80,443,8080` | header grade + WAF/CDN + the 49 sensitive paths (v0.85) + CORS | `nikto`, manual |
-| `$RM --owasp-scan $WEBAPP` | XSS/SQLi/open-redirect/SSRF probe findings | `nikto`/`zap` |
-| `$RM --csp-cors $WEBAPP` | CSP + CORS misconfig verdict | manual |
-| `$RM --cms-detect $WEBAPP` | CMS fingerprint (WP/Joomla/Drupal) | `whatweb` |
-| `$RM --web-crawl $WEBAPP --crawl-depth 2` | BFS crawl, robots.txt, cookies | manual |
-| `$RM --web-scan --evasion ghost $WEBAPP` | HTTP probes rotate a **browser UA** (not "RustyMap") | check WAF/server log |
-
-### DNS
-| Command | Expect | Compare |
-|---------|--------|---------|
-| `$RM --dns-security example.com` | DNSSEC/CAA/DANE/DMARC/SPF audit | `dig`, `dnsrecon` |
-| `$RM --dns-enum example.com --dns-wordlist big.txt` | subdomain enum | `dnsrecon -t brt` |
-
-### Bruteforce → see `HYDRA_PARITY.md`
-Run all 13 adapters vs hydra; confirm same creds found (or both none),
-rate-limit honoured, no hang. Flip COMMAND_COVERAGE brute cells per adapter.
-
-### Metasploit end-to-end (msfrpcd + msfdb up)
-| Command | Expect |
-|---------|--------|
-| `$RM --msf-ping --msf-url … --msf-token T` | connected version line |
-| `$RM --sV --msf-suggest --msf-url … $WIN` | CVE→modules with pre-filled RHOSTS |
-| `$RM --msf-fire <aux_module> --msf-fire-confirm --msf-url …` | fires with the interactive safety gate |
+> ICMP back-off is fail-safe: if the ICMP socket can't open you simply get no
+> back-off signal and behaviour is identical to v0.100.0. It only runs on
+> `--fast-engine` (opt-in). On a host that does **not** rate-limit you won't see
+> type-3 — that's expected, test 0.1 against the gateway that choked at v0.95.0.
 
 ---
 
-## P2 — Specialized (need a matching target; otherwise confirm clean "no target" handling)
+## P1 — Maturity promotions you can do with the current lab (→ v1.0)
 
-| Command | Needs | Expect |
-|---------|-------|--------|
-| `sudo $RM --sI $ZOMBIE:80 -p 1-1000 $SERVER` | a zombie host w/ incremental IPID | idle-scan results, no packets from your IP |
-| `$RM -b $FTPRELAY $SERVER -p 1-100` | an FTP server allowing PORT | FTP-bounce scan |
-| `$RM --ics-scan $PLC` | Modbus/S7/DNP3/EnIP/BACnet device | ICS protocol probe |
-| `$RM --iot-discover $NET` | mDNS/SSDP/CoAP devices | responders (0 in a VM — env) |
-| `$RM --container-scan $DOCKERHOST` | exposed Docker/K8s/etcd/Consul | API probe |
-| `$RM --apk-scan app.apk` | an APK file | static AXML/secret analysis |
-| `$RM --ipa-scan app.ipa` | an IPA file | plist/secret analysis |
-| `$RM --cloud-fingerprint example.com` | — | CDN/cloud classification |
-| `$RM --cloud-buckets company` | — | public S3/GCS/Azure bucket enum |
-| `$RM --cloud-metadata-via $SSRF_URL` | an SSRF primitive | IMDS probe |
-| `sudo $RM --quic cloudflare.com` | — | QUIC v1 (RFC 9000) — re-confirm (passed v0.82) |
-| broadcast: `sudo $RM --dhcp` / `--mdns` / `--llmnr` / `--wsdd` | non-VM NIC | responders (0 if multicast blocked — env) |
+Goal: move features from Beta/Alpha → Production. Rule stays: **one observed
+agreement with the reference tool on a real target = promote; one divergence =
+stay/demote.** Propose the tier change, don't silently flip it.
 
----
+### Beta → Production (highest value, targets on hand)
 
-## P3 — Output / workflow / reporting
+| Feature | Command | Promote when | Compare |
+|---------|---------|--------------|---------|
+| **`-O`** (1–2 more hosts) | `sudo $RM -O --nmap-os-db /usr/share/nmap/nmap-os-db $SERVER` and one more **different** box | family+CPE match nmap's `-O` on ≥2 heterogeneous hosts (OpenWrt router already PASS 2026-10-22) | `nmap -O` |
+| **`--smb-audit`** | `$RM --smb-audit $WIN` (SMB actually reachable, not firewalled) | real dialect+signing verdict matches, not just the reject-path | `crackmapexec smb $WIN`, `nmap --script smb2-security-mode` |
+| **`--brute-protocol ssh`** | `$RM --brute-protocol ssh --brute-user admin --brute-pass-list rockyou-top.txt $SERVER` | finds the same cred as hydra (or both none), rate-limit honoured, no hang | `hydra -l admin -P … ssh://$SERVER` |
+| **`--brute-protocol ftp`** | same shape vs an FTP server | matches hydra | `hydra … ftp://` |
+| **`--brute-protocol mysql`** | vs a MySQL instance | matches hydra | `hydra … mysql://` |
+| **`--brute-protocol postgres`** | vs Postgres (MD5 auth, not SCRAM) | matches hydra | `hydra … postgres://` |
+| **`--brute-protocol smb`** | vs Samba/Win | matches | `crackmapexec` |
+| **`--brute-protocol ldap`** | vs an LDAP simple-bind | matches | `hydra … ldap://` |
+| **`--brute-protocol vnc`** | vs an RFB 3.x server | matches | `hydra … vnc://` |
+
+→ Full brute matrix in `HYDRA_PARITY.md`; flip each adapter cell as it passes.
+
+### Already-Production re-confirmations (quick, keeps the tier honest)
 
 | Command | Expect | Compare |
 |---------|--------|---------|
-| `$RM --oP report.pdf $SERVER -sV` | valid PDF renders | open it |
-| `$RM --siem-format cef --siem-out out.cef $SERVER -sV` | valid CEF; also try `leef`/`ecs`/`syslog` | a CEF parser |
-| `$RM --compliance pci-dss --compliance-report pci.md $NET` | control citations + findings + remediation | read it |
-| `$RM $SERVER -sV --exec-summary` | executive summary block | — |
-| `$RM --sT --db lab.db $NET` then later `$RM --sT --db lab.db --diff-against <prev.json> $NET` | diff: newly-open / closed / changed | — |
-| `$RM --threat-intel-misp <url> --threat-intel-match $NET` | MISP IoC match on scan targets | — |
-| `$RM --wizard` | interactive scan-builder emits a VALID command (regression-check: must use `--sV` not `-sV`) | run the emitted cmd |
-| `$RM --serve` | web UI serves on localhost | browser |
-| `$RM $SERVER --tui` | TUI renders results | eyeball |
+| `$RM --sV $SERVER -p 22,53,443,445` | SSH/DNS/TLS/SMB products match nmap | `nmap -sV` |
+| `$RM --ssh-audit $SERVER` | KEX/cipher/MAC list matches | `ssh-audit $SERVER` |
+| `$RM --tls-grade $ROUTER -p 443,8443` | A+/F grade + PoC lines near sslscan | `sslscan`, `testssl.sh` |
+| `$RM --cve-for "OpenSSH 9.6p1"` | 25 CVEs incl. CVE-2024-6387 | NVD |
 
 ---
 
-## P4 — Aggiornamento & manutenzione (self-update + data-sync)
+## P2 — Alpha features that need a specific target
 
-Richiedono rete (GitHub release, feed NVD / CISA KEV / ExploitDB / Nuclei).
+Promote when the matching target exists; otherwise just confirm clean
+"no target / graceful" handling. All Alpha ⇒ still behind `--experimental-confirm`.
 
-> ⚠ **`--update`/`--check-update` sono TARATI sulle GitHub *Release*, non sui
-> tag.** L'ultima Release pubblicata è **v0.68.0** (le versioni successive sono
-> solo tag git — CI di release bloccata dal billing). Quindi su un binario
-> recente `--update` dice *"Already up to date (latest: v0.68.0)"* e **NON**
-> porta a v0.86.0. Per aggiornare Kali usa il flusso **git + cargo** del Prep
-> (`git fetch --tags && git checkout v0.86.0 && cargo build --release`). Perché
-> `--update` torni utile vanno pubblicate le Release con gli asset
-> (`rustymap-linux-x86_64.tar.gz`) buildati su Kali — vedi nota sotto.
+| Feature | Needs | Command | Expect |
+|---------|-------|---------|--------|
+| `--brute-protocol rdp` | real Windows RDP | `$RM --brute-protocol rdp --experimental-confirm …` | negative NTSTATUS reliable; positives only *suggestive* — validate manually |
+| `--brute-protocol mssql` | real SQL Server | `$RM --brute-protocol mssql --experimental-confirm …` | TDS 7.4 auth works vs a real instance |
+| `--mobile-discover` (positive) | an Android (ADB 5555) or iOS (62078) device | `$RM --mobile-discover $PHONE` | correct classify + exit 1 (lab only ever hit the fallback) |
+| `--apk-scan` | a real/obfuscated `.apk` | `$RM --apk-scan app.apk` | perms/exported/cleartext/pinning/secrets/trackers; check secret FP rate |
+| `--ipa-scan` | a real `.ipa` | `$RM --ipa-scan app.ipa` | Info.plist findings |
+| `--ics-scan` | a real PLC (or Conpot) | `$RM --ics-scan $PLC` | Modbus/S7/DNP3/EnIP/BACnet probe — read-only |
+| `--os-fp-v6` | IPv6 hosts | `sudo $RM --os-fp-v6 $V6HOST` | IPv6 OS guess; DB coverage thinner than v4 |
+| `--sI` idle | zombie w/ incremental IPID | `sudo $RM --sI $ZOMBIE:80 $SERVER` | results, no packets from your IP (modern OSes randomize IPID → may not work) |
+| `--threat-intel-sync` | a MISP instance | `$RM --threat-intel-sync <url> --threat-intel-match $NET` | IoC match on targets |
+| `--owasp-probes` | DVWA / Juice Shop | `$RM --owasp-probes $WEBAPP --experimental-confirm` | XSS/SQLi/redirect/SSRF — expect high FP, compare ZAP/sqlmap |
+| `--web-crawl` | a real web app | `$RM --web-crawl $WEBAPP --crawl-depth 2` | BFS + robots.txt + cookies (slow; no JS apps) |
 
-| Command | Expect | Note |
-|---------|--------|------|
-| `$RM --check-update` | riporta se esiste una release GitHub più recente (o "up to date") | read-only, sicuro |
-| `$RM --update-cve-db` | sync NVD JSON 2.0 (ultimi 5 anni) → `~/.cache/rustymap/nvd.sqlite`; stampa conteggio | poi `$RM --cve-db ~/.cache/rustymap/nvd.sqlite --sV $SERVER` usa il DB scaricato |
-| `$RM --update-exploit-refs` | sync KEV + ExploitDB + Nuclei → `exploit_refs.json`; stampa conteggi | — |
-| `$RM --inspect-exploit-cache CVE-2021-44228` | voce di cache per Log4Shell (sempre in KEV) → badge `[KEV]` presente | sanity dei feed scaricati |
-| `$RM --update` | scarica+installa l'ultima release da GitHub, **sostituisce il binario** | ⚠ fallo per ULTIMO (rimpiazza l'eseguibile sotto test); verifica poi `$RM --version` |
+---
 
-> `--install-npcap` è solo-Windows (su Kali non serve: i raw-socket girano come root nativamente).
+## P3 — Newer features not yet lab-exercised
 
-**Ordine consigliato:** `--check-update` → `--update-cve-db` / `--update-exploit-refs` → `--inspect-exploit-cache` (conferma i feed) → `--update` alla fine.
+| # | Command | Expect | Note |
+|---|---------|--------|------|
+| 3.1 | `$RM --port-script ./probe.sh $SERVER -sV` | runs `probe.sh` once per **open** port (IP+port as args), stdout → a finding; opt-in, per-port timeout honoured, audited | v0.98.0 — never run on Kali. Write a 2-line `probe.sh` (e.g. `echo "$1:$2 hello"`) |
+| 3.2 | `$RM --nmap-service-probes /usr/share/nmap/nmap-service-probes -sV $SERVER` | DB-probe **replay** names products the built-ins miss | v0.100.0 PASS once (Dropbear/dnsmasq/…); re-confirm on more services |
+| 3.3 | **script FP sweep** — `$RM $NET -sV --script-all` (or your usual script run) across diverse hosts | **no false positives** from the 607 Rhai scripts | v0.99.0 expanded 307→607; 2 FPs fixed in v0.99.1 — re-sweep like the v0.87→v0.87.1 pass to catch residual FPs on host types not yet seen |
+| 3.4 | `$RM --oJL out.jsonl $NET -sV` | one valid JSON object per host per line | v0.96.0 — smoke only |
+
+---
+
+## P4 — Performance & regression gates
+
+| # | Command | Expect | Note |
+|---|---------|--------|------|
+| 4.1 | re-bench `/24` raw sweep at v0.100.1 vs the v0.100.0 number | ≈ same ~7× nmap speed (host-parallel win intact) | v0.100.0 hit **655s→7.2s (~90×)** on 2026-10-23; make sure v0.100.1's ICMP thread didn't regress it |
+| 4.2 | run the `PERFORMANCE.md` regression gate (`benches/lab_compare.rs` harness) | raw not >10% slower than nmap on SYN /24, full-TCP host, `-sV` ~50 hosts, `-O` ~10 hosts | the formal release gate from v0.95.0 |
+| 4.3 | *(optional)* `sudo $RM --fast-engine -p- $SERVER` where $SERVER has 1 open + rest filtered, **no** `--host-timeout` | finishes in ≲1 min (was ~50 min pre-v0.95.2) | fast is opt-in, so low priority — but this was the last cwnd foot-gun |
+
+---
+
+## Out of scope on purpose (don't chase these to Production)
+
+- **`--osdb-submit`** — stays Alpha: it leaks fingerprints to an external
+  endpoint; promoting it would imply "safe to enable broadly", which it isn't.
+- **`--sI`** / **`--owasp-probes`** / **`--web-crawl`** — honest Alpha: modern
+  IPID randomization and dedicated tools (ZAP/sqlmap) mean these keep known
+  limits even when they "work". Validate for *correctness*, leave the tier note.
+- **`--update` / `--check-update`** — tied to GitHub **Releases**, and release
+  CI is billing-blocked (last published Release = v0.68.0). On a git-built
+  binary `--update` will say "up to date (v0.68.0)". Only `--check-update`
+  (read-only) is worth a sanity run; real self-update needs published assets.
 
 ---
 
 ## Done criteria
 
-- `VALIDATION_0.86.md` written with P0 results (all must pass) + whatever P1/P2/P3 you reach.
-- `LAB_VALIDATION.md` dated row added.
-- `COMMAND_COVERAGE.md` cells flipped ⬜→✅ (with the VALIDATION ref) for each confirmed command.
-- Any bug found → triage in the report, fix in a `0.86.x` patch, re-run.
+- `VALIDATION_0.100.1.md` written: P0 all pass, plus whatever P1–P4 you reach.
+- `LAB_VALIDATION.md` dated row added; `COMMAND_COVERAGE.md` cells flipped.
+- Each tier promotion recorded in `maturity.rs` **only** after one real-target
+  agreement (propose first). `-O` → Production once a 2nd heterogeneous host
+  confirms the os-db match.
+- Any bug → `0.100.x` patch, re-run the failing row.

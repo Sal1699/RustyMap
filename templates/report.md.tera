@@ -22,7 +22,8 @@ Device: **{{ h.device_class }}**{% if h.vendor %} · {{ h.vendor }}{% endif %}{%
 {% if h.diff.new_open | length > 0 %}- newly open: `{{ h.diff.new_open | join(sep=", ") }}`
 {% endif %}{% if h.diff.closed_now | length > 0 %}- no longer open: `{{ h.diff.closed_now | join(sep=", ") }}`
 {% endif %}{% for c in h.diff.state_changes %}- port `{{ c[0] }}`: {{ c[1] }} → {{ c[2] }}
-{% endfor %}
+{% endfor %}{% if h.diff.state_changes_hidden > 0 %}- _+{{ h.diff.state_changes_hidden }} more port-state change(s) not listed_
+{% endif %}
 {% endif %}
 
 {% if h.ports | length > 0 %}

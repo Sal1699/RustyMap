@@ -1,14 +1,22 @@
 //! SMB version + signing audit — parses the SMB Negotiate Protocol
 //! Response.
 //!
-//! We send a SMBv1 NegotiateProtocolRequest listing both SMB1 and
-//! SMB2 dialects. The server picks the highest it supports:
+//! We try a native **SMB2 NEGOTIATE** (`0xfe`-headed, with a 3.1.1
+//! preauth-integrity negotiate context, exactly as nmap/smbclient do)
+//! first, and fall back to the legacy **SMBv1 multi-dialect negotiate**
+//! (`0xff`-headed) only if that is refused:
 //!   - SMB2+ servers respond with a 0xfe-headed packet (SMB2 SYNC
 //!     header) — we parse the SecurityMode flags to learn whether
 //!     signing is enabled and whether it's *required*.
-//!   - SMB1-only servers respond with a 0xff-headed packet — that
-//!     answer alone is a finding (SMBv1 is deprecated, EternalBlue
-//!     family targets it).
+//!   - SMB1-only servers (old NAS / embedded) reject the SMB2 probe;
+//!     the SMB1 fallback then draws a 0xff-headed answer, which alone
+//!     is a finding (SMBv1 is deprecated, EternalBlue targets it).
+//!
+//! Why SMB2-first: modern Windows (10/11, notably **24H2**) has SMB1
+//! fully removed and RSTs a legacy `\xffSMB` negotiate outright
+//! (lab v0.100.1 BUG-1: Win11 24H2 reset the connection on :139 and
+//! :445 while nmap/crackmapexec succeeded). Leading with the SMB2
+//! negotiate is what those tools do and what modern hosts expect.
 //!
 //! No authentication, no shares listed — just the negotiate. The
 //! connection is closed before the session-setup phase.
@@ -83,54 +91,133 @@ const NEGOTIATE_REQUEST: &[u8] = &[
     0x02, b'S', b'M', b'B', b' ', b'2', b'.', b'?', b'?', b'?', 0x00,
 ];
 
+/// Native SMB2 NEGOTIATE request (158 bytes after the 4-byte NetBIOS header),
+/// offering dialects 2.0.2 / 2.1 / 3.0 / 3.0.2 / 3.1.1 with the mandatory
+/// SMB2_PREAUTH_INTEGRITY_CAPABILITIES negotiate context that 3.1.1 requires.
+/// This is what modern Windows expects — the legacy `\xffSMB` negotiate above
+/// is RST'd by Win10/11 (SMB1 removed). NetBIOS length is patched at send time.
+const SMB2_NEGOTIATE_REQUEST: &[u8] = &[
+    // NetBIOS session header (length patched in `negotiate_once`)
+    0x00, 0x00, 0x00, 0x00,
+    // ── SMB2 SYNC header (64 bytes) ──
+    0xFE, 0x53, 0x4D, 0x42,                         // ProtocolId "\xfeSMB"
+    0x40, 0x00,                                     // StructureSize = 64
+    0x00, 0x00,                                     // CreditCharge = 0
+    0x00, 0x00, 0x00, 0x00,                         // Status (reserved) = 0
+    0x00, 0x00,                                     // Command = 0x0000 NEGOTIATE
+    0x01, 0x00,                                     // CreditRequest = 1
+    0x00, 0x00, 0x00, 0x00,                         // Flags = 0
+    0x00, 0x00, 0x00, 0x00,                         // NextCommand = 0
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // MessageId = 0
+    0x00, 0x00, 0x00, 0x00,                         // Reserved (ProcessId) = 0
+    0x00, 0x00, 0x00, 0x00,                         // TreeId = 0
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // SessionId = 0
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Signature (16B) = 0
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // ── NEGOTIATE request (fixed 36 bytes) ──
+    0x24, 0x00,                                     // StructureSize = 36
+    0x05, 0x00,                                     // DialectCount = 5
+    0x01, 0x00,                                     // SecurityMode = SIGNING_ENABLED
+    0x00, 0x00,                                     // Reserved
+    0x00, 0x00, 0x00, 0x00,                         // Capabilities = 0
+    // ClientGuid (16B) — fixed, non-zero
+    b'R', b'u', b's', b't', b'y', b'M', b'a', b'p',
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+    0x70, 0x00, 0x00, 0x00,                         // NegotiateContextOffset = 112
+    0x01, 0x00,                                     // NegotiateContextCount = 1
+    0x00, 0x00,                                     // Reserved2
+    // ── Dialects (5 × 2B) ──
+    0x02, 0x02,                                     // SMB 2.0.2
+    0x10, 0x02,                                     // SMB 2.1
+    0x00, 0x03,                                     // SMB 3.0
+    0x02, 0x03,                                     // SMB 3.0.2
+    0x11, 0x03,                                     // SMB 3.1.1
+    // Padding to 8-byte alignment (offset 110 → 112)
+    0x00, 0x00,
+    // ── Negotiate context: SMB2_PREAUTH_INTEGRITY_CAPABILITIES @ offset 112 ──
+    0x01, 0x00,                                     // ContextType = 0x0001
+    0x26, 0x00,                                     // DataLength = 38
+    0x00, 0x00, 0x00, 0x00,                         // Reserved
+    0x01, 0x00,                                     // HashAlgorithmCount = 1
+    0x20, 0x00,                                     // SaltLength = 32
+    0x01, 0x00,                                     // HashAlgorithms[0] = SHA-512
+    // Salt (32B)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
+
 pub async fn audit(ip: IpAddr, port: u16, dur: Duration) -> Result<SmbAudit> {
     let addr = SocketAddr::new(ip, port);
+
+    // SMB2 first (modern Windows/Samba). Only if that is refused do we try the
+    // legacy SMB1 multi-dialect negotiate — Win10/11 RST the SMB1 packet, so
+    // leading with SMB1 (the pre-v0.100.2 behaviour) reset the connection and
+    // produced a false "firewall reject" on perfectly healthy SMB3 hosts
+    // (lab v0.100.1 BUG-1: Win11 24H2).
+    let smb2_err = match negotiate_once(addr, SMB2_NEGOTIATE_REQUEST, dur)
+        .await
+        .and_then(|body| build_audit(&body))
+    {
+        Ok(a) => return Ok(a),
+        Err(e) => e,
+    };
+
+    // Fallback: SMB1 multi-dialect negotiate for genuinely SMB1-only servers.
+    match negotiate_once(addr, NEGOTIATE_REQUEST, dur)
+        .await
+        .and_then(|body| build_audit(&body))
+    {
+        Ok(a) => Ok(a),
+        Err(smb1_err) => Err(anyhow!(
+            "{}:{} refused both the SMB2 and SMB1 negotiate (SMB2: {}; SMB1: {}) — \
+             port filtered, a non-SMB service, or a host that dropped the probe",
+            ip, port, smb2_err, smb1_err
+        )),
+    }
+}
+
+/// One negotiate round-trip: connect, patch the NetBIOS length into `req`,
+/// send it, and return the response body (everything after the 4-byte NetBIOS
+/// header). Errors are phrased as verdicts so the caller can chain attempts.
+async fn negotiate_once(addr: SocketAddr, req: &[u8], dur: Duration) -> Result<Vec<u8>> {
     let mut s = timeout(dur, TcpStream::connect(addr)).await??;
 
-    // Patch NetBIOS length = body_len.
-    let mut req = NEGOTIATE_REQUEST.to_vec();
+    let mut req = req.to_vec();
     let body_len = (req.len() - 4) as u32;
     req[1] = ((body_len >> 16) & 0xff) as u8;
     req[2] = ((body_len >> 8) & 0xff) as u8;
     req[3] = (body_len & 0xff) as u8;
-
     timeout(dur, s.write_all(&req)).await??;
 
-    // Read NetBIOS header (4B) then the body. A modern Windows host behind
-    // a firewall often accepts the TCP connect and then RSTs the SMB
-    // negotiate, so translate the raw read failure into a verdict instead
-    // of a bare I/O error (lab bug: "bogus SMB response length 1").
+    // Read NetBIOS header (4B) then the body. A host that accepts the TCP
+    // connect and then RSTs the negotiate becomes a clear verdict here rather
+    // than a bare I/O error (lab bug: "bogus SMB response length 1").
     let mut nbhdr = [0u8; 4];
     timeout(dur, s.read_exact(&mut nbhdr))
         .await
-        .map_err(|_| {
-            anyhow!(
-                "no SMB negotiate reply from {}:{} within timeout — port filtered or not SMB",
-                ip, port
-            )
-        })?
-        .map_err(|e| {
-            anyhow!(
-                "{}:{} dropped the SMB negotiate ({}) — likely a firewall RST or the host refused SMB",
-                ip, port, e
-            )
-        })?;
+        .map_err(|_| anyhow!("no SMB negotiate reply within timeout"))?
+        .map_err(|e| anyhow!("peer dropped the SMB negotiate ({})", e))?;
     // A NetBIOS session message has message-type 0x00; anything else — or an
-    // implausible body length — means the peer isn't speaking SMB-over-NetBIOS
-    // here (firewall reset mid-handshake, or a non-SMB service on the port).
-    let resp_len = (((nbhdr[1] as u32) << 16) | ((nbhdr[2] as u32) << 8) | (nbhdr[3] as u32)) as usize;
-    if nbhdr[0] != 0x00 || resp_len < 32 || resp_len > 4096 {
+    // implausible body length — means the peer isn't speaking SMB here.
+    let resp_len =
+        (((nbhdr[1] as u32) << 16) | ((nbhdr[2] as u32) << 8) | (nbhdr[3] as u32)) as usize;
+    if nbhdr[0] != 0x00 || resp_len < 32 || resp_len > 8192 {
         return Err(anyhow!(
-            "{}:{} did not return a valid SMB negotiate (NetBIOS type=0x{:02x}, len={}) — \
-             likely a firewall reject or a non-SMB service on this port",
-            ip, port, nbhdr[0], resp_len
+            "not a valid SMB negotiate (NetBIOS type=0x{:02x}, len={})",
+            nbhdr[0], resp_len
         ));
     }
     let mut body = vec![0u8; resp_len];
     timeout(dur, s.read_exact(&mut body)).await??;
+    Ok(body)
+}
 
+/// Parse a negotiate response body into a classified `SmbAudit`.
+fn build_audit(body: &[u8]) -> Result<SmbAudit> {
     let mut a = SmbAudit::default();
-    parse(&body, &mut a)?;
+    parse(body, &mut a)?;
     classify(&mut a);
     Ok(a)
 }
@@ -255,6 +342,26 @@ mod tests {
         };
         classify(&mut a);
         assert!(a.findings.is_empty(), "{:?}", a.findings);
+    }
+
+    #[test]
+    fn smb2_negotiate_request_well_formed() {
+        let r = SMB2_NEGOTIATE_REQUEST;
+        assert_eq!(&r[4..8], b"\xfeSMB", "SMB2 protocol id");
+        assert_eq!(u16::from_le_bytes([r[8], r[9]]), 64, "header StructureSize");
+        assert_eq!(u16::from_le_bytes([r[16], r[17]]), 0x0000, "NEGOTIATE command");
+        assert_eq!(u16::from_le_bytes([r[68], r[69]]), 36, "body StructureSize");
+        assert_eq!(u16::from_le_bytes([r[70], r[71]]), 5, "DialectCount");
+        assert_eq!(
+            u32::from_le_bytes([r[96], r[97], r[98], r[99]]),
+            112,
+            "NegotiateContextOffset points past the dialects + padding"
+        );
+        assert_eq!(u16::from_le_bytes([r[104], r[105]]), 0x0202, "first dialect 2.0.2");
+        assert_eq!(u16::from_le_bytes([r[112], r[113]]), 0x0311, "last dialect 3.1.1");
+        // Preauth context begins at byte 116 (SMB2 offset 112).
+        assert_eq!(u16::from_le_bytes([r[116], r[117]]), 0x0001, "PREAUTH_INTEGRITY ctx");
+        assert_eq!(r.len() - 4, 158, "SMB2 message length (excl. NetBIOS)");
     }
 
     #[test]

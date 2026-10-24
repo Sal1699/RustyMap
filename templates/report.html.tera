@@ -79,6 +79,7 @@
           <li class="changed">port {{ c[0] }}: {{ c[1] }} → {{ c[2] }}</li>
         {% endfor %}
         </ul>
+        {% if h.diff.state_changes_hidden > 0 %}<div class="hostmeta" style="opacity:.55">+{{ h.diff.state_changes_hidden }} more port-state change(s) not listed</div>{% endif %}
       {% endif %}
     </div>
     {% endif %}

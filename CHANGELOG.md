@@ -4,6 +4,39 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.2] - 2026-10-24
+
+**Fixes from the v0.100.1 Kali lab run (`VALIDATION_0.100.1.md`, 19-host /24).**
+659/659 tests.
+
+### Fixed
+- **BUG-1 — `--smb-audit` now negotiates SMB2 first.** Against Windows 11 24H2
+  (SMB3.1.1) the audit got a connection reset on both :139 and :445 while
+  nmap/crackmapexec succeeded. Cause: it opened with a legacy `\xffSMB`
+  multi-dialect negotiate, which modern Windows (SMB1 removed) RSTs outright.
+  `smb_audit::audit` now sends a native **SMB2 NEGOTIATE** (dialects 2.0.2→3.1.1
+  with the mandatory `PREAUTH_INTEGRITY_CAPABILITIES` context, as nmap/smbclient
+  do) and falls back to the SMB1 negotiate only for genuinely SMB1-only servers.
+  The packet is offset-checked by a new unit test. *(Beta → stays Beta until the
+  SMB2-first path is confirmed against a live Win10/11 + Samba host — the fix is
+  untested from the Windows dev box.)*
+
+### Changed
+- **`-O` promoted Beta → Production.** The v0.100.1 lab matched `nmap -O` on
+  3/3 heterogeneous hosts — OpenWrt router, OpenWrt/Linux embedded (93%), and
+  Windows 11 24H2 (exact family+version). (`src/maturity.rs`.)
+- **NOTE-2 — HTML/Markdown report diff is capped.** A full-port diff against a
+  rate-limiting host churned thousands of filtered↔closed flips, writing ~14K
+  `<li>` into the HTML. The per-host `state_changes` list now renders at most 50
+  rows with a "`+N more port-state change(s) not listed`" summary; the
+  open-port movement (newly-open / no-longer-open) is still shown in full.
+
+### Notes
+- NOTE-1 (`-sV` not naming the product behind TLS on :443) is the known
+  version-intensity gate, not a regression — raise `--version-intensity` for the
+  TLS app-layer probe. NOTE-3 (ICMP back-off untestable against a silently
+  filtering router) still needs a host that actually sends ICMP type-3.
+
 ## [0.100.1] - 2026-10-23
 
 **The last big-list item (#4 ICMP rate-limit) plus HTML report trim.** 658/658

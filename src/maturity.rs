@@ -56,14 +56,14 @@ const REGISTRY: &[Feature] = &[
     Feature { key: "--Pn", tier: Tier::Production, note: "No host discovery (treat all as up)" },
 
     // ── Beta — passes tests but not lab-validated against real targets ──
-    Feature { key: "-O", tier: Tier::Beta,
-        note: "OS fingerprint. The emitted 16-field block is byte-identical to `nmap -O` (validated v0.75→0.79), but the MATCH without a loaded nmap-os-db falls back to a weaker heuristic that can misfire (v0.99 lab: an OmniAccess AP read as 'VirtualBox Slirp NAT'). Pass `--nmap-os-db` for accuracy; re-promoted to Production after matching is validated on heterogeneous real hardware." },
+    Feature { key: "-O", tier: Tier::Production,
+        note: "OS fingerprint. The emitted 16-field block is byte-identical to `nmap -O` (validated v0.75→0.79), and the match now agrees with `nmap -O` on heterogeneous real hardware: lab v0.100.1 hit 3/3 — OpenWrt router (.1), OpenWrt/Linux embedded (.31, 93%), and Windows 11 24H2 (.64, exact family+version). Pass `--nmap-os-db` for best accuracy; without it the built-in 100-sig heuristic can read confidence lower. The earlier v0.99 misfire (an AP read as 'VirtualBox Slirp NAT') was fixed in v0.99.2 by demoting the Slirp heuristic to a hint." },
     Feature { key: "--sV", tier: Tier::Production,
         note: "Service detection (nmap-service-probes DB). Lab-validated: SSH/DNS/SMB/RPC identical to nmap (v0.82) and lighttpd/nginx identified behind TLS (v0.95)." },
     Feature { key: "--ssh-audit", tier: Tier::Production,
         note: "RFC 4253 KEXINIT enum. Lab-validated vs ssh-audit/reference (v0.82.1); exotic stacks (Cisco IOS SSH) still less exercised." },
     Feature { key: "--smb-audit", tier: Tier::Beta,
-        note: "SMBv1/v2 dialect + signing. Validated against Samba 4.x and Windows 10; older SMB1-only servers not exercised." },
+        note: "SMBv1/v2 dialect + signing. As of v0.100.2 it sends a native SMB2 NEGOTIATE first (3.1.1 preauth context) and falls back to the legacy SMB1 negotiate — the SMB1-first probe was RST'd by Win11 24H2 (lab v0.100.1 BUG-1). Stays Beta until the SMB2-first path is confirmed on real Win10/11 + Samba (the fix is untested against a live SMB3.1.1 host from the dev box)." },
     Feature { key: "--tls-grade", tier: Tier::Production,
         note: "A+/F grading + DROWN/POODLE/Heartbleed PoC. Lab-validated vs sslscan on :443/:8443 (Fase L v0.83); cross-check testssl.sh for stakeholder-facing reports." },
     Feature { key: "--cve-for", tier: Tier::Production,

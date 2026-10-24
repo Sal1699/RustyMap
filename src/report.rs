@@ -29,7 +29,15 @@ struct DiffView {
     new_open: Vec<u16>,
     closed_now: Vec<u16>,
     state_changes: Vec<(u16, String, String)>,
+    /// state_changes beyond the render cap, summarised instead of listed.
+    state_changes_hidden: usize,
 }
+
+/// Max per-host `state_changes` rows rendered. A full-port diff against a
+/// rate-limiting host churned thousands of filtered↔closed flips, which wrote
+/// ~14K `<li>` into the HTML (lab v0.100.1 NOTE-2). The interesting diff is the
+/// open-port movement (shown in full); the rest is summarised as a count.
+const MAX_STATE_CHANGES: usize = 50;
 
 #[derive(Serialize)]
 struct HostView {
@@ -109,10 +117,20 @@ fn to_view(hosts: &[HostResult], diffs: &HashMap<String, PortDiff>) -> Vec<HostV
             // small note so the trimmed table stays honest.
             let hidden_count = h.ports.len().saturating_sub(ports.len());
             let ip_s = h.target.ip.to_string();
-            let diff = diffs.get(&ip_s).map(|d| DiffView {
-                new_open: d.new_open.clone(),
-                closed_now: d.closed_now.clone(),
-                state_changes: d.state_changes.clone(),
+            let diff = diffs.get(&ip_s).map(|d| {
+                let state_changes_hidden =
+                    d.state_changes.len().saturating_sub(MAX_STATE_CHANGES);
+                DiffView {
+                    new_open: d.new_open.clone(),
+                    closed_now: d.closed_now.clone(),
+                    state_changes: d
+                        .state_changes
+                        .iter()
+                        .take(MAX_STATE_CHANGES)
+                        .cloned()
+                        .collect(),
+                    state_changes_hidden,
+                }
             });
             HostView {
                 ip: ip_s,
