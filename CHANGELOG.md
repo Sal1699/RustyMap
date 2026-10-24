@@ -4,6 +4,43 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.4] - 2026-10-24
+
+**Brute-adapter validation (`VALIDATION_0.100.3.md`): 3 promotions, 2 fixes, 1
+naming fix.** 662/662 tests.
+
+### Changed
+- **`--brute-protocol ftp`, `postgres`, `ldap` promoted Beta → Production.**
+  Each agreed with hydra on a real target (Metasploitable 2 vsftpd 2.3.4 /
+  PostgreSQL 8.3 MD5 / osixia openldap simple-bind) on both the single-cred and
+  needle-in-haystack tests, with wrong creds correctly rejected.
+- **`--owasp-probes` renamed to `--owasp-scan` in the maturity registry and the
+  Alpha gate.** The CLI flag has always been `--owasp-scan URL`; the maturity
+  matrix (and the plan docs) named a flag that doesn't exist, so a tester typing
+  `--owasp-probes` hit "unknown flag" and the Alpha gate keyed off a registry
+  entry that no invocation matched. Now consistent.
+
+### Fixed
+- **BRUTE-2 — MySQL empty-password auth.** For a blank password the adapter sent
+  a 20-byte zero scramble with auth-data-length 20, which the server reads as a
+  wrong non-empty password (lab: MySQL 5.0.51a `root` with no password, which
+  hydra authenticates). It now sends a zero-length auth response (length 0) for
+  an empty password. (`brute_mysql.rs`.)
+- **BRUTE-3 — VNC RFB 3.3 handshake.** The adapter only handled the RFB 3.7+
+  security negotiation (1-byte count + type list). RFB 3.3 servers (e.g.
+  Metasploitable 2) instead dictate the security type as a single 4-byte
+  big-endian value with no client selection byte; the adapter now parses the
+  server version (`rfb_minor`) and takes the 3.3 path when minor < 7.
+  (`brute_vnc.rs`.)
+
+### Notes
+- `mysql` and `vnc` **stay Beta** — the fixes are offset/protocol-correct and
+  unit-tested but untested against a live server from the dev box; re-run vs
+  hydra on Kali to promote. Deferred: BRUTE-1 (smb needs an SMBv1 NTLM
+  fallback for old Samba), BRUTE-4 (ssh legacy-KEX — low priority, test vs a
+  modern OpenSSH), the `--ssh-audit` non-standard-port gap, and the cosmetic
+  `ssl/` service-name prefix.
+
 ## [0.100.3] - 2026-10-24
 
 **`--smb-audit` promoted Beta → Production.** 659/659 tests.

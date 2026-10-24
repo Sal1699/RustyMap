@@ -109,7 +109,7 @@ Promote when the matching target exists; otherwise just confirm clean
 | `--os-fp-v6` | IPv6 hosts | `sudo $RM --os-fp-v6 $V6HOST` | IPv6 OS guess; DB coverage thinner than v4 |
 | `--sI` idle | zombie w/ incremental IPID | `sudo $RM --sI $ZOMBIE:80 $SERVER` | results, no packets from your IP (modern OSes randomize IPID → may not work) |
 | `--threat-intel-sync` | a MISP instance | `$RM --threat-intel-sync <url> --threat-intel-match $NET` | IoC match on targets |
-| `--owasp-probes` | DVWA / Juice Shop | `$RM --owasp-probes $WEBAPP --experimental-confirm` | XSS/SQLi/redirect/SSRF — expect high FP, compare ZAP/sqlmap |
+| `--owasp-scan` | DVWA / Juice Shop | `$RM --owasp-scan http://$WEBAPP/ --experimental-confirm` | XSS/SQLi/redirect/SSRF — expect high FP, compare ZAP/sqlmap |
 | `--web-crawl` | a real web app | `$RM --web-crawl $WEBAPP --crawl-depth 2` | BFS + robots.txt + cookies (slow; no JS apps) |
 
 ---
@@ -139,7 +139,7 @@ Promote when the matching target exists; otherwise just confirm clean
 
 - **`--osdb-submit`** — stays Alpha: it leaks fingerprints to an external
   endpoint; promoting it would imply "safe to enable broadly", which it isn't.
-- **`--sI`** / **`--owasp-probes`** / **`--web-crawl`** — honest Alpha: modern
+- **`--sI`** / **`--owasp-scan`** / **`--web-crawl`** — honest Alpha: modern
   IPID randomization and dedicated tools (ZAP/sqlmap) mean these keep known
   limits even when they "work". Validate for *correctness*, leave the tier note.
 - **`--update` / `--check-update`** — tied to GitHub **Releases**, and release

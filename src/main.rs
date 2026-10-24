@@ -1637,7 +1637,7 @@ async fn run(mut args: Cli) -> Result<()> {
             maturity::announce_and_gate("--web-crawl", args.experimental_confirm)?;
         }
         if args.owasp_scan.is_some() {
-            maturity::announce_and_gate("--owasp-probes", args.experimental_confirm)?;
+            maturity::announce_and_gate("--owasp-scan", args.experimental_confirm)?;
         }
         let seed_raw = args
             .owasp_scan

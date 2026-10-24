@@ -47,10 +47,18 @@ impl BruteAdapter for MysqlAdapter {
             return Err(anyhow!("not a MySQL v10 handshake"));
         }
         let salt = extract_salt(&body)?;
-        let scramble = mysql_native_scramble(pass.as_bytes(), &salt);
+        // An empty password uses a ZERO-LENGTH auth response (auth-data-length
+        // 0), NOT a 20-byte zero scramble — otherwise the server reads it as a
+        // wrong non-empty password (lab v0.100.3 BRUTE-2: MySQL 5.0.51a with a
+        // blank root password, which hydra authenticates and we did not).
+        let auth: Vec<u8> = if pass.is_empty() {
+            Vec::new()
+        } else {
+            mysql_native_scramble(pass.as_bytes(), &salt).to_vec()
+        };
 
         // 2) Send HandshakeResponse41
-        let resp = build_handshake_response(user, &scramble);
+        let resp = build_handshake_response(user, &auth);
         write_packet(&mut s, seq.wrapping_add(1), &resp, cfg.timeout).await?;
 
         // 3) Read OK / ERR
@@ -153,7 +161,11 @@ pub fn mysql_native_scramble(password: &[u8], salt: &[u8; 20]) -> [u8; 20] {
     out
 }
 
-pub fn build_handshake_response(user: &str, scramble: &[u8; 20]) -> Vec<u8> {
+/// Build the HandshakeResponse41. `auth` is the auth-data: the 20-byte native
+/// scramble for a real password, or an **empty slice for an empty password**
+/// (the length-prefix then goes out as 0, which is how the server recognises a
+/// blank password under CLIENT_SECURE_CONNECTION).
+pub fn build_handshake_response(user: &str, auth: &[u8]) -> Vec<u8> {
     let capabilities: u32 = CLIENT_LONG_PASSWORD
         | CLIENT_PROTOCOL_41
         | CLIENT_SECURE_CONNECTION
@@ -168,8 +180,8 @@ pub fn build_handshake_response(user: &str, scramble: &[u8; 20]) -> Vec<u8> {
     body.extend_from_slice(&[0u8; 23]); // filler
     body.extend_from_slice(user.as_bytes());
     body.push(0);
-    body.push(20); // auth-data length
-    body.extend_from_slice(scramble);
+    body.push(auth.len() as u8); // auth-data length (0 for an empty password)
+    body.extend_from_slice(auth);
     body.extend_from_slice(b"mysql_native_password\0");
     body
 }
@@ -216,6 +228,27 @@ mod tests {
         let s = String::from_utf8_lossy(&resp);
         assert!(s.contains("alice"));
         assert!(s.contains("mysql_native_password"));
+    }
+
+    #[test]
+    fn empty_password_response_sends_zero_auth_len() {
+        // BRUTE-2: an empty password must emit auth-data-length 0 and no
+        // scramble, immediately followed by the plugin name.
+        let resp = build_handshake_response("root", &[]);
+        let pos = resp.windows(5).position(|w| w == b"root\0").unwrap();
+        let len_idx = pos + 5;
+        assert_eq!(resp[len_idx], 0, "empty password → auth-data-length 0");
+        assert_eq!(&resp[len_idx + 1..len_idx + 1 + 21], b"mysql_native_password");
+    }
+
+    #[test]
+    fn nonempty_password_response_sends_20_byte_auth() {
+        let scramble = [7u8; 20];
+        let resp = build_handshake_response("root", &scramble);
+        let pos = resp.windows(5).position(|w| w == b"root\0").unwrap();
+        let len_idx = pos + 5;
+        assert_eq!(resp[len_idx], 20);
+        assert_eq!(&resp[len_idx + 1..len_idx + 21], &scramble);
     }
 
     #[test]

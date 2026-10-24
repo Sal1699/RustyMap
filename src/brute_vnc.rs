@@ -41,24 +41,40 @@ impl BruteAdapter for VncAdapter {
         if !hello.starts_with(b"RFB ") {
             return Err(anyhow!("not an RFB server"));
         }
-        // 2) Echo back our preferred version
-        timeout(cfg.timeout, s.write_all(b"RFB 003.008\n")).await??;
+        let minor = rfb_minor(&hello).unwrap_or(8);
 
-        // 3) Security types: 1 byte count + N bytes types
-        let mut type_count = [0u8; 1];
-        timeout(cfg.timeout, s.read_exact(&mut type_count)).await??;
-        if type_count[0] == 0 {
-            return Ok(false); // server bailed (e.g. unsupported)
+        if minor < 7 {
+            // ── RFB 3.3/3.5: the SERVER dictates the security type as a single
+            // 4-byte big-endian value; the client echoes 3.3 and does NOT send
+            // a type-selection byte (lab v0.100.3 BRUTE-3: Metasploitable 2 VNC
+            // speaks 3.3, so the 3.7-style count+list read below was wrong). ──
+            timeout(cfg.timeout, s.write_all(b"RFB 003.003\n")).await??;
+            let mut sectype = [0u8; 4];
+            timeout(cfg.timeout, s.read_exact(&mut sectype)).await??;
+            match u32::from_be_bytes(sectype) {
+                0 => return Ok(false), // connection failed / rejected
+                1 => return Ok(true),  // "None" — no auth required (open VNC)
+                2 => {}                // VNC auth → challenge follows
+                _ => return Ok(false), // unsupported security type
+            }
+        } else {
+            // ── RFB 3.7/3.8: client negotiates from the offered list. ──
+            timeout(cfg.timeout, s.write_all(b"RFB 003.008\n")).await??;
+            let mut type_count = [0u8; 1];
+            timeout(cfg.timeout, s.read_exact(&mut type_count)).await??;
+            if type_count[0] == 0 {
+                return Ok(false); // server bailed (e.g. unsupported)
+            }
+            let mut types = vec![0u8; type_count[0] as usize];
+            timeout(cfg.timeout, s.read_exact(&mut types)).await??;
+            if !types.contains(&0x02) {
+                return Ok(false); // VNC auth not offered
+            }
+            // Pick VNC auth
+            timeout(cfg.timeout, s.write_all(&[0x02u8])).await??;
         }
-        let mut types = vec![0u8; type_count[0] as usize];
-        timeout(cfg.timeout, s.read_exact(&mut types)).await??;
-        if !types.contains(&0x02) {
-            return Ok(false); // VNC auth not offered
-        }
-        // 4) Pick VNC auth
-        timeout(cfg.timeout, s.write_all(&[0x02u8])).await??;
 
-        // 5) 16-byte challenge
+        // 5) 16-byte challenge (both version paths converge here)
         let mut challenge = [0u8; 16];
         timeout(cfg.timeout, s.read_exact(&mut challenge)).await??;
 
@@ -71,6 +87,16 @@ impl BruteAdapter for VncAdapter {
         timeout(cfg.timeout, s.read_exact(&mut status)).await??;
         Ok(status == [0, 0, 0, 0])
     }
+}
+
+/// Parse the minor version from an `RFB 003.NNN\n` greeting (e.g. 3 or 8).
+/// Used to pick the 3.3 (server-dictated security type) vs 3.7+ (negotiated
+/// list) handshake. Returns `None` if the greeting isn't well-formed.
+pub fn rfb_minor(hello: &[u8]) -> Option<u32> {
+    if hello.len() < 12 || !hello.starts_with(b"RFB ") {
+        return None;
+    }
+    std::str::from_utf8(&hello[8..11]).ok()?.parse::<u32>().ok()
 }
 
 /// Build the 8-byte VNC password key: pad/truncate to 8 bytes, then
@@ -112,6 +138,14 @@ pub fn vnc_encrypt(password: &str, challenge: &[u8; 16]) -> [u8; 16] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rfb_minor_parses_version() {
+        assert_eq!(rfb_minor(b"RFB 003.003\n"), Some(3));
+        assert_eq!(rfb_minor(b"RFB 003.008\n"), Some(8));
+        assert_eq!(rfb_minor(b"RFB 003.007\n"), Some(7));
+        assert_eq!(rfb_minor(b"nope"), None);
+    }
 
     #[test]
     fn bit_reverse_known_vectors() {
