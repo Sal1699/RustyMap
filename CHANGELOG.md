@@ -4,6 +4,24 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.5] - 2026-10-24
+
+**`--brute-protocol mysql` and `vnc` promoted Beta → Production.** 662/662 tests.
+
+### Changed
+- **`--brute-protocol mysql` Beta → Production.** The v0.100.4 empty-password
+  fix was re-validated on Kali: RustyMap now authenticates Metasploitable 2
+  MySQL 5.0.51a (`root` with a blank password) and agrees with hydra.
+- **`--brute-protocol vnc` Beta → Production.** The v0.100.4 RFB 3.3 handshake
+  fix was re-validated: RustyMap now cracks Metasploitable 2 VNC (RFB 3.3,
+  `password`) and agrees with hydra.
+
+### Notes
+- Brute adapters still Beta: `ssh` (inconclusive against the archaic OpenSSH
+  4.7p1 — re-test vs a modern server) and `smb` (needs an SMBv1 NTLM fallback
+  for old Samba, BRUTE-1). Five of seven network brute adapters are now
+  Production (ftp, postgres, ldap, mysql, vnc).
+
 ## [0.100.4] - 2026-10-24
 
 **Brute-adapter validation (`VALIDATION_0.100.3.md`): 3 promotions, 2 fixes, 1

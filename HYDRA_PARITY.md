@@ -50,8 +50,8 @@ clean exit, (4) RustyMap's rate-limit is honored (watch timing).
 | ldap | ✅ same bind `cn=admin,dc=example,dc=org` (hydra **ldap3://**), wrong rejected | **Production** (v0.100.4) |
 | ssh | ⚠️ both FAIL on OpenSSH 4.7p1 legacy KEX/MAC — inconclusive (agree on failure) | Beta — re-test modern SSH (BRUTE-4) |
 | smb | ❌ diverge: hydra/CME authenticate over SMBv1 (Samba 3.0.20), RustyMap has no SMBv1 fallback | Beta (BRUTE-1) |
-| mysql | ❌ empty password not sent as zero-length auth → **fixed v0.100.4**, re-test | Beta (BRUTE-2) |
-| vnc | ❌ RFB 3.3 security-type read as 3.7-style list → **fixed v0.100.4**, re-test | Beta (BRUTE-3) |
+| mysql | ✅ (v0.100.5 re-test) empty password `root:` HIT = hydra after the v0.100.4 fix | **Production** (v0.100.5) |
+| vnc | ✅ (v0.100.5 re-test) RFB 3.3 `password` HIT = hydra after the v0.100.4 fix | **Production** (v0.100.5) |
 
 > ldap note: hydra `ldap2://` reported 0 on this container; `ldap3://` works and
 > RustyMap agrees with it. Re-test mysql/vnc at v0.100.4. SMB needs SMBv1 NTLM;

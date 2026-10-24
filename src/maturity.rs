@@ -74,14 +74,14 @@ const REGISTRY: &[Feature] = &[
         note: "SSH cred brute via russh (v0.64). Lab v0.100.3 could not get a definitive result on Metasploitable 2 OpenSSH 4.7p1 — russh and the system ssh client both refuse that server's legacy KEX/MAC/host-keys (agreement on failure, weak evidence). Re-test against a modern OpenSSH (8.x+, e.g. pentest-ground.com:4445) to promote (BRUTE-4)." },
     Feature { key: "--brute-protocol smb", tier: Tier::Beta,
         note: "SMB NTLMv2 cred brute (v0.64). Lab v0.100.3 DIVERGES from hydra/CME on Metasploitable 2 Samba 3.0.20: the adapter doesn't negotiate SMBv1 so it finds nothing while hydra/CME authenticate. Needs an SMBv1 NTLM fallback before promotion (BRUTE-1)." },
-    Feature { key: "--brute-protocol mysql", tier: Tier::Beta,
-        note: "MySQL native_password cred brute (v0.64). Lab v0.100.3 diverged on an EMPTY password (MySQL 5.0.51a root with no password): the adapter sent a 20-byte zero scramble instead of a zero-length auth response. Fixed in v0.100.4 (empty password → auth-data-length 0); re-test vs hydra to promote (BRUTE-2)." },
+    Feature { key: "--brute-protocol mysql", tier: Tier::Production,
+        note: "MySQL native_password cred brute (v0.64). The v0.100.4 empty-password fix (auth-data-length 0) was confirmed on Kali v0.100.5: agrees with hydra on Metasploitable 2 MySQL 5.0.51a (root with a blank password). caching_sha2_password (8.0+ default) is still best-effort — native_password only." },
     Feature { key: "--brute-protocol postgres", tier: Tier::Production,
         note: "PostgreSQL MD5 cred brute (v0.64). Lab v0.100.3 agrees with hydra on Metasploitable 2 PostgreSQL 8.3 (MD5 auth): same hit (postgres:postgres) single-cred + needle-in-haystack. SCRAM (PG10+) still not implemented — MD5 auth only." },
     Feature { key: "--brute-protocol ldap", tier: Tier::Production,
         note: "LDAP simple-bind brute (v0.64). Lab v0.100.3 agrees with hydra ldap3:// on osixia/openldap: correct bind on cn=admin,dc=example,dc=org and correct rejection of a wrong password. SASL/GSSAPI still not supported — simple bind only." },
-    Feature { key: "--brute-protocol vnc", tier: Tier::Beta,
-        note: "RFB 3.x DES challenge-response (v0.64). Lab v0.100.3 diverged on Metasploitable 2 (RFB 3.3): the adapter only handled the RFB 3.7+ security-list negotiation, not 3.3's 4-byte server-dictated security type. Fixed in v0.100.4 (RFB 3.3 path added); re-test vs hydra to promote (BRUTE-3). RFB 4+ and Apple Remote Desktop still not covered." },
+    Feature { key: "--brute-protocol vnc", tier: Tier::Production,
+        note: "RFB 3.x DES challenge-response (v0.64). The v0.100.4 RFB 3.3 handshake fix was confirmed on Kali v0.100.5: agrees with hydra on Metasploitable 2 VNC (RFB 3.3, password 'password'). RFB 4+ and Apple Remote Desktop variants still not covered." },
 
     // ── Alpha — known limits or freshly landed; --experimental-confirm gate ──
     Feature { key: "--brute-protocol rdp", tier: Tier::Alpha,
