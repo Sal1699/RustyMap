@@ -4,6 +4,19 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.3] - 2026-10-24
+
+**`--smb-audit` promoted Beta → Production.** 659/659 tests.
+
+### Changed
+- **`--smb-audit` Beta → Production.** The v0.100.2 SMB2-first fix was
+  re-validated on Kali against Windows 11 24H2 (:445) and matched two reference
+  tools three ways: dialect **SMB 3.1.1** and the signing verdict (*enabled but
+  not required → relay-vulnerable*) agree with `nmap --script smb2-security-mode`
+  and crackmapexec. Port 139 (SMB-over-NetBIOS) is correctly refused by modern
+  Windows. This clears the BUG-1 disclaimer; the Beta spot-check warning no
+  longer prints for `--smb-audit`. (`src/maturity.rs`.)
+
 ## [0.100.2] - 2026-10-24
 
 **Fixes from the v0.100.1 Kali lab run (`VALIDATION_0.100.1.md`, 19-host /24).**
