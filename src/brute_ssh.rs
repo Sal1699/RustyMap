@@ -16,7 +16,7 @@
 //! subprocess. Compile time on a fresh build adds ~30 seconds.
 
 use crate::brute::{BruteAdapter, BruteConfig};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use russh::client::{self, Handle};
 use russh_keys::key::PublicKey;
@@ -35,15 +35,24 @@ impl BruteAdapter for SshAdapter {
         });
         let handler = AcceptAllHandler;
         let connect_fut = client::connect(config, cfg.target, handler);
+        // A connect failure/timeout is a TRANSPORT error, not an auth verdict —
+        // return Err so the framework retries the pair (the server may be
+        // throttling rapid attempts). Returning Ok(false) here would brand a
+        // throttled connection as "wrong password" and silently skip a cred
+        // that is actually valid (lab v0.100.5: ssh userlist×passlist miss).
         let mut handle: Handle<AcceptAllHandler> = match timeout(cfg.timeout, connect_fut).await {
             Ok(Ok(h)) => h,
-            _ => return Ok(false),
+            Ok(Err(e)) => return Err(anyhow!("ssh connect to {} failed: {}", cfg.target, e)),
+            Err(_) => return Err(anyhow!("ssh connect to {} timed out", cfg.target)),
         };
-        // Authenticate — russh 0.45 returns bool directly
+        // Authenticate — russh returns Ok(false) for a rejected password
+        // (a real auth failure), Ok(true) for success, and Err for a
+        // protocol/transport error (→ retryable).
         let auth = handle.authenticate_password(user, pass);
         let result = match timeout(cfg.timeout, auth).await {
             Ok(Ok(success)) => success,
-            _ => false,
+            Ok(Err(e)) => return Err(anyhow!("ssh auth error: {}", e)),
+            Err(_) => return Err(anyhow!("ssh auth timed out")),
         };
         // Best-effort clean disconnect; ignore any error.
         let _ = handle

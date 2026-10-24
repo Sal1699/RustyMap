@@ -105,6 +105,12 @@ impl PairSource {
     }
 }
 
+/// Transport errors (connection refused/reset/timeout — often a server
+/// throttling rapid attempts) get this many retries on the SAME pair before
+/// being recorded as an error and skipped, mirroring hydra's reconnect-and-
+/// retry resilience. Retries do not count against `--brute-max-tries`.
+const PAIR_ERROR_RETRIES: u32 = 2;
+
 /// Run an adapter against a pair source under the safety policy.
 pub async fn run<A: BruteAdapter>(
     adapter: A,
@@ -149,11 +155,32 @@ pub async fn run<A: BruteAdapter>(
             break;
         }
         let t0 = Instant::now();
-        let outcome = match adapter.try_one(&cfg, &user, &pass).await {
-            Ok(true) => AttemptOutcome::Success,
-            Ok(false) => AttemptOutcome::Failed,
-            Err(_) => AttemptOutcome::Error,
-        };
+        // A transport error (refused/reset/timeout) is not an auth verdict —
+        // the server may be throttling rapid attempts. Retry the SAME pair a
+        // few times before giving up, so a throttled/transient drop on the
+        // attempt that carries the right credential isn't silently missed
+        // (lab v0.100.5: ssh userlist×passlist missed a cred hydra found,
+        // because the matching attempt hit a throttled connection). An
+        // Ok(false) is a real auth failure and is never retried.
+        let mut outcome = AttemptOutcome::Error;
+        for retry in 0..=PAIR_ERROR_RETRIES {
+            match adapter.try_one(&cfg, &user, &pass).await {
+                Ok(true) => {
+                    outcome = AttemptOutcome::Success;
+                    break;
+                }
+                Ok(false) => {
+                    outcome = AttemptOutcome::Failed;
+                    break;
+                }
+                Err(_) => {
+                    outcome = AttemptOutcome::Error;
+                    if retry < PAIR_ERROR_RETRIES {
+                        sleep(Duration::from_millis(120 * (retry as u64 + 1))).await;
+                    }
+                }
+            }
+        }
         let latency_ms = t0.elapsed().as_millis() as u64;
         let error = match outcome {
             AttemptOutcome::Error => Some("adapter error".to_string()),
@@ -270,6 +297,52 @@ mod tests {
         let pairs = PairSource::Fixed(vec![("admin".into(), "admin".into())]);
         let r = run(stub, cfg(false, true), pairs).await.unwrap();
         assert_eq!(r.successes.len(), 1);
+    }
+
+    /// Errors `fail_first` times for the valid pair, then authenticates — to
+    /// prove a transient transport error is retried, not recorded as a miss.
+    struct FlakyAdapter {
+        fail_first: AtomicUsize,
+        calls: Arc<AtomicUsize>,
+    }
+    #[async_trait]
+    impl BruteAdapter for FlakyAdapter {
+        fn protocol(&self) -> &'static str { "flaky" }
+        async fn try_one(&self, _cfg: &BruteConfig, user: &str, pass: &str) -> Result<bool> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            if self.fail_first.load(Ordering::Relaxed) > 0 {
+                self.fail_first.fetch_sub(1, Ordering::Relaxed);
+                return Err(anyhow!("transient transport error"));
+            }
+            Ok(user == "admin" && pass == "secret")
+        }
+    }
+
+    #[tokio::test]
+    async fn transport_error_is_retried_then_hits() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let adapter = FlakyAdapter {
+            fail_first: AtomicUsize::new(1), // first attempt errors, retry succeeds
+            calls: Arc::clone(&calls),
+        };
+        let pairs = PairSource::Fixed(vec![("admin".into(), "secret".into())]);
+        let r = run(adapter, cfg(true, false), pairs).await.unwrap();
+        assert_eq!(r.successes.len(), 1, "retry should recover the hit");
+        assert_eq!(calls.load(Ordering::Relaxed), 2, "one error + one success");
+    }
+
+    #[tokio::test]
+    async fn persistent_error_gives_up_after_retries() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let adapter = FlakyAdapter {
+            fail_first: AtomicUsize::new(100), // always errors
+            calls: Arc::clone(&calls),
+        };
+        let pairs = PairSource::Fixed(vec![("admin".into(), "secret".into())]);
+        let r = run(adapter, cfg(true, false), pairs).await.unwrap();
+        assert_eq!(r.successes.len(), 0);
+        // 1 initial + PAIR_ERROR_RETRIES retries on the single pair.
+        assert_eq!(calls.load(Ordering::Relaxed), (PAIR_ERROR_RETRIES + 1) as usize);
     }
 
     #[tokio::test]

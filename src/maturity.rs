@@ -71,7 +71,7 @@ const REGISTRY: &[Feature] = &[
     Feature { key: "--brute-protocol ftp", tier: Tier::Production,
         note: "FTP cred brute (v0.63). Lab v0.100.3 agrees with hydra on Metasploitable 2 vsftpd 2.3.4: same hit (msfadmin:msfadmin) on single-cred and needle-in-haystack, wrong creds correctly rejected." },
     Feature { key: "--brute-protocol ssh", tier: Tier::Beta,
-        note: "SSH cred brute via russh (v0.64). Lab v0.100.3 could not get a definitive result on Metasploitable 2 OpenSSH 4.7p1 — russh and the system ssh client both refuse that server's legacy KEX/MAC/host-keys (agreement on failure, weak evidence). Re-test against a modern OpenSSH (8.x+, e.g. pentest-ground.com:4445) to promote (BRUTE-4)." },
+        note: "SSH cred brute via russh (v0.64). Lab v0.100.5 PROVED the success path on a modern server (--brute-pair and --brute-userpass both HIT and agreed with hydra), but --brute-userlist×--brute-passlist MISSED a cred hydra found: the adapter branded a throttled connection as Ok(false) and the framework didn't retry transport errors. Fixed in v0.100.6 (ssh connect/auth failure → Err; framework retries a pair on transport error). Re-test userlist×passlist vs hydra to promote." },
     Feature { key: "--brute-protocol smb", tier: Tier::Beta,
         note: "SMB NTLMv2 cred brute (v0.64). Lab v0.100.3 DIVERGES from hydra/CME on Metasploitable 2 Samba 3.0.20: the adapter doesn't negotiate SMBv1 so it finds nothing while hydra/CME authenticate. Needs an SMBv1 NTLM fallback before promotion (BRUTE-1)." },
     Feature { key: "--brute-protocol mysql", tier: Tier::Production,

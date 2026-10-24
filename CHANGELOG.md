@@ -4,6 +4,32 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.6] - 2026-10-24
+
+**Brute transport-error handling — a cred-missing bug found in the ssh positive
+test.** 664/664 tests.
+
+### Fixed
+- **SSH adapter no longer brands a transport failure as "wrong password."**
+  `brute_ssh` returned `Ok(false)` on a connect/auth failure or timeout, which
+  the framework recorded as a clean auth-failure. So when the server throttled
+  the one rapid attempt carrying the right credential, it was silently skipped.
+  It now returns `Err` for connect/auth transport errors (a rejected password
+  still returns `Ok(false)`). (`brute_ssh.rs`.)
+- **The brute framework retries a pair on a transport error.** A `try_one`
+  returning `Err` (refused/reset/timeout — often server throttling) is retried
+  up to twice with backoff before being recorded as an error, mirroring hydra's
+  reconnect-and-retry. Retries don't count against `--brute-max-tries`.
+  (`brute.rs`.) Benefits every adapter, not just ssh.
+
+### Why
+Lab v0.100.5 ssh positive test: `--brute-pair` and `--brute-userpass` both HIT
+and agreed with hydra (success path proven), but `--brute-userlist ×
+--brute-passlist` (16 rapid attempts) MISSED the cred hydra found — the matching
+attempt hit a throttled connection that was mis-recorded as an auth failure and
+never retried. `ssh` stays Beta until the userlist×passlist mode is re-confirmed
+against hydra on Kali.
+
 ## [0.100.5] - 2026-10-24
 
 **`--brute-protocol mysql` and `vnc` promoted Beta → Production.** 662/662 tests.
