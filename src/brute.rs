@@ -210,20 +210,32 @@ pub async fn run<A: BruteAdapter>(
     Ok(report)
 }
 
+/// Attempts that ended in a transport error (connection refused/reset/timeout)
+/// rather than a server auth verdict. A run where every attempt errored reached
+/// no verdict at all — the target was down/filtered — so it must NOT be read as
+/// "the credentials are wrong".
+pub fn error_count(r: &BruteReport) -> usize {
+    r.attempts
+        .iter()
+        .filter(|a| a.outcome == AttemptOutcome::Error)
+        .count()
+}
+
 pub fn print_report(r: &BruteReport) {
     use colored::*;
+    let errors = error_count(r);
     println!();
-    println!(
-        "{}",
-        format!(
-            "Bruteforce against {} ({} adapter) — {} attempt(s), {} success(es)",
-            r.target,
-            r.protocol,
-            r.tried,
-            r.successes.len()
-        )
-        .bold()
+    let mut headline = format!(
+        "Bruteforce against {} ({} adapter) — {} attempt(s), {} success(es)",
+        r.target,
+        r.protocol,
+        r.tried,
+        r.successes.len()
     );
+    if errors > 0 {
+        headline.push_str(&format!(", {} connection error(s)", errors));
+    }
+    println!("{}", headline.bold());
     for (u, p) in &r.successes {
         println!(
             "  {} {}:{}",
@@ -236,7 +248,33 @@ pub fn print_report(r: &BruteReport) {
         println!("  {} {}", "[-] aborted:".yellow(), reason);
     }
     if r.successes.is_empty() && r.aborted_reason.is_none() {
-        println!("  {}", "no valid pair found".dimmed());
+        if r.tried > 0 && errors == r.tried {
+            // Every attempt failed to connect — no auth verdict was reached.
+            // Say so loudly: this is inconclusive, not "no valid credentials".
+            println!(
+                "  {}",
+                format!(
+                    "all {} attempt(s) failed to connect (refused/reset/timeout) — target \
+                     down, filtered, or throttling. INCONCLUSIVE, not a clean 'no valid \
+                     credentials'; verify the service is reachable and re-run.",
+                    r.tried
+                )
+                .yellow()
+                .bold()
+            );
+        } else if errors > 0 {
+            println!(
+                "  {}",
+                format!(
+                    "no valid pair found — but {} of {} attempt(s) errored on the wire and \
+                     were NOT conclusively tested",
+                    errors, r.tried
+                )
+                .yellow()
+            );
+        } else {
+            println!("  {}", "no valid pair found".dimmed());
+        }
     }
 }
 
@@ -380,6 +418,29 @@ mod tests {
         let r = run(stub, c, pairs).await.unwrap();
         assert_eq!(r.tried, 3);
         assert!(r.aborted_reason.is_some());
+    }
+
+    #[test]
+    fn error_count_distinguishes_transport_errors_from_auth_failures() {
+        let mk = |o: AttemptOutcome| BruteAttempt {
+            user: "u".into(),
+            pass: "p".into(),
+            outcome: o,
+            latency_ms: 0,
+            error: None,
+        };
+        let r = BruteReport {
+            tried: 3,
+            attempts: vec![
+                mk(AttemptOutcome::Error),
+                mk(AttemptOutcome::Failed),
+                mk(AttemptOutcome::Error),
+            ],
+            ..Default::default()
+        };
+        // 2 of 3 errored → an all-errored run would equal `tried` and read as
+        // inconclusive rather than "no valid credentials".
+        assert_eq!(error_count(&r), 2);
     }
 
     #[test]

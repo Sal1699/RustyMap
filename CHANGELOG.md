@@ -4,6 +4,27 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.7] - 2026-10-28
+
+**Brute report distinguishes a dead target from "no valid credentials."**
+665/665 tests.
+
+### Changed
+- **`brute::print_report` now surfaces connection errors.** A run where every
+  attempt failed to connect (refused/reset/timeout — e.g. the service is down,
+  filtered, or still booting) printed "no valid pair found", which reads like
+  "the passwords are wrong" when in fact no credential was ever tested. The
+  headline now appends "N connection error(s)", and an all-errored run prints a
+  bold **INCONCLUSIVE** line telling the operator to verify reachability and
+  re-run. Added `brute::error_count`. (`brute.rs`.)
+
+### Why
+Lab re-test of the ssh fix was invalid in a way the old output hid: hydra said
+"connection refused" to the SSH container while RustyMap reported "16/16
+attempts, 0 valid" — both had simply failed to reach the target (the container
+wasn't listening yet), but only hydra's message made that obvious. This makes
+RustyMap's verdict just as unambiguous.
+
 ## [0.100.6] - 2026-10-24
 
 **Brute transport-error handling — a cred-missing bug found in the ssh positive
