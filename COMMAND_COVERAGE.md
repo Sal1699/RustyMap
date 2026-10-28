@@ -76,7 +76,7 @@ Keep this in sync as new areas get a documented lab run. Reference the
 
 | Command | Status | Reference | Note |
 |---------|--------|-----------|------|
-| `--brute-protocol ssh` | ✅ | hydra | rate + gate verified (N7) |
+| `--brute-protocol ssh` | ✅ | hydra | cred recovered vs hydra (v0.100.8); Production v0.100.9 |
 | ftp/smtp/http-basic/http-form/smb/mssql/mysql/postgres/vnc/rdp/snmp/ldap/telnet | ⬜ | hydra | turnkey command pairs in **HYDRA_PARITY.md** (v0.86.0) — run on Kali |
 
 ## Metasploit

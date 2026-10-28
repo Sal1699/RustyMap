@@ -48,14 +48,15 @@ clean exit, (4) RustyMap's rate-limit is honored (watch timing).
 | ftp | ✅ same hit `msfadmin:msfadmin` (single + needle), wrong rejected | **Production** (v0.100.4) |
 | postgres | ✅ same hit `postgres:postgres` (MD5 auth), wrong rejected | **Production** (v0.100.4) |
 | ldap | ✅ same bind `cn=admin,dc=example,dc=org` (hydra **ldap3://**), wrong rejected | **Production** (v0.100.4) |
-| ssh | ⚠️ both FAIL on OpenSSH 4.7p1 legacy KEX/MAC — inconclusive (agree on failure) | Beta — re-test modern SSH (BRUTE-4) |
+| ssh | ✅ (v0.100.8) recovered `testbrute:test123` on modern OpenSSH (Docker :2222) in 8 attempts; hydra intermittent under MaxStartups the same run | **Production** (v0.100.9) |
 | smb | ❌ diverge: hydra/CME authenticate over SMBv1 (Samba 3.0.20), RustyMap has no SMBv1 fallback | Beta (BRUTE-1) |
 | mysql | ✅ (v0.100.5 re-test) empty password `root:` HIT = hydra after the v0.100.4 fix | **Production** (v0.100.5) |
 | vnc | ✅ (v0.100.5 re-test) RFB 3.3 `password` HIT = hydra after the v0.100.4 fix | **Production** (v0.100.5) |
 
 > ldap note: hydra `ldap2://` reported 0 on this container; `ldap3://` works and
-> RustyMap agrees with it. Re-test mysql/vnc at v0.100.4. SMB needs SMBv1 NTLM;
-> SSH needs a modern server (e.g. pentest-ground.com:4445, OpenSSH 8.4p1).
+> RustyMap agrees with it. SSH validated v0.100.8 on a modern OpenSSH (Docker
+> linuxserver/openssh-server :2222, password auth) → Production v0.100.9. Only
+> SMB remains Beta (needs an SMBv1 NTLM fallback for old Samba, BRUTE-1).
 
 **Notes**
 - MSSQL + RDP are **Alpha** tier (RDP CredSSP pubKeyAuth is best-effort —

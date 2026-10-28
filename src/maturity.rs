@@ -70,8 +70,8 @@ const REGISTRY: &[Feature] = &[
         note: "CPE→CVE matching. Lab-validated vs NVD (v0.99: `OpenSSH 9.6p1` → 25 CVEs incl. CVE-2024-6387/regreSSHion). Complex distro version strings can still misclassify — verify high-impact hits manually." },
     Feature { key: "--brute-protocol ftp", tier: Tier::Production,
         note: "FTP cred brute (v0.63). Lab v0.100.3 agrees with hydra on Metasploitable 2 vsftpd 2.3.4: same hit (msfadmin:msfadmin) on single-cred and needle-in-haystack, wrong creds correctly rejected." },
-    Feature { key: "--brute-protocol ssh", tier: Tier::Beta,
-        note: "SSH cred brute via russh (v0.64). Success path PROVED vs hydra (v0.100.5: --brute-pair/--brute-userpass HIT). The larger --brute-userlist×--brute-passlist still MISSED a cred hydra found: a burst of rapid connects trips the server's MaxStartups throttle and the attempt carrying the valid pair was dropped on the wire. v0.100.6 made transport failures retryable; v0.100.8 widened the retry to 4 attempts with seconds-scale exponential backoff + jitter so a throttled valid pair gets real chances to land. Re-test userlist×passlist vs hydra on a modern server to promote." },
+    Feature { key: "--brute-protocol ssh", tier: Tier::Production,
+        note: "SSH cred brute via russh (v0.64). Lab-validated vs hydra across every mode: --brute-pair/--brute-userpass HIT=hydra (v0.100.5), and the full --brute-userlist×--brute-passlist recovered the known-valid cred in v0.100.8 on a modern OpenSSH server — in 8 effective attempts, where hydra's 16 parallel tasks were throttled to an intermittent miss by the server's MaxStartups. The success path needed the v0.100.6/.8 retry-backoff work (transport errors retried 4× with seconds-scale exponential backoff + jitter) to outlast a burst throttle; a single connection always worked. Password auth only — no pubkey / keyboard-interactive." },
     Feature { key: "--brute-protocol smb", tier: Tier::Beta,
         note: "SMB NTLMv2 cred brute (v0.64). Lab v0.100.3 DIVERGES from hydra/CME on Metasploitable 2 Samba 3.0.20: the adapter doesn't negotiate SMBv1 so it finds nothing while hydra/CME authenticate. Needs an SMBv1 NTLM fallback before promotion (BRUTE-1)." },
     Feature { key: "--brute-protocol mysql", tier: Tier::Production,
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn beta_gate_passes_silently() {
-        let r = announce_and_gate("--brute-protocol ssh", false);
+        let r = announce_and_gate("--brute-protocol smb", false);
         assert!(r.is_ok(), "beta does not need --experimental-confirm");
     }
 

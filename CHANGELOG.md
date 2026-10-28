@@ -4,6 +4,28 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.9] - 2026-10-28
+
+**`--brute-protocol ssh` promoted Beta → Production.** 666/666 tests.
+
+### Changed
+- **`--brute-protocol ssh` is now Production.** The v0.100.8 retry-backoff fix
+  was validated on Kali against hydra: RustyMap recovered the known-valid
+  credential (`testbrute:test123`) on a modern OpenSSH server in 8 effective
+  attempts, riding out the server's connection drops with the new backoff. In
+  the same run hydra's 16 parallel tasks tripped the container's `MaxStartups`
+  and missed intermittently — so RustyMap's sequential + backoff approach was the
+  more reliable of the two here. (`maturity.rs`.) The `beta_gate_passes_silently`
+  test now exercises `--brute-protocol smb` (the remaining Beta brute adapter).
+
+### Why
+Closes the ssh thread opened at v0.100.5: `--brute-pair` / `--brute-userpass`
+already agreed with hydra, and the larger `--brute-userlist × --brute-passlist`
+mode — the one that was missing the credential under the server's burst throttle
+— now finds it. ssh is the 6th of 7 network brute adapters at Production
+(ftp / postgres / ldap / mysql / vnc / **ssh**); only `smb` remains Beta, pending
+the SMBv1 NTLM fallback for old Samba (BRUTE-1).
+
 ## [0.100.8] - 2026-10-28
 
 **Brute retry now outlasts a server burst-throttle, so a throttled valid

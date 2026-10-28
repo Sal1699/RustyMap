@@ -64,6 +64,7 @@ To promote a feature from one tier to the next:
 | 2026-10-24 | v0.100.3 Part B (brute vs hydra) + v0.100.4 | Kali → Metasploitable 2 (172.17.0.2) + osixia/openldap | hydra 9.6 / crackmapexec | Report `VALIDATION_0.100.3.md`. **ftp/postgres/ldap = match hydra** (single + needle, wrong-cred rifiutato) → promossi. ssh inconcludente (both fail su OpenSSH 4.7p1 legacy KEX); smb diverge (hydra/CME via SMBv1, RM senza fallback, BRUTE-1); mysql diverge su empty-pass (BRUTE-2); vnc diverge su RFB 3.3 (BRUTE-3). | **v0.100.4:** BRUTE-2 (mysql empty-pass→auth-len 0) e BRUTE-3 (vnc RFB 3.3 handshake) FIXATI (restano Beta, re-test Kali); BRUTE-1 (smb SMBv1) + BRUTE-4 (ssh legacy) rinviati. | **ftp/postgres/ldap Beta → Production** |
 | 2026-10-24 | v0.100.5 re-test fix brute (mysql+vnc) | Kali → Metasploitable 2 (172.17.0.2) | hydra 9.6 | **Fix v0.100.4 CONFERMATI:** mysql `root:` (empty) HIT = hydra; vnc RFB 3.3 `password` HIT = hydra. Entrambi ora autenticano e concordano. | 5/7 brute network ora Production (ftp/postgres/ldap/mysql/vnc); restano Beta ssh (server troppo vecchio) + smb (BRUTE-1 SMBv1). | **mysql + vnc Beta → Production** |
 | 2026-10-24 | ssh positive test (linuxserver/openssh-server moderno) | Kali → Docker SSH :2222 (password-auth) | hydra 9.6 | **Success-path PROVATO:** `--brute-pair testbrute:test123` HIT=hydra; `--brute-userpass` combo HIT (3 tent.)=hydra; wrong/pubkey-only/legacy-KEX 0 clean=hydra. **MA `--brute-userlist×--brute-passlist` MISS** (RM 0, hydra HIT 16 tent.): l'attempt con la cred giusta cadeva su una connessione throttled che l'adapter marcava `Ok(false)` (= pwd sbagliata) e il framework non ritentava. | **FIX v0.100.6:** ssh connect/auth failure → `Err` (non Ok(false)); framework ritenta un pair su transport-error (×2, backoff), come hydra. 664 test. ssh RESTA Beta → re-test userlist×passlist su Kali deve dare HIT=hydra. | nessuno (ssh pendente re-test del fix) |
+| 2026-10-28 | ssh promotion re-test (v0.100.8 backoff fix) | Kali → Docker SSH :2222 (linuxserver/openssh-server, password-auth) | hydra 9.6 | **PASS — RustyMap ha recuperato `testbrute:test123`** in 8 tentativi effettivi (2 err); il retry-backoff v0.100.8 ha assorbito i connection-drop del server. Hydra con 16 task paralleli ha fatto scattare il `MaxStartups` del container → miss intermittente / crash 255 nello stesso run. Validità cred = ground truth (provisioned) + confermata da hydra nel run `--brute-pair` v0.100.5. | Chiude il thread ssh (v0.100.5→.8): userlist×passlist (l'ultima modalità che mancava) ora HIT. RustyMap più affidabile del parallelismo default di hydra sotto questo throttle. | **ssh Beta → Production** (v0.100.9) |
 
 ## Targets in current lab
 
@@ -81,7 +82,7 @@ Roughly grouped by feature. Tackle the high-uncertainty items first
 most likely to reveal bugs the synthetic tests didn't.
 
 ### Brute adapters
-- [ ] `--brute-protocol ssh` vs `hydra ssh://` — Linux sshd + Dropbear if available
+- [x] `--brute-protocol ssh` vs `hydra ssh://` — ✅ v0.100.8 recovered testbrute:test123 (Docker OpenSSH :2222) → Production v0.100.9
 - [ ] `--brute-protocol smb` vs `crackmapexec smb` — Windows + Samba
 - [ ] `--brute-protocol mysql` vs `hydra mysql://` — MySQL 5.7 + 8.x + MariaDB
 - [ ] `--brute-protocol postgres` vs `hydra postgres://` — verify SCRAM path is unsupported (intentional)
