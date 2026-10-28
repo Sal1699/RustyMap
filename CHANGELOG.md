@@ -4,6 +4,27 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.12] - 2026-10-28
+
+**SMB brute diagnostics — the guest-mapping false positive persists.** 674/674 tests.
+
+### Added
+- **`RUSTYMAP_SMB_DEBUG=1` dumps the SMB brute exchange.** For each attempt it
+  prints (to stderr) the parsed status / Action / guest flag plus the hex of the
+  challenge reply, the AUTHENTICATE request we sent, and the server's reply — to
+  pin down the Metasploitable 2 Samba 3.0.20 false positive from exact bytes
+  rather than another blind guess. (`brute_smb.rs`.)
+
+### Known issue
+- **`--brute-protocol smb` still false-positives on Metasploitable 2 Samba
+  3.0.20.** The v0.100.11 `SMB_SETUP_GUEST` (Action bit 0) check did not catch it
+  in the lab re-test — `root:wrong` is still read as a hit while crackmapexec and
+  hydra correctly reject it and find only `msfadmin:msfadmin`. Either Samba
+  signals the guest mapping somewhere other than the Action bit, or the Type-3 we
+  send is being guest-mapped upstream (malformed NTLMv2 / username). Under
+  investigation with the new diagnostics. **`smb` stays Beta — do not rely on its
+  results yet.**
+
 ## [0.100.11] - 2026-10-28
 
 **SMB brute no longer reports a Samba guest mapping as a hit.** 673/673 tests.

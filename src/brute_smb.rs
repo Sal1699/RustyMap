@@ -79,6 +79,28 @@ impl BruteAdapter for SmbAdapter {
         let setup2 = build_session_setup_ntlmssp_authenticate(user, &self.domain, &nt_response, server_uid);
         timeout(cfg.timeout, s.write_all(&setup2)).await??;
         let setup2_resp = read_nbt(&mut s, cfg.timeout).await?;
+        // Opt-in protocol diagnostics: `RUSTYMAP_SMB_DEBUG=1` dumps the
+        // challenge reply, the AUTHENTICATE we sent, and the server's reply
+        // (hex) plus parsed status/action, to pin down a lab mismatch (e.g. the
+        // Samba 3.0.20 guest-mapping false positive) from exact bytes instead of
+        // another blind guess.
+        if std::env::var_os("RUSTYMAP_SMB_DEBUG").is_some() {
+            let hx = |b: &[u8]| b.iter().map(|x| format!("{:02x}", x)).collect::<String>();
+            let status = parse_nt_status(&setup2_resp)
+                .map(|s| format!("0x{:08x}", s))
+                .unwrap_or_else(|| "none".into());
+            let action = parse_setup_action(&setup2_resp)
+                .map(|a| format!("0x{:04x}", a))
+                .unwrap_or_else(|| "none".into());
+            eprintln!(
+                "[smb-debug] {}:{} uid=0x{:04x} status={} action={} guest={}",
+                user, pass, server_uid, status, action,
+                setup_granted_guest(&setup2_resp)
+            );
+            eprintln!("[smb-debug]   challenge-resp({}B)={}", setup1_resp.len(), hx(&setup1_resp));
+            eprintln!("[smb-debug]   auth-req({}B)={}", setup2.len(), hx(&setup2));
+            eprintln!("[smb-debug]   auth-resp({}B)={}", setup2_resp.len(), hx(&setup2_resp));
+        }
         // SUCCESS (0) → creds valid; any NT_STATUS error → these creds failed
         // (LOGON_FAILURE / WRONG_PASSWORD / NO_SUCH_USER / …). An unparseable
         // reply is a wire/protocol error, not an auth verdict → Err so the
@@ -386,20 +408,25 @@ pub fn parse_uid(body: &[u8]) -> Option<u16> {
     Some(u16::from_le_bytes([body[28], body[29]]))
 }
 
-/// Was the SessionSetupAndX response a GUEST mapping rather than real auth?
-///
-/// The response Action field's bit 0 is `SMB_SETUP_GUEST`: the server granted a
-/// guest session (e.g. Samba `map to guest = Bad User/Password`, as on
-/// Metasploitable 2) instead of authenticating the submitted credential. A hit
-/// must require this bit CLEAR, or every wrong credential reads as success.
-/// Action sits right after the AndX prologue: header(32) + WordCount(1) +
-/// AndXCommand(1) + AndXReserved(1) + AndXOffset(2) → offset 37.
-pub fn setup_granted_guest(body: &[u8]) -> bool {
+/// SessionSetupAndX response Action field (offset 37, little-endian), or None
+/// if the reply is too short / not SMB. Action sits right after the AndX
+/// prologue: header(32) + WordCount(1) + AndXCommand(1) + AndXReserved(1) +
+/// AndXOffset(2) → offset 37.
+pub fn parse_setup_action(body: &[u8]) -> Option<u16> {
     if body.len() < 39 || &body[0..4] != b"\xffSMB" {
-        return false;
+        return None;
     }
-    let action = u16::from_le_bytes([body[37], body[38]]);
-    action & 0x0001 != 0
+    Some(u16::from_le_bytes([body[37], body[38]]))
+}
+
+/// Was the SessionSetupAndX response a GUEST mapping rather than real auth?
+/// The Action field's bit 0 is `SMB_SETUP_GUEST`: the server granted a guest
+/// session (e.g. Samba `map to guest`) instead of authenticating the submitted
+/// credential, so a hit must require this bit CLEAR. NOTE: not every server
+/// signals a guest mapping here (lab: Samba 3.0.20 still false-positived with
+/// this check) — see the `RUSTYMAP_SMB_DEBUG` diagnostics in `try_one`.
+pub fn setup_granted_guest(body: &[u8]) -> bool {
+    parse_setup_action(body).map_or(false, |a| a & 0x0001 != 0)
 }
 
 #[cfg(test)]
@@ -533,5 +560,15 @@ mod tests {
         // Too short to hold an Action field → treat as non-guest (the status
         // was already SUCCESS); never panic on a truncated reply.
         assert!(!setup_granted_guest(b"\xffSMBshort"));
+    }
+
+    #[test]
+    fn parse_setup_action_reads_offset() {
+        let mut body = vec![0u8; 40];
+        body[0..4].copy_from_slice(b"\xffSMB");
+        body[37] = 0x05;
+        body[38] = 0x00;
+        assert_eq!(parse_setup_action(&body), Some(0x0005));
+        assert_eq!(parse_setup_action(b"short"), None);
     }
 }
