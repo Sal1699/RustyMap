@@ -8,8 +8,11 @@
 //!   2. Session Setup ANDX with NTLMSSP NEGOTIATE (Type 1)
 //!      → server replies with NTLMSSP CHALLENGE (Type 2) carrying
 //!      the 8-byte server challenge + TargetInfo block.
-//!   3. Session Setup ANDX with NTLMSSP AUTHENTICATE (Type 3)
-//!      carrying our computed NTLMv2 response.
+//!   3. Session Setup ANDX with NTLMSSP AUTHENTICATE (Type 3), echoing the
+//!      server-assigned UID from step 2 and carrying our computed NTLMv2
+//!      response. Old servers like Samba 3.0.20 require the UID to correlate
+//!      the Type-3 with the challenge they issued — sending UID 0 makes auth
+//!      fail for every credential (lab BRUTE-1).
 //!   4. Server replies with NT_STATUS_SUCCESS (0x00000000) → success,
 //!      LOGON_FAILURE (0xC000006D) / WRONG_PASSWORD (0xC000006A) →
 //!      bad credentials.
@@ -65,13 +68,26 @@ impl BruteAdapter for SmbAdapter {
         let server_challenge = challenge.server_challenge;
         let target_info = challenge.target_info.clone();
 
+        // The server assigns a UID in its CHALLENGE reply; the AUTHENTICATE
+        // must echo it so the server can correlate the Type-3 with the
+        // challenge it issued. Omitting it (UID 0) makes old servers such as
+        // Samba 3.0.20 reject every credential (lab BRUTE-1).
+        let server_uid = parse_uid(&setup1_resp).unwrap_or(0);
+
         // 3) Session Setup with NTLMSSP AUTHENTICATE
         let nt_response = compute_ntlmv2(user, &self.domain, pass, &server_challenge, &target_info);
-        let setup2 = build_session_setup_ntlmssp_authenticate(user, &self.domain, &nt_response);
+        let setup2 = build_session_setup_ntlmssp_authenticate(user, &self.domain, &nt_response, server_uid);
         timeout(cfg.timeout, s.write_all(&setup2)).await??;
         let setup2_resp = read_nbt(&mut s, cfg.timeout).await?;
-        let nt_status = parse_nt_status(&setup2_resp);
-        Ok(nt_status == Some(0x0000_0000))
+        // SUCCESS (0) → creds valid; any NT_STATUS error → these creds failed
+        // (LOGON_FAILURE / WRONG_PASSWORD / NO_SUCH_USER / …). An unparseable
+        // reply is a wire/protocol error, not an auth verdict → Err so the
+        // framework can retry rather than brand it "wrong password".
+        match parse_nt_status(&setup2_resp) {
+            Some(0x0000_0000) => Ok(true),
+            Some(_) => Ok(false),
+            None => Err(anyhow!("unparseable SMB Session Setup reply from {}", cfg.target)),
+        }
     }
 }
 
@@ -169,24 +185,10 @@ fn build_session_setup_ntlmssp_negotiate() -> Vec<u8> {
         0, 0, 0, 0, 0, 0, 0, 0,
         0x0a, 0x00, 0x00, 0x00, 0xa1, 0x4a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f,
     ];
-    let mut body: Vec<u8> = Vec::with_capacity(64 + ntlmssp.len());
-    body.push(12);
-    body.extend_from_slice(&[0xff, 0x00, 0x00, 0x00, 0xff, 0xff, 0x02, 0x00, 0x01, 0x00,
-                             0x00, 0x00, 0x00, 0x00]);
-    body.extend_from_slice(&(ntlmssp.len() as u16).to_le_bytes());
-    body.extend_from_slice(&[0, 0, 0, 0]);
-    body.extend_from_slice(&0xd4u32.to_le_bytes());
-    body.extend_from_slice(&(ntlmssp.len() as u16).to_le_bytes());
-    body.extend_from_slice(&ntlmssp);
-    body.push(0);
-
-    let mut pkt = smb_header_for(0x73, 0xc807);
-    pkt.extend_from_slice(&body);
-    patch_nbt_length(&mut pkt);
-    pkt
+    wrap_session_setup(&ntlmssp, 0)
 }
 
-fn build_session_setup_ntlmssp_authenticate(user: &str, domain: &str, nt_response: &[u8]) -> Vec<u8> {
+fn build_session_setup_ntlmssp_authenticate(user: &str, domain: &str, nt_response: &[u8], uid: u16) -> Vec<u8> {
     // Build the NTLMSSP AUTHENTICATE Type 3 message
     let user_utf16: Vec<u8> = user.encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
     let domain_utf16: Vec<u8> = domain.encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
@@ -252,39 +254,61 @@ fn build_session_setup_ntlmssp_authenticate(user: &str, domain: &str, nt_respons
     // Append payload
     ntlmssp.extend_from_slice(&payload);
 
-    // Wrap in Session Setup ANDX
-    let mut body: Vec<u8> = Vec::with_capacity(64 + ntlmssp.len());
-    body.push(12);
-    body.extend_from_slice(&[0xff, 0x00, 0x00, 0x00, 0xff, 0xff, 0x02, 0x00, 0x01, 0x00,
-                             0x00, 0x00, 0x00, 0x00]);
-    body.extend_from_slice(&(ntlmssp.len() as u16).to_le_bytes());
-    body.extend_from_slice(&[0, 0, 0, 0]);
-    body.extend_from_slice(&0xd4u32.to_le_bytes());
-    body.extend_from_slice(&(ntlmssp.len() as u16).to_le_bytes());
-    body.extend_from_slice(&ntlmssp);
-    body.push(0);
+    // Wrap in Session Setup ANDX, echoing the server-assigned UID.
+    wrap_session_setup(&ntlmssp, uid)
+}
 
-    let mut pkt = smb_header_for(0x73, 0xc807);
-    pkt.extend_from_slice(&body);
+/// Wrap a GSS/NTLMSSP security blob in an SMB_COM_SESSION_SETUP_ANDX request
+/// (WordCount 12, extended security). `uid` is echoed into the SMB header so a
+/// follow-up AUTHENTICATE correlates with the server's challenge; it is 0 for
+/// the first (NEGOTIATE) round. Shared by both session-setup builders so the
+/// parameter block can't drift between them.
+fn wrap_session_setup(security_blob: &[u8], uid: u16) -> Vec<u8> {
+    let blob_len = security_blob.len() as u16;
+    let trailing: &[u8] = &[0x00]; // pad byte; native OS/LanMan strings left empty
+    let byte_count = (blob_len as usize + trailing.len()) as u16;
+
+    // Parameter block (24 bytes = WordCount 12).
+    let mut params: Vec<u8> = Vec::with_capacity(24);
+    params.push(0xff); // AndXCommand = none
+    params.push(0x00); // AndXReserved
+    params.extend_from_slice(&0u16.to_le_bytes()); // AndXOffset
+    params.extend_from_slice(&0xffffu16.to_le_bytes()); // MaxBufferSize
+    params.extend_from_slice(&0x0002u16.to_le_bytes()); // MaxMpxCount
+    params.extend_from_slice(&0x0001u16.to_le_bytes()); // VcNumber
+    params.extend_from_slice(&0u32.to_le_bytes()); // SessionKey
+    params.extend_from_slice(&blob_len.to_le_bytes()); // SecurityBlobLength
+    params.extend_from_slice(&0u32.to_le_bytes()); // Reserved
+    // Capabilities — CAP_UNICODE|CAP_NT_SMBS|CAP_STATUS32|CAP_LEVEL_II_OPLOCKS
+    // plus CAP_EXTENDED_SECURITY (0x80000000), which the old code omitted so
+    // the server never treated the blob as NTLMSSP.
+    params.extend_from_slice(&0x8000_00d4u32.to_le_bytes());
+
+    let mut pkt = smb_header_for(0x73, 0xc807, uid);
+    pkt.push(12); // WordCount
+    pkt.extend_from_slice(&params);
+    pkt.extend_from_slice(&byte_count.to_le_bytes()); // ByteCount = blob + trailing
+    pkt.extend_from_slice(security_blob);
+    pkt.extend_from_slice(trailing);
     patch_nbt_length(&mut pkt);
     pkt
 }
 
-fn smb_header_for(command: u8, flags2: u16) -> Vec<u8> {
+fn smb_header_for(command: u8, flags2: u16, uid: u16) -> Vec<u8> {
     let mut pkt = Vec::with_capacity(36);
-    pkt.extend_from_slice(&[0u8; 4]); // NBT placeholder
+    pkt.extend_from_slice(&[0u8; 4]); // NBT length placeholder
     pkt.extend_from_slice(b"\xffSMB");
     pkt.push(command);
-    pkt.extend_from_slice(&[0u8; 4]);
-    pkt.push(0x18);
-    pkt.extend_from_slice(&flags2.to_le_bytes());
-    pkt.extend_from_slice(&[0u8; 2]);
-    pkt.extend_from_slice(&[0u8; 8]);
-    pkt.extend_from_slice(&[0u8; 2]);
-    pkt.extend_from_slice(&[0u8; 2]);
-    pkt.extend_from_slice(&[0x2f, 0x4b]);
-    pkt.extend_from_slice(&[0u8; 2]);
-    pkt.extend_from_slice(&[0xc5, 0x5e]);
+    pkt.extend_from_slice(&[0u8; 4]); // NT_STATUS
+    pkt.push(0x18); // flags
+    pkt.extend_from_slice(&flags2.to_le_bytes()); // flags2
+    pkt.extend_from_slice(&[0u8; 2]); // PIDHigh
+    pkt.extend_from_slice(&[0u8; 8]); // SecuritySignature
+    pkt.extend_from_slice(&[0u8; 2]); // Reserved
+    pkt.extend_from_slice(&[0u8; 2]); // TID
+    pkt.extend_from_slice(&0x4b2fu16.to_le_bytes()); // PIDLow
+    pkt.extend_from_slice(&uid.to_le_bytes()); // UID (echo server-assigned)
+    pkt.extend_from_slice(&0x5ec5u16.to_le_bytes()); // MID
     pkt
 }
 
@@ -344,6 +368,16 @@ pub fn parse_nt_status(body: &[u8]) -> Option<u32> {
         return None;
     }
     Some(u32::from_le_bytes([body[5], body[6], body[7], body[8]]))
+}
+
+/// UID from an SMB1 response header (offset 28, little-endian). The server
+/// assigns this in its CHALLENGE reply; the AUTHENTICATE request must echo it
+/// so the server can correlate the Type-3 message with the challenge.
+pub fn parse_uid(body: &[u8]) -> Option<u16> {
+    if body.len() < 30 || &body[0..4] != b"\xffSMB" {
+        return None;
+    }
+    Some(u16::from_le_bytes([body[28], body[29]]))
 }
 
 #[cfg(test)]
@@ -411,5 +445,52 @@ mod tests {
     fn parse_nt_status_pulls_le_word() {
         let body = b"\xffSMBx\x05\x02\x00\xC0";
         assert_eq!(parse_nt_status(body), Some(0xC0000205));
+    }
+
+    #[test]
+    fn parse_uid_reads_header_field() {
+        // \xffSMB(4) + cmd(1) + status(4) + flags(1) + flags2(2) + pidhigh(2)
+        // + sig(8) + reserved(2) + tid(2) + pidlow(2) = offset 28, then UID(2).
+        let mut body = vec![0u8; 30];
+        body[0..4].copy_from_slice(b"\xffSMB");
+        body[28] = 0x34;
+        body[29] = 0x12;
+        assert_eq!(parse_uid(&body), Some(0x1234));
+    }
+
+    #[test]
+    fn parse_uid_rejects_non_smb() {
+        // Long enough to pass the length guard, but not an SMB reply.
+        assert_eq!(parse_uid(&[0x11u8; 40]), None);
+    }
+
+    #[test]
+    fn authenticate_echoes_server_uid() {
+        // UID sits at SMB offset 28..30, i.e. packet offset 32..34 after the
+        // 4-byte NBT prefix. Regression guard for lab BRUTE-1 (UID 0 → auth
+        // fails on Samba 3.0.20 for every credential).
+        let resp = compute_ntlmv2("u", "", "p", &[0u8; 8], b"");
+        let pkt = build_session_setup_ntlmssp_authenticate("u", "", &resp, 0xBEEF);
+        assert_eq!(&pkt[32..34], &0xBEEFu16.to_le_bytes());
+    }
+
+    #[test]
+    fn negotiate_session_setup_has_uid_zero() {
+        let pkt = build_session_setup_ntlmssp_negotiate();
+        assert_eq!(&pkt[32..34], &0u16.to_le_bytes());
+    }
+
+    #[test]
+    fn wrap_session_setup_structure() {
+        // ByteCount must cover the blob + trailing pad, and Capabilities must
+        // advertise CAP_EXTENDED_SECURITY (both were wrong before BRUTE-1).
+        let blob = b"NTLMSSP\0some-blob-bytes";
+        let pkt = wrap_session_setup(blob, 0x1234);
+        assert_eq!(&pkt[32..34], &0x1234u16.to_le_bytes(), "UID echoed");
+        let bp = pkt.windows(8).position(|w| w == b"NTLMSSP\0").unwrap();
+        let bc = u16::from_le_bytes([pkt[bp - 2], pkt[bp - 1]]) as usize;
+        assert_eq!(bc, pkt.len() - bp, "ByteCount = blob + trailing pad");
+        let caps = u32::from_le_bytes([pkt[bp - 6], pkt[bp - 5], pkt[bp - 4], pkt[bp - 3]]);
+        assert!(caps & 0x8000_0000 != 0, "CAP_EXTENDED_SECURITY must be set");
     }
 }

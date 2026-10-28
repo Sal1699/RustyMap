@@ -4,6 +4,33 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.10] - 2026-10-28
+
+**SMB brute now echoes the server UID — the BRUTE-1 root cause.** 671/671 tests.
+
+### Fixed
+- **`--brute-protocol smb` AUTHENTICATE now echoes the server-assigned UID.**
+  The hand-rolled SMBv1 NTLMSSP flow sent its Type-3 AUTHENTICATE with UID 0
+  instead of the UID the server assigned in its CHALLENGE reply, so the server
+  could not correlate the Type-3 with the challenge it issued and rejected
+  **every** credential — the adapter authenticated nothing on Metasploitable 2
+  Samba 3.0.20 while hydra/crackmapexec succeeded (lab BRUTE-1). It now captures
+  the UID from the challenge response and echoes it. Two secondary bugs fixed in
+  the same path: the Session Setup ANDX `ByteCount` was one short (excluded the
+  trailing pad byte), and `Capabilities` omitted `CAP_EXTENDED_SECURITY`
+  (0x80000000) so the server wasn't told the blob was NTLMSSP. The two
+  session-setup builders now share one `wrap_session_setup` helper so their
+  parameter blocks can't drift. (`brute_smb.rs`.)
+
+### Why
+`smb` is the last network brute adapter still Beta. The v0.100.3 lab note ("no
+SMBv1 fallback") was imprecise — the adapter does negotiate SMBv1; the real
+defect was UID correlation, which makes a server reject otherwise-valid
+credentials. `smb` stays **Beta** until this is validated against Samba 3.0.20
+with hydra/crackmapexec as the reference (the single-connection path can't be
+self-tested on Windows). SMBv1 NTLMSSP only — fine for old Samba; modern
+SMB2/3-only servers would need a separate negotiate path.
+
 ## [0.100.9] - 2026-10-28
 
 **`--brute-protocol ssh` promoted Beta → Production.** 666/666 tests.
