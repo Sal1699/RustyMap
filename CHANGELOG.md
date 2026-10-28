@@ -4,6 +4,28 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.11] - 2026-10-28
+
+**SMB brute no longer reports a Samba guest mapping as a hit.** 673/673 tests.
+
+### Fixed
+- **`--brute-protocol smb` now rejects a guest-mapped session.** After the
+  v0.100.10 UID fix the Type-3 AUTHENTICATE reached Samba, but the adapter read
+  any `NT_STATUS 0` as success. Metasploitable 2's Samba runs `map to guest`, so
+  an unknown user / bad password is granted a GUEST session with status 0 — the
+  adapter marked the first wrong pair (`root:wrong`) as a hit (lab false
+  positive, confirmed against crackmapexec + hydra). It now also checks the
+  SessionSetupAndX response `Action` field: `SMB_SETUP_GUEST` (bit 0) set →
+  guest mapping, not authentication of the submitted credential → treated as a
+  failure, matching crackmapexec/hydra. (`brute_smb.rs`.)
+
+### Why
+Chained straight off the v0.100.10 lab re-test: the UID fix worked (the server
+now processes the credential), which exposed a second defect — status-only
+success detection. `smb` stays **Beta** until a clean re-test shows
+`msfadmin:msfadmin` found and `root:wrong` rejected, matching the reference
+tools.
+
 ## [0.100.10] - 2026-10-28
 
 **SMB brute now echoes the server UID — the BRUTE-1 root cause.** 671/671 tests.

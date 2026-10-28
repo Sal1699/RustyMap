@@ -49,16 +49,17 @@ clean exit, (4) RustyMap's rate-limit is honored (watch timing).
 | postgres | ✅ same hit `postgres:postgres` (MD5 auth), wrong rejected | **Production** (v0.100.4) |
 | ldap | ✅ same bind `cn=admin,dc=example,dc=org` (hydra **ldap3://**), wrong rejected | **Production** (v0.100.4) |
 | ssh | ✅ (v0.100.8) recovered `testbrute:test123` on modern OpenSSH (Docker :2222) in 8 attempts; hydra intermittent under MaxStartups the same run | **Production** (v0.100.9) |
-| smb | ⚠️ v0.100.10 fix pending re-test: the SMBv1 AUTHENTICATE now echoes the server-assigned UID (was 0 → Samba 3.0.20 rejected all creds); also ByteCount + CAP_EXTENDED_SECURITY | Beta — re-test vs hydra/CME on Samba 3.0.20 |
+| smb | ⚠️ v0.100.10 UID fix worked (server processes creds); v0.100.11 fixed the resulting false positive (Samba `map to guest` status-0 → now checks SMB_SETUP_GUEST, like CME/hydra). Pending clean re-test | Beta — re-test vs hydra/CME on Samba 3.0.20 |
 | mysql | ✅ (v0.100.5 re-test) empty password `root:` HIT = hydra after the v0.100.4 fix | **Production** (v0.100.5) |
 | vnc | ✅ (v0.100.5 re-test) RFB 3.3 `password` HIT = hydra after the v0.100.4 fix | **Production** (v0.100.5) |
 
 > ldap note: hydra `ldap2://` reported 0 on this container; `ldap3://` works and
 > RustyMap agrees with it. SSH validated v0.100.8 on a modern OpenSSH (Docker
 > linuxserver/openssh-server :2222, password auth) → Production v0.100.9. Only
-> SMB remains Beta: the BRUTE-1 root cause (SMBv1 AUTHENTICATE sent UID 0, not
-> the server-assigned UID) is fixed in v0.100.10, pending a Samba 3.0.20 re-test
-> vs hydra/CME.
+> SMB remains Beta: the BRUTE-1 UID-correlation fix (v0.100.10) worked but
+> exposed a guest-mapping false positive (Samba `map to guest` returns status 0
+> for a bad cred), fixed in v0.100.11; pending a clean Samba 3.0.20 re-test vs
+> hydra/CME (msfadmin:msfadmin found, root:wrong rejected).
 
 **Notes**
 - MSSQL + RDP are **Alpha** tier (RDP CredSSP pubKeyAuth is best-effort —
