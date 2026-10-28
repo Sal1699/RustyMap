@@ -4,6 +4,33 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.8] - 2026-10-28
+
+**Brute retry now outlasts a server burst-throttle, so a throttled valid
+credential is no longer lost.** 666/666 tests.
+
+### Fixed
+- **Transport-error retry uses seconds-scale exponential backoff with jitter,
+  and retries 4 times (was 2 at 120/240 ms).** When a target throttles a burst
+  of rapid connects (e.g. OpenSSH `MaxStartups`), the attempt carrying the valid
+  credential gets dropped on the wire; the old sub-second retry landed inside the
+  same throttle window and also failed, so the credential was recorded as an
+  error and skipped. Retries are now spaced 400ms / 800ms / 1.6s / 3s (+ up to
+  250ms jitter) — long enough for the server's startup queue to drain — giving
+  the valid pair several real chances to land. Retries still don't count against
+  `--brute-max-tries`. (`brute.rs`.) Benefits every brute adapter, not just ssh.
+
+### Why
+Lab v0.100.7 ssh re-test on a confirmed-reachable modern server: at
+`--brute-rate 1`, 11 of 16 connects errored (not auth-failed — v0.100.7's report
+made that distinction clear) and the valid `testbrute:test123` was among the
+dropped ones, so RustyMap missed a credential hydra found. Both tools degraded
+after ~4–5 rapid connects, the signature of a server-side burst throttle; hydra
+happened to test the valid pair before the throttle bit. This is not a KEX bug —
+a single connection (sshpass, `--brute-pair`) always works — it was retry
+recovery that gave up too fast. `ssh` stays **Beta** until the
+`--brute-userlist × --brute-passlist` mode is re-confirmed against hydra on Kali.
+
 ## [0.100.7] - 2026-10-28
 
 **Brute report distinguishes a dead target from "no valid credentials."**

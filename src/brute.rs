@@ -106,10 +106,18 @@ impl PairSource {
 }
 
 /// Transport errors (connection refused/reset/timeout — often a server
-/// throttling rapid attempts) get this many retries on the SAME pair before
-/// being recorded as an error and skipped, mirroring hydra's reconnect-and-
-/// retry resilience. Retries do not count against `--brute-max-tries`.
-const PAIR_ERROR_RETRIES: u32 = 2;
+/// throttling a burst of pre-auth connections) get this many retries on the
+/// SAME pair before being recorded as an error, mirroring hydra's reconnect-
+/// and-retry resilience. Retries do not count against `--brute-max-tries`.
+///
+/// The backoff between retries is exponential with jitter (see `run`). A burst
+/// throttle such as OpenSSH `MaxStartups` clears over *seconds* as the server's
+/// startup queue drains, so the attempt carrying the valid credential needs a
+/// few well-spaced chances to land — the old 2 retries at 120/240 ms were far
+/// too fast to outlast it (lab v0.100.7: ssh `--brute-userlist×--brute-passlist`
+/// lost a cred hydra found; 11 of 16 connects errored under the server throttle
+/// and the matching attempt was one of them).
+const PAIR_ERROR_RETRIES: u32 = 4;
 
 /// Run an adapter against a pair source under the safety policy.
 pub async fn run<A: BruteAdapter>(
@@ -176,7 +184,16 @@ pub async fn run<A: BruteAdapter>(
                 Err(_) => {
                     outcome = AttemptOutcome::Error;
                     if retry < PAIR_ERROR_RETRIES {
-                        sleep(Duration::from_millis(120 * (retry as u64 + 1))).await;
+                        // Exponential backoff with jitter: 400ms, 800ms, 1.6s,
+                        // 3s (+ up to 250ms). A burst throttle (e.g. OpenSSH
+                        // MaxStartups) clears over seconds as the server's
+                        // startup queue drains, so spacing the retries out gives
+                        // the attempt carrying the valid credential real chances
+                        // to land; the jitter avoids re-synchronising with the
+                        // throttle window on every pair.
+                        let backoff = (400u64 << retry).min(3000);
+                        let jitter = rand::random::<u64>() % 250;
+                        sleep(Duration::from_millis(backoff + jitter)).await;
                     }
                 }
             }
@@ -356,7 +373,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn transport_error_is_retried_then_hits() {
         let calls = Arc::new(AtomicUsize::new(0));
         let adapter = FlakyAdapter {
@@ -369,7 +386,23 @@ mod tests {
         assert_eq!(calls.load(Ordering::Relaxed), 2, "one error + one success");
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
+    async fn multiple_transport_errors_recover_within_retries() {
+        // Models the lab throttle: the valid pair's connect is dropped several
+        // times in a row before it finally lands. With PAIR_ERROR_RETRIES=4 the
+        // framework must outlast a 3-error burst and still record the hit.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let adapter = FlakyAdapter {
+            fail_first: AtomicUsize::new(3), // 3 throttled drops, then success
+            calls: Arc::clone(&calls),
+        };
+        let pairs = PairSource::Fixed(vec![("admin".into(), "secret".into())]);
+        let r = run(adapter, cfg(true, false), pairs).await.unwrap();
+        assert_eq!(r.successes.len(), 1, "4 retries should outlast a 3-error throttle");
+        assert_eq!(calls.load(Ordering::Relaxed), 4, "3 errors + 1 success");
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn persistent_error_gives_up_after_retries() {
         let calls = Arc::new(AtomicUsize::new(0));
         let adapter = FlakyAdapter {
