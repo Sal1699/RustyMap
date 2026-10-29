@@ -19,7 +19,7 @@
 //! Each finding includes the param it triggered on and the evidence
 //! snippet so reviewers can verify by hand.
 
-use crate::web_crawl::Endpoint;
+use crate::web_crawl::{seed_cookie_jar, Endpoint};
 use anyhow::Result;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,10 @@ pub struct OwaspFinding {
 pub struct ProbeConfig {
     pub timeout: Duration,
     pub checks: Vec<&'static str>, // "xss", "sqli", "redirect", "ssrf"
+    /// Cookie-header-style string ("PHPSESSID=…; security=low") so the
+    /// probes hit the authenticated surface the crawl mapped. Without it
+    /// every probe lands on the app's login redirect and finds nothing.
+    pub cookie: Option<String>,
 }
 
 impl Default for ProbeConfig {
@@ -47,6 +51,7 @@ impl Default for ProbeConfig {
         Self {
             timeout: Duration::from_secs(8),
             checks: vec!["xss", "sqli", "redirect", "ssrf"],
+            cookie: None,
         }
     }
 }
@@ -66,7 +71,25 @@ const SQL_ERROR_FINGERPRINTS: &[&str] = &[
 ];
 
 pub async fn probe(endpoints: &[Endpoint], cfg: &ProbeConfig) -> Result<Vec<OwaspFinding>> {
+    // Carry the crawl's session into the probes. The jar is seeded at each
+    // distinct site root (path "/") so the cookie applies to every probed
+    // path, not just the one it was first seen on.
+    let jar = std::sync::Arc::new(reqwest::cookie::Jar::default());
+    if let Some(cookie) = &cfg.cookie {
+        let mut seeded = std::collections::HashSet::new();
+        for ep in endpoints {
+            if let Ok(mut root) = Url::parse(&ep.url) {
+                root.set_path("/");
+                root.set_query(None);
+                root.set_fragment(None);
+                if seeded.insert(root.to_string()) {
+                    seed_cookie_jar(&jar, cookie, &root);
+                }
+            }
+        }
+    }
     let client = reqwest::Client::builder()
+        .cookie_provider(std::sync::Arc::clone(&jar))
         .timeout(cfg.timeout)
         .danger_accept_invalid_certs(true)
         .redirect(reqwest::redirect::Policy::none())

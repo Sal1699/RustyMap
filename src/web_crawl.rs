@@ -62,7 +62,7 @@ pub async fn crawl(seed: &str, cfg: &CrawlConfig) -> Result<CrawlResult> {
 
     let jar = Arc::new(reqwest::cookie::Jar::default());
     if let Some(cookie) = &cfg.cookie {
-        jar.add_cookie_str(cookie, &seed_url);
+        seed_cookie_jar(&jar, cookie, &seed_url);
     }
     let client = reqwest::Client::builder()
         .cookie_provider(Arc::clone(&jar))
@@ -146,6 +146,20 @@ pub async fn crawl(seed: &str, cfg: &CrawlConfig) -> Result<CrawlResult> {
         pages_visited: pages,
         endpoints,
     })
+}
+
+/// Seed a cookie jar from a cookie-header-style string ("a=1; b=2"),
+/// adding each pair as its own cookie at `url`. `add_cookie_str` reads
+/// everything after the first ';' as attributes of the first cookie and
+/// drops the rest, which would lose DVWA's `security=low` alongside its
+/// PHPSESSID — so split on ';' and add each pair independently.
+pub fn seed_cookie_jar(jar: &reqwest::cookie::Jar, cookie: &str, url: &Url) {
+    for part in cookie.split(';') {
+        let part = part.trim();
+        if part.contains('=') {
+            jar.add_cookie_str(part, url);
+        }
+    }
 }
 
 async fn fetch_robots_disallow(client: &reqwest::Client, seed: &Url) -> Vec<String> {
@@ -297,5 +311,20 @@ mod tests {
         let url = Url::parse("https://x.test/admin/dash").unwrap();
         assert!(disallowed(&["/admin".to_string()], &url));
         assert!(!disallowed(&["/api".to_string()], &url));
+    }
+
+    #[test]
+    fn seed_cookie_jar_keeps_every_pair() {
+        use reqwest::cookie::{CookieStore, Jar};
+        // A two-cookie header string must yield BOTH cookies — the DVWA
+        // regression: PHPSESSID for the session + security=low to make the
+        // vuln fire. add_cookie_str alone would keep only PHPSESSID.
+        let jar = Jar::default();
+        let url = Url::parse("http://dvwa.test/").unwrap();
+        seed_cookie_jar(&jar, "PHPSESSID=abc123; security=low", &url);
+        let hv = jar.cookies(&url).expect("cookies present for host");
+        let s = hv.to_str().unwrap();
+        assert!(s.contains("PHPSESSID=abc123"), "session cookie kept: {s}");
+        assert!(s.contains("security=low"), "security cookie kept: {s}");
     }
 }

@@ -16,6 +16,31 @@ real target → tell me and I flip the tier. Record outcomes in `LAB_VALIDATION.
 
 ---
 
+## Sweep results — completed 2026-10-29 (outcomes shipped in v0.100.17)
+
+| # | Feature | Ran | RustyMap | Reference | Verdict |
+|---|---------|-----|----------|-----------|---------|
+| 1 | `--brute-protocol mssql` | ✅ | MISS on correct + wrong cred (cleartext LOGIN7) | hydra HIT `sa:Str0ng!Pass` | **Stay Alpha** — needs TDS-over-TLS login for SQL Server 2022 |
+| 2 | `--brute-protocol rdp` | ⊘ skip | — | — | No RDP target (port filtered on Win host) |
+| 3 | `--apk-scan` | ✅ | 5 dangerous perms, debuggable, allowBackup, exported, AdMob/Analytics, **0 FP** | InsecureBankv2 known issues — all match | **→ PRODUCTION (v0.100.17)** |
+| 4 | `--ipa-scan` | ✅ | ATS disabled, URL schemes, bundle metadata | synthetic IPA (known-insecure plist) | PASS (limited) — stay Alpha (no mach-O/entitlements) |
+| 5 | `--ics-scan` | ✅ | Modbus :502 + S7 :102 fingerprinted (raw bytes) | nmap modbus-discover/s7-info both **ERROR** | **→ PRODUCTION (v0.100.17)** — outperforms nmap on Conpot |
+| 6 | `--os-fp-v6` | ✅ | "legacy/embedded stack (no WS/TS/SACK) 70%" | nmap -6 -O: "No OS matches" | Stay Alpha — thin v6 DB (both tools miss this host) |
+| 7 | `--owasp-scan` | ✅ | crawler 24 pages/35 endpoints ✓; probes **0 findings** | DVWA low: XSS/SQLi/CMDi exploitable | **FAIL → fixed in v0.100.17** (probe ran unauthenticated + dropped `security=low`); re-run to confirm. Stays Alpha |
+| 8 | `--web-crawl` | ✅ | 24 pages/35 endpoints, in-scope, session held | DVWA authenticated crawl | PASS — stay Alpha (no JS) |
+| 9 | `--sI` | ⊘ skip | — | — | No predictable-IPID zombie available |
+| 10 | `--threat-intel-misp` | ⊘ skip | — | — | No MISP instance in lab |
+| 11 | `--osdb-submit` | ✅ | pack: Linux, TTL=64, CPE valid, conf 55%, no auto-submit | manual review | PASS — stay Alpha by design |
+
+**Promotions:** `--ics-scan`, `--apk-scan` → Production (9 Alpha remaining).
+**Bug found + fixed (v0.100.17):** `--owasp-scan` probed unauthenticated and dropped the `security=low` cookie.
+**Confirmed gap:** mssql cleartext LOGIN7 vs SQL Server 2022 TLS → TDS-over-TLS login deferred.
+
+The per-feature recipes below stay for re-running rows as missing targets (RDP host,
+IPID zombie, MISP instance, DVWA for the owasp re-test) become available.
+
+---
+
 ## 1. 🟢 `--brute-protocol mssql` — SQL Server cred brute
 ```sh
 docker run -e 'ACCEPT_EULA=Y' -e 'MSSQL_SA_PASSWORD=Str0ng!Pass' -p 1433:1433 -d mcr.microsoft.com/mssql/server:2022

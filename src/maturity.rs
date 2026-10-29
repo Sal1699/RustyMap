@@ -84,13 +84,18 @@ const REGISTRY: &[Feature] = &[
     Feature { key: "--brute-protocol vnc", tier: Tier::Production,
         note: "RFB 3.x DES challenge-response (v0.64). The v0.100.4 RFB 3.3 handshake fix was confirmed on Kali v0.100.5: agrees with hydra on Metasploitable 2 VNC (RFB 3.3, password 'password'). RFB 4+ and Apple Remote Desktop variants still not covered." },
 
+    // ── Promoted from Alpha after the v0.100.17 Kali sweep (real-target
+    // agreement with — or outperformance of — the reference tool) ──
+    Feature { key: "--ics-scan", tier: Tier::Production,
+        note: "Modbus/S7/DNP3/EnIP/BACnet probes. Lab-validated v0.100.17 on a fresh Conpot honeypot: fingerprinted Modbus (:502) and S7comm (:102) with raw-byte evidence where nmap's own modbus-discover and s7-info scripts both errored out. Validated against Conpot only — real PLCs may behave differently; use read-only against production." },
+    Feature { key: "--apk-scan", tier: Tier::Production,
+        note: "Android APK static analysis with inline AXML parser. Lab-validated v0.100.17 on InsecureBankv2: flagged 5 dangerous permissions, debuggable, allowBackup, exported components and AdMob/Analytics trackers — matching every known issue with zero false positives. Secret-string patterns may still FP on obfuscated/protected APKs." },
+
     // ── Alpha — known limits or freshly landed; --experimental-confirm gate ──
     Feature { key: "--brute-protocol rdp", tier: Tier::Alpha,
         note: "RDP CredSSP best-effort (v0.65): pubKeyAuth NOT implemented (would need RC4 of TLS SPKI under NTLM session key). Negative results (specific NTSTATUS error codes) are reliable; positive results are SUGGESTIVE, not authoritative. Validate against a real Windows RDP server before reporting findings." },
     Feature { key: "--brute-protocol mssql", tier: Tier::Alpha,
         note: "MSSQL TDS 7.4 SQL Server Auth (v0.65). Implemented from MS-TDS spec but not yet validated against a real SQL Server instance." },
-    Feature { key: "--apk-scan", tier: Tier::Alpha,
-        note: "Android APK static analysis with inline AXML parser. Mobile-secret patterns may produce false positives; structure parsing not exercised against obfuscated/protected APKs." },
     Feature { key: "--ipa-scan", tier: Tier::Alpha,
         note: "iOS IPA static analysis via plist. Only Info.plist inspected; mach-O entitlements / embedded provisioning profiles not parsed." },
     Feature { key: "--threat-intel-misp", tier: Tier::Alpha,
@@ -103,8 +108,6 @@ const REGISTRY: &[Feature] = &[
         note: "IPv6 OS fingerprint (`os_fp_v6.rs` / `os_fp_multi.rs`). Less mature than IPv4 path; database coverage thinner." },
     Feature { key: "--owasp-scan", tier: Tier::Alpha,
         note: "Basic XSS/SQLi/open-redirect/SSRF probes (CLI flag: --owasp-scan URL). Heavy false-positive rate; dedicated tools (ZAP, sqlmap) outperform on real engagements." },
-    Feature { key: "--ics-scan", tier: Tier::Alpha,
-        note: "Modbus/S7/DNP3/EnIP/BACnet probes. Validated against Conpot honeypots only — real PLCs may behave differently. Use read-only against production." },
     Feature { key: "--web-crawl", tier: Tier::Alpha,
         note: "BFS crawler with robots.txt + cookie store. Slow vs ZAP and doesn't handle JS-rendered apps. Prefer dedicated tools for serious web work." },
 ];

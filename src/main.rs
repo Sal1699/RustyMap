@@ -1674,6 +1674,7 @@ async fn run(mut args: Cli) -> Result<()> {
             let pcfg = owasp_probes::ProbeConfig {
                 timeout: std::time::Duration::from_secs(8),
                 checks,
+                cookie: args.web_cookie.clone(),
             };
             let findings = owasp_probes::probe(&result.endpoints, &pcfg).await?;
             owasp_probes::print_findings(&findings);

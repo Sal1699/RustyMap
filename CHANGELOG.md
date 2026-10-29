@@ -4,6 +4,47 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.17] - 2026-10-29
+
+**v0.100.17 Kali sweep outcomes: promoted `--ics-scan` and `--apk-scan` to
+Production; fixed `--owasp-scan` probing targets unauthenticated.** 676/676 tests.
+
+### Changed
+- **`--ics-scan` promoted Alpha → Production.** Lab-validated on a fresh Conpot
+  honeypot: RustyMap fingerprinted Modbus (:502) and S7comm (:102) with raw-byte
+  evidence where nmap's own `modbus-discover` and `s7-info` scripts both errored
+  out. Validated against Conpot only — real PLCs may behave differently; keep it
+  read-only against production. (`maturity.rs`.)
+- **`--apk-scan` promoted Alpha → Production.** Lab-validated on InsecureBankv2:
+  flagged 5 dangerous permissions, `debuggable`, `allowBackup`, exported
+  components and AdMob/Analytics trackers — matching every documented issue with
+  zero false positives. Secret-string patterns may still FP on obfuscated APKs.
+  (`maturity.rs`.)
+
+### Fixed
+- **`--owasp-scan` probed the target unauthenticated and found nothing.** The
+  crawler authenticated through a cookie jar, but the probe layer built its own
+  `reqwest::Client` with no cookie, so every XSS/SQLi/redirect/SSRF request on an
+  auth-gated app (e.g. DVWA) hit the login redirect — 0 findings on a target where
+  the bugs are trivially exploitable. `ProbeConfig` now carries the session cookie
+  (`--web-cookie`) and the probe client seeds a jar at each site root.
+  (`owasp_probes.rs`, `main.rs`.)
+- **A `--web-cookie "a=1; b=2"` string kept only the first cookie.** Both the
+  crawler and the probes seeded the jar with `add_cookie_str(whole_string, …)`,
+  which reads everything after the first `;` as *attributes* of the first cookie
+  and discards the rest — dropping DVWA's `security=low` next to its `PHPSESSID`,
+  so the vuln never fired even once authenticated. A shared `seed_cookie_jar`
+  helper now splits on `;` and adds each pair independently. (`web_crawl.rs`.)
+
+### Note
+- These close the actionable items from the v0.100.17 Kali Alpha sweep (Phase B).
+  The fast-engine ICMP rate-limit back-off (Phase A) was also confirmed on Kali
+  (NEEDS-KALI #4 closed): 15 `[raw-icmp]` back-off lines against an iptables-REJECT
+  target, cwnd halving 62 → 32 → 16. The `--owasp-scan` fix needs a Kali re-run of
+  DVWA to confirm it now reports the XSS/SQLi; it stays Alpha regardless (no CMDi
+  probe, no JS rendering). mssql stays Alpha — the cleartext-LOGIN7 MISS on SQL
+  Server 2022 confirms it needs a TDS-over-TLS login path.
+
 ## [0.100.16] - 2026-10-29
 
 **Fixed two Alpha-gate wiring bugs; added the Alpha validation sweep plan.** 675/675 tests.

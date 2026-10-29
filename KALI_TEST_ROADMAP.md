@@ -1,9 +1,11 @@
 # RustyMap — Kali Test Roadmap (v0.100.16)
 
-Everything still to validate on the Kali lab, in execution order, from the
-v0.100.16 head. The network brute set is **done** (7/7 Production); what remains
-is the fast-engine **ICMP back-off active path** (Phase A) and the **11 Alpha
-features** (Phase B).
+Everything to validate on the Kali lab, in execution order. **Sweep completed
+2026-10-29** (see the results table + Done criteria): Phase A passed, and the
+Phase B Alpha sweep promoted `--ics-scan` + `--apk-scan` to Production and found
+the `--owasp-scan` auth bug (fixed in v0.100.17). The network brute set was
+already **done** (7/7 Production). **9 Alpha features remain**; re-run rows as
+targets become available.
 
 Companion: `KALI_ALPHA_SWEEP.md` (fuller per-Alpha notes), `HYDRA_PARITY.md`
 (brute matrix), `LAB_VALIDATION.md` (dated run log).
@@ -161,23 +163,27 @@ fingerprint correctly. Stays Alpha by design (privacy-sensitive output).
 
 | Item | Ran? | RustyMap | Reference | Verdict |
 |------|------|----------|-----------|---------|
-| A1 ICMP back-off | ☐ | | tcpdump type-3 | |
-| B1 mssql | ☐ | | hydra | |
-| B2 ics | ☐ | | nmap scripts | |
-| B3 os-fp-v6 | ☐ | | nmap -6 -O | |
-| B4 apk | ☐ | | mobsf / known | |
-| B5 ipa | ☐ | | — | |
-| B6 rdp | ☐ | | hydra | |
-| B7 owasp-scan | ☐ | | ZAP | |
-| B8 web-crawl | ☐ | | — | |
-| B9 sI | ☐ | | nmap -sI | |
-| B10 threat-intel-misp | ☐ | | — | |
-| B11 osdb-submit | ☐ | | — | |
+| A1 ICMP back-off | ✅ | 15 `[raw-icmp]` lines, cwnd 62→32→16 | tcpdump type-3 | **PASS** — NEEDS-KALI #4 closed |
+| B1 mssql | ✅ | MISS (cleartext LOGIN7) | hydra HIT | Stay Alpha — needs TDS-over-TLS |
+| B2 ics | ✅ | Modbus+S7 raw bytes | nmap scripts ERROR | **PROMOTED → Production** (v0.100.17) |
+| B3 os-fp-v6 | ✅ | "legacy/embedded 70%" | nmap: no match | Stay Alpha — thin v6 DB |
+| B4 apk | ✅ | 5 perms, debuggable, 0 FP | InsecureBankv2 known | **PROMOTED → Production** (v0.100.17) |
+| B5 ipa | ✅ | ATS off, schemes, metadata | synthetic IPA | PASS (limited) — stay Alpha |
+| B6 rdp | ⊘ | — | — | SKIP — RDP port filtered |
+| B7 owasp-scan | ✅ | crawler OK; probes 0 → **fixed** v0.100.17 | DVWA low | FAIL→fixed, re-run; stays Alpha |
+| B8 web-crawl | ✅ | 24 pages/35 endpoints, cookie held | DVWA | PASS — stay Alpha |
+| B9 sI | ⊘ | — | — | SKIP — no zombie |
+| B10 threat-intel-misp | ⊘ | — | — | SKIP — no MISP |
+| B11 osdb-submit | ✅ | pack: Linux TTL64 CPE 55% | manual | PASS — stay Alpha by design |
 
-## Done criteria
+## Done criteria — ✅ MET (sweep completed 2026-10-29, outcomes in v0.100.17)
 
-- Phase A: `[raw-icmp]` back-off observed against a REJECT target → NEEDS-KALI #4 closed.
-- Phase B: each feature run once; paste output. I harden + propose the tier flip
-  per feature (one real-target agreement with the reference = promote; divergence
-  = fix or stay Alpha). Realistic promotions: mssql / ics / os-fp-v6 / maybe apk.
-- Any bug → a `0.100.x` patch, re-run that row.
+- **Phase A: PASS.** `[raw-icmp]` back-off observed against an iptables-REJECT
+  target (15 lines, cwnd 62→32→16) → NEEDS-KALI #4 **closed**.
+- **Phase B: all 8 reachable features run** (rdp/sI/misp skipped — no target).
+  Outcomes: **ics + apk promoted to Production**; the owasp-scan probe-auth bug was
+  found and **fixed in v0.100.17** (re-run B7 on DVWA to confirm it now reports the
+  XSS/SQLi); mssql MISS confirms the TDS-over-TLS gap; os-fp-v6 / ipa / web-crawl /
+  osdb-submit stay Alpha by design.
+- **9 Alpha features remain.** Re-run rows when you have the missing targets
+  (RDP host, IPID zombie, MISP instance, DVWA for the owasp re-test).
