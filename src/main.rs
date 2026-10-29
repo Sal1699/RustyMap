@@ -752,7 +752,7 @@ async fn run(mut args: Cli) -> Result<()> {
         }).await?;
     }
     if let Some(misp_url) = &args.threat_intel_misp {
-        maturity::announce_and_gate("--threat-intel-sync", args.experimental_confirm)?;
+        maturity::announce_and_gate("--threat-intel-misp", args.experimental_confirm)?;
         let url = misp_url.clone();
         let key = args.misp_api_key.clone()
             .ok_or_else(|| anyhow!("--misp-api-key is required when using --threat-intel-misp"))?;
@@ -2686,7 +2686,7 @@ async fn run(mut args: Cli) -> Result<()> {
             run_udp(targets, port_list.clone(), scanner, timeout_dur, parallel).await
         }
         ScanType::Idle => {
-            maturity::announce_and_gate("-sI", args.experimental_confirm)?;
+            maturity::announce_and_gate("--sI", args.experimental_confirm)?;
             let spec = args.scan_idle.as_ref().unwrap();
             let (zombie_str, zombie_port) = match spec.rsplit_once(':') {
                 Some((ip, port)) => (

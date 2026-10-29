@@ -4,6 +4,28 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.16] - 2026-10-29
+
+**Fixed two Alpha-gate wiring bugs; added the Alpha validation sweep plan.** 675/675 tests.
+
+### Fixed
+- **`--sI` (idle scan) Alpha gate never fired.** `main.rs` gated `ScanType::Idle`
+  with the key `"-sI"`, but the registry key (and the CLI flag) is `"--sI"`, so the
+  lookup missed and the idle scan ran WITHOUT requiring `--experimental-confirm`.
+  Now gated with `"--sI"`. (Same class as the v0.100.4 `--owasp-probes` slip.)
+- **`--threat-intel-misp` was advertised in the maturity matrix as a non-existent
+  `--threat-intel-sync` flag.** The gate fired (both sides used the same string),
+  but the matrix named a flag you can't type. Registry key + gate renamed to the
+  real flag `--threat-intel-misp`; the note now also mentions `--threat-intel-match`.
+- **`--osdb-submit` note corrected** — it builds a submission pack to stdout /
+  `--osdb-submit-out`; it does not auto-submit to any endpoint.
+
+### Added
+- **`KALI_ALPHA_SWEEP.md`** — a verified, per-feature validation checklist for all
+  11 Alpha features (target to set up, exact command, reference tool, and whether
+  each is a realistic Production candidate or Alpha-by-design), to work through the
+  whole set on Kali.
+
 ## [0.100.15] - 2026-10-29
 
 **`--fast-engine` ICMP back-off is now observable under `--trace-raw`.** 675/675 tests.
