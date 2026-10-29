@@ -4,6 +4,32 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.13] - 2026-10-29
+
+**SMB brute: fixed the 4-byte Type-3 misalignment that made Samba guest-map every
+credential.** 675/675 tests.
+
+### Fixed
+- **`--brute-protocol smb` NTLMSSP AUTHENTICATE had a 12-byte Version field where
+  the layout budgeted 8.** `header_len` (the fixed part before the payload)
+  counted the Version as 8 bytes, but the code wrote 12, so every security-buffer
+  `BufferOffset` (LM / NT response / domain / username / workstation) pointed 4
+  bytes short. The server read a shifted, corrupt NT response and username and
+  fell back to an anonymous/guest session — which on Metasploitable 2's Samba
+  3.0.20 (`map to guest`) returned `STATUS_SUCCESS` identically for every
+  credential, so `root:wrong` and `msfadmin:msfadmin` were byte-for-byte the same
+  reply (the lab false positive, same UID and all). The Version field is now
+  exactly 8 bytes, so the offsets line up and the server actually validates the
+  credential. Added a regression test asserting the NT-response security buffer
+  frames the real NT bytes. (`brute_smb.rs`.)
+
+### Why
+Found by code inspection after the v0.100.12 `RUSTYMAP_SMB_DEBUG` dump showed valid
+and invalid credentials producing identical guest responses — the signature of a
+login the server never actually evaluated (not merely an indistinguishable one).
+`smb` stays **Beta** until the Kali re-test confirms `msfadmin:msfadmin` is found
+and `root:wrong` rejected, matching crackmapexec/hydra.
+
 ## [0.100.12] - 2026-10-28
 
 **SMB brute diagnostics — the guest-mapping false positive persists.** 674/674 tests.

@@ -230,7 +230,14 @@ fn build_session_setup_ntlmssp_authenticate(user: &str, domain: &str, nt_respons
     // the payload offsets.
     // Order: LmChallengeResponse, NtChallengeResponse, DomainName,
     //        UserName, Workstation, EncryptedRandomSessionKey
-    let header_len = 8 + 4 + 6 * 8 + 4 + 8; // header + 6 security buffers + flags + version
+    // Fixed part before the payload: signature(8) + msgtype(4) +
+    // 6 security buffers(48) + flags(4) + version(8) = 72. Every BufferOffset
+    // below is header_len + a running length, so this MUST equal the exact
+    // number of bytes written before the payload. The Version field is 8 bytes
+    // (NEGOTIATE_VERSION is set in the flags): a 12-byte value here shifted
+    // every offset by 4, so the server read a corrupt NT response + username
+    // and silent-guest-mapped every credential (lab: root:wrong ≡ msfadmin).
+    let header_len = 8 + 4 + 6 * 8 + 4 + 8; // = 72
     let mut payload = Vec::new();
 
     // LM response = 24 zero bytes (NTLMv2 doesn't use it)
@@ -276,8 +283,9 @@ fn build_session_setup_ntlmssp_authenticate(user: &str, domain: &str, nt_respons
 
     // Flags
     ntlmssp.extend_from_slice(&0xa2888205u32.to_le_bytes());
-    // Version
-    ntlmssp.extend_from_slice(&[0x0a, 0x00, 0x00, 0x00, 0xa1, 0x4a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f]);
+    // Version — EXACTLY 8 bytes (must match the version(8) term in header_len
+    // above): Windows-6.1 build 7601, NTLMRevision 0x0f.
+    ntlmssp.extend_from_slice(&[0x06, 0x01, 0xb1, 0x1d, 0x00, 0x00, 0x00, 0x0f]);
 
     // Append payload
     ntlmssp.extend_from_slice(&payload);
@@ -570,5 +578,28 @@ mod tests {
         body[38] = 0x00;
         assert_eq!(parse_setup_action(&body), Some(0x0005));
         assert_eq!(parse_setup_action(b"short"), None);
+    }
+
+    #[test]
+    fn type3_nt_response_security_buffer_points_at_nt_bytes() {
+        // Regression for the guest-mapping bug: a 12-byte Version field overran
+        // the 8-byte version budget in header_len, so every BufferOffset was 4
+        // bytes short and the server read a corrupt NT response → treated the
+        // login as anonymous and guest-mapped every credential. Assert the NT
+        // security buffer's (len, offset) actually frames the NT response we
+        // passed. With the old 12-byte Version this read 4 bytes off and failed.
+        let nt = vec![0xABu8; 50]; // sentinel NT response
+        let pkt = build_session_setup_ntlmssp_authenticate("alice", "", &nt, 0x0064);
+        let base = pkt.windows(8).position(|w| w == b"NTLMSSP\0").unwrap();
+        let msg = &pkt[base..];
+        // Buffers after sig(8)+msgtype(4): LM@12, NT@20. NT = len(2) maxlen(2) off(4).
+        let nt_len = u16::from_le_bytes([msg[20], msg[21]]) as usize;
+        let nt_off = u32::from_le_bytes([msg[24], msg[25], msg[26], msg[27]]) as usize;
+        assert_eq!(nt_len, nt.len(), "NT length field");
+        assert_eq!(
+            &msg[nt_off..nt_off + nt_len],
+            &nt[..],
+            "NT security buffer offset must frame the real NT response bytes"
+        );
     }
 }
