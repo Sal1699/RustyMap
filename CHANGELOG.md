@@ -4,6 +4,25 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.15] - 2026-10-29
+
+**`--fast-engine` ICMP back-off is now observable under `--trace-raw`.** 675/675 tests.
+
+### Changed
+- **The fast-engine congestion window now logs when an ICMP destination-unreachable
+  (type 3) forces a back-off.** The back-off (admin-prohibited / port-unreach /
+  frag-needed → halve the cwnd) shipped in v0.100.1 but printed nothing, so it
+  couldn't be confirmed in the lab — the home /24 only drops silently, never
+  REJECTs. With `--trace-raw` it now prints
+  `[raw-icmp] N ICMP dest-unreachable (type 3) during wave → cwnd back-off to W`.
+  No behaviour change otherwise. (`raw_scan.rs`.)
+
+### Why
+To make the Fase 31 ICMP rate-limit signal (#4) validatable: it needs a target
+that REJECTs (sends ICMP type 3) rather than silently dropping — e.g. an iptables
+`-j REJECT --reject-with icmp-port-unreachable` rule. Until now the only lab
+evidence was the fail-safe (0 type-3 → no-op); this makes the active path visible.
+
 ## [0.100.14] - 2026-10-29
 
 **`--brute-protocol smb` promoted Beta → Production — all 7 network brute adapters

@@ -940,8 +940,17 @@ pub fn run_raw_tcp_fast(
             // direct rate-limit signal (admin-prohibited / frag / port-unreach)
             // → force a cwnd back-off regardless of the drop ratio (Fase 31
             // ICMP signal, #4). No-op if the ICMP listener isn't available.
-            if scanner.icmp_unreach() > icmp_before {
+            let icmp_after = scanner.icmp_unreach();
+            if icmp_after > icmp_before {
                 cwnd.force_backoff();
+                if TRACE_ENABLED.load(Ordering::Relaxed) {
+                    eprintln!(
+                        "[raw-icmp] {} ICMP dest-unreachable (type 3) during wave \
+                         → cwnd back-off to {}",
+                        icmp_after - icmp_before,
+                        cwnd.window()
+                    );
+                }
             }
             if replies > 0 {
                 host_replied = true;
