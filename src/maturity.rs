@@ -55,7 +55,8 @@ const REGISTRY: &[Feature] = &[
     Feature { key: "--sn", tier: Tier::Production, note: "Host discovery (ping sweep)" },
     Feature { key: "--Pn", tier: Tier::Production, note: "No host discovery (treat all as up)" },
 
-    // ── Beta — passes tests but not lab-validated against real targets ──
+    // ── Promoted to Production after real-target lab validation (nmap /
+    // hydra / crackmapexec / sslscan). Full history in LAB_VALIDATION.md. ──
     Feature { key: "-O", tier: Tier::Production,
         note: "OS fingerprint. The emitted 16-field block is byte-identical to `nmap -O` (validated v0.75→0.79), and the match now agrees with `nmap -O` on heterogeneous real hardware: lab v0.100.1 hit 3/3 — OpenWrt router (.1), OpenWrt/Linux embedded (.31, 93%), and Windows 11 24H2 (.64, exact family+version). Pass `--nmap-os-db` for best accuracy; without it the built-in 100-sig heuristic can read confidence lower. The earlier v0.99 misfire (an AP read as 'VirtualBox Slirp NAT') was fixed in v0.99.2 by demoting the Slirp heuristic to a hint." },
     Feature { key: "--sV", tier: Tier::Production,
@@ -72,8 +73,8 @@ const REGISTRY: &[Feature] = &[
         note: "FTP cred brute (v0.63). Lab v0.100.3 agrees with hydra on Metasploitable 2 vsftpd 2.3.4: same hit (msfadmin:msfadmin) on single-cred and needle-in-haystack, wrong creds correctly rejected." },
     Feature { key: "--brute-protocol ssh", tier: Tier::Production,
         note: "SSH cred brute via russh (v0.64). Lab-validated vs hydra across every mode: --brute-pair/--brute-userpass HIT=hydra (v0.100.5), and the full --brute-userlist×--brute-passlist recovered the known-valid cred in v0.100.8 on a modern OpenSSH server — in 8 effective attempts, where hydra's 16 parallel tasks were throttled to an intermittent miss by the server's MaxStartups. The success path needed the v0.100.6/.8 retry-backoff work (transport errors retried 4× with seconds-scale exponential backoff + jitter) to outlast a burst throttle; a single connection always worked. Password auth only — no pubkey / keyboard-interactive." },
-    Feature { key: "--brute-protocol smb", tier: Tier::Beta,
-        note: "SMB NTLMv2 cred brute over SMBv1 (v0.64). Lab v0.100.3 authenticated nothing on Metasploitable 2 Samba 3.0.20 (BRUTE-1). Root cause fixed v0.100.10: the AUTHENTICATE sent UID 0 instead of echoing the server-assigned UID from the challenge, so the server couldn't correlate the Type-3 and rejected every credential; the session-setup ByteCount was also off-by-one and CAP_EXTENDED_SECURITY was missing. v0.100.11/.12 (guest-bit check + RUSTYMAP_SMB_DEBUG diagnostics) led to the root cause, fixed v0.100.13: the Type-3 NTLMSSP Version field was 12 bytes but header_len budgeted 8, so every security-buffer offset was 4 bytes short — the server read a corrupt NT response/username and silent-guest-mapped EVERY credential identically (lab: root:wrong byte-for-byte == msfadmin). Version is now 8 bytes so the offsets align and the server validates the credential. Re-test vs hydra/crackmapexec on Samba 3.0.20 (msfadmin:msfadmin found, root:wrong rejected) to promote. SMBv1 NTLMSSP only." },
+    Feature { key: "--brute-protocol smb", tier: Tier::Production,
+        note: "SMB NTLMv2 cred brute over SMBv1 (v0.64). Lab-validated vs hydra + crackmapexec on Metasploitable 2 Samba 3.0.20 (v0.100.13): finds msfadmin:msfadmin in 6 attempts — identical hit and attempt count to crackmapexec, matching hydra — with no guest-mapping false positive (root:wrong rejected). Getting there took a four-bug chain fixed over v0.100.10→.13: UID correlation, session-setup ByteCount, missing CAP_EXTENDED_SECURITY, and the Type-3 Version-field length that had silent-guest-mapped every credential. SMBv1 NTLMSSP only — modern SMB2/3-only servers need a separate negotiate path." },
     Feature { key: "--brute-protocol mysql", tier: Tier::Production,
         note: "MySQL native_password cred brute (v0.64). The v0.100.4 empty-password fix (auth-data-length 0) was confirmed on Kali v0.100.5: agrees with hydra on Metasploitable 2 MySQL 5.0.51a (root with a blank password). caching_sha2_password (8.0+ default) is still best-effort — native_password only." },
     Feature { key: "--brute-protocol postgres", tier: Tier::Production,
@@ -178,9 +179,33 @@ mod tests {
     }
 
     #[test]
-    fn beta_gate_passes_silently() {
-        let r = announce_and_gate("--brute-protocol smb", false);
-        assert!(r.is_ok(), "beta does not need --experimental-confirm");
+    fn gate_policy_matches_all_tiers() {
+        // Policy over the whole registry, self-maintaining as tiers change:
+        // Production/Beta pass the gate without --experimental-confirm; Alpha
+        // rejects without it and passes with it. (Beta is currently empty — smb
+        // was promoted in v0.100.14 — but the invariant still holds for it.)
+        for f in registry() {
+            match f.tier {
+                Tier::Production | Tier::Beta => assert!(
+                    announce_and_gate(f.key, false).is_ok(),
+                    "{} ({}) must pass the gate without confirm",
+                    f.key,
+                    f.tier.label()
+                ),
+                Tier::Alpha => {
+                    assert!(
+                        announce_and_gate(f.key, false).is_err(),
+                        "{} (alpha) must reject without confirm",
+                        f.key
+                    );
+                    assert!(
+                        announce_and_gate(f.key, true).is_ok(),
+                        "{} (alpha) must pass with confirm",
+                        f.key
+                    );
+                }
+            }
+        }
     }
 
     #[test]

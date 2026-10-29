@@ -4,6 +4,30 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.14] - 2026-10-29
+
+**`--brute-protocol smb` promoted Beta → Production — all 7 network brute adapters
+are now Production.** 675/675 tests.
+
+### Changed
+- **`--brute-protocol smb` is now Production.** The v0.100.13 Type-3 fix was
+  validated on Kali: against Metasploitable 2 Samba 3.0.20, RustyMap finds
+  `msfadmin:msfadmin` in 6 attempts — the same hit and attempt count as
+  crackmapexec, and matching hydra — with no guest-mapping false positive
+  (`root:wrong` now rejected). This completes the set:
+  **ftp / ssh / smb / mysql / postgres / ldap / vnc are all Production (7/7).**
+  (`maturity.rs`.) The gate test is now a registry-wide policy check
+  (`gate_policy_matches_all_tiers`), since no Beta-tier features remain.
+
+### Why
+Closes BRUTE-1, open since v0.100.3. Getting SMB right took a four-bug chain, all
+found and fixed over v0.100.10→.13: UID correlation, session-setup `ByteCount`,
+the missing `CAP_EXTENDED_SECURITY`, and finally the Type-3 Version-field length
+that had been silently guest-mapping every credential. The remaining
+non-Production features are 11 Alpha (brute rdp/mssql, apk/ipa-scan,
+threat-intel-sync, osdb-submit, sI, os-fp-v6, owasp-scan, ics-scan, web-crawl),
+each needing a dedicated target.
+
 ## [0.100.13] - 2026-10-29
 
 **SMB brute: fixed the 4-byte Type-3 misalignment that made Samba guest-map every
