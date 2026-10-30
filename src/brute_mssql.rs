@@ -4,10 +4,14 @@
 //!
 //! Flow per [MS-TDS] §3.3:
 //!
-//!   1. Send `PRELOGIN` (type=0x12) advertising **ENCRYPTION = OFF**
-//!      (0x00 = "encryption supported, prefer off"). Modern SQL Server
-//!      (2016+/2022) ALWAYS encrypts the login exchange, so it replies
-//!      OFF/ON/REQ and we must speak TLS; only a legacy server replies
+//!   1. Send `PRELOGIN` (type=0x12) advertising **ENCRYPTION = ON**
+//!      (0x01 = "encryption supported, use it"). Modern SQL Server
+//!      (2016+/2022) always encrypts the login; advertising ON makes the
+//!      server encrypt the WHOLE session, so the login response and all
+//!      later traffic stay inside TLS — no mid-stream switch back to
+//!      cleartext to trip over (advertising OFF negotiates *login-only*
+//!      encryption, where the reply comes back in cleartext and a plain
+//!      TLS read chokes on it). A legacy server with no cert replies
 //!      NOT_SUP (0x02), for which we fall back to a cleartext LOGIN7.
 //!   2. **TLS**, with a twist unique to TDS: during the handshake each
 //!      TLS record is wrapped in a TDS `0x12` (PRELOGIN) packet. Once
@@ -16,16 +20,21 @@
 //!      the wire raw (the TDS packet lives *inside* the encryption).
 //!      We drive rustls' low-level `ClientConnection` by hand to switch
 //!      framing at exactly the right point.
-//!   3. Send `LOGIN7` (type=0x10) with the credentials (over TLS when
-//!      negotiated). The password nibbles are swapped then XOR'd with
-//!      0xA5 — a wire quirk, NOT encryption.
-//!   4. Server replies with either:
+//!   3. Send `LOGIN7` (type=0x10) with the credentials over TLS. The
+//!      password nibbles are swapped then XOR'd with 0xA5 — a wire
+//!      quirk, NOT encryption.
+//!   4. Server replies (encrypted) with either:
 //!      - `LOGINACK` (token 0xAD) → success
 //!      - `ERROR` (token 0xAA) with NTSTATUS / message → bad creds
 //!
+//! The reply is read defensively: normally it is TLS application data we
+//! decrypt through rustls, but if the server did a login-only negotiation
+//! and answered in cleartext we parse the raw TDS packet instead.
+//!
 //! TDS over TCP/1433. SQL Server Authentication only — Windows/SSPI
-//! (NTLM/Kerberos) SSO is out of scope. `RUSTYMAP_MSSQL_DEBUG=1` emits
-//! a stderr trace of the encryption negotiation + login response.
+//! (NTLM/Kerberos) SSO is out of scope. `RUSTYMAP_MSSQL_DEBUG=1` traces
+//! the negotiated encryption byte, the first post-login bytes on the wire
+//! (TLS record vs cleartext TDS), and the login-response head.
 
 use crate::brute::{BruteAdapter, BruteConfig};
 use anyhow::{anyhow, Result};
@@ -53,8 +62,8 @@ impl BruteAdapter for MssqlAdapter {
         let debug = std::env::var_os("RUSTYMAP_MSSQL_DEBUG").is_some();
         let mut s = timeout(cfg.timeout, TcpStream::connect(cfg.target)).await??;
 
-        // 1) PRELOGIN — advertise ENCRYPT_OFF so the server engages TLS
-        //    for the login (modern SQL Server rejects a cleartext login).
+        // 1) PRELOGIN — advertise ENCRYPT_ON so the server encrypts the
+        //    whole session (modern SQL Server rejects a cleartext login).
         let prelogin = build_prelogin();
         timeout(cfg.timeout, s.write_all(&prelogin)).await??;
         let prelogin_resp = read_tds_packet(&mut s, cfg.timeout).await?;
@@ -83,7 +92,7 @@ impl BruteAdapter for MssqlAdapter {
             eprintln!("[mssql] TLS handshake complete → LOGIN7 over TLS");
         }
         tls_send_app(&mut s, &mut conn, &login, cfg.timeout).await?;
-        let resp = tls_read_tds(&mut s, &mut conn, cfg.timeout).await?;
+        let resp = read_login_response(&mut s, &mut conn, cfg.timeout, debug).await?;
         if debug {
             let n = resp.len().min(48);
             let head: String = resp[..n].iter().map(|b| format!("{:02x}", b)).collect();
@@ -99,7 +108,7 @@ pub fn build_prelogin() -> Vec<u8> {
     // Body: option list, each {token(1) offset(2) length(2)} terminated
     // by 0xFF, then the per-option data.
     //   0x00 VERSION  (6 bytes: 4 maj/min/build, 2 subbuild)
-    //   0x01 ENCRYPTION (1 byte: 0 = OFF → engage TLS for the login)
+    //   0x01 ENCRYPTION (1 byte: 1 = ON → encrypt the whole session)
     //   0x02 INSTOPT (var: NUL-terminated instance name, empty here)
     //   0x03 THREADID (4 bytes)
     //   0xFF terminator
@@ -114,7 +123,7 @@ pub fn build_prelogin() -> Vec<u8> {
     data.extend_from_slice(&[0x09, 0x00, 0x00, 0x00, 0x00, 0x00]); // version 9.0.0.0
     off += 6;
     header_offsets.push((0x01u8, off, 1u16));
-    data.push(ENCRYPT_OFF); // encryption = OFF → server engages TLS for the login
+    data.push(ENCRYPT_ON); // encryption = ON → server encrypts the whole session
     off += 1;
     header_offsets.push((0x02u8, off, 1u16));
     data.push(0x00); // instance = ""
@@ -308,10 +317,11 @@ async fn read_tds_packet(s: &mut TcpStream, dur: std::time::Duration) -> Result<
 // on the wire). We drive rustls' low-level ClientConnection by hand so
 // we own the framing switch precisely.
 
-// PRELOGIN ENCRYPTION option values (MS-TDS). We advertise OFF; the
-// server replies OFF / ON (0x01) / REQ (0x03) — all meaning "do TLS for
-// the login" — or NOT_SUP for a legacy cleartext-only server.
-const ENCRYPT_OFF: u8 = 0x00;
+// PRELOGIN ENCRYPTION option values (MS-TDS). We advertise ON so the
+// server encrypts the whole session (login response included); it
+// replies ON (0x01) / REQ (0x03) — both "session encrypted" — or
+// NOT_SUP (0x02) for a legacy server with no cert (cleartext fallback).
+const ENCRYPT_ON: u8 = 0x01;
 const ENCRYPT_NOT_SUP: u8 = 0x02;
 
 /// Parse the server's PRELOGIN response body (TDS header already
@@ -428,49 +438,115 @@ async fn tls_send_app(
     Ok(())
 }
 
-/// Read TLS application data until a full TDS response packet is
-/// decrypted; return its body (token stream, 8-byte TDS header stripped).
-async fn tls_read_tds(
+/// Read the server's login response. With full-session encryption (we
+/// advertise ENCRYPT_ON) the reply is TLS application data we decrypt
+/// through rustls. As a safety net — in case the server negotiated
+/// login-only encryption and answered in cleartext — we peek the first
+/// byte off the socket: a TLS record (`0x14`–`0x17`, version `0x03xx`)
+/// goes to rustls; a raw TDS packet (type byte such as `0x04`) is parsed
+/// directly. Either way we return the token-stream body with the 8-byte
+/// TDS header stripped.
+async fn read_login_response(
     sock: &mut TcpStream,
     conn: &mut rustls::ClientConnection,
     dur: std::time::Duration,
+    debug: bool,
 ) -> Result<Vec<u8>> {
+    // First chunk off the socket decides the framing.
+    let mut first = [0u8; 8192];
+    let n = timeout(dur, sock.read(&mut first)).await??;
+    if n == 0 {
+        return Err(anyhow!("server closed before the TDS login response"));
+    }
+    if debug {
+        let h: String = first[..n.min(16)].iter().map(|b| format!("{:02x}", b)).collect();
+        let kind = if is_tls_record(&first[..n]) { "TLS record" } else { "cleartext TDS" };
+        eprintln!("[mssql] post-login first {} socket bytes ({}); head={}", n, kind, h);
+    }
+
+    if !is_tls_record(&first[..n]) {
+        // Login-only negotiation: the reply is a raw cleartext TDS packet.
+        let mut plain = first[..n].to_vec();
+        loop {
+            if let Some(body) = take_tds_packet(&plain) {
+                return Ok(body);
+            }
+            let mut buf = [0u8; 8192];
+            let m = timeout(dur, sock.read(&mut buf)).await??;
+            if m == 0 {
+                return finish_partial(&plain);
+            }
+            plain.extend_from_slice(&buf[..m]);
+        }
+    }
+
+    // Full-session encryption: decrypt the TLS records through rustls.
     let mut plain: Vec<u8> = Vec::new();
+    let mut pending = first[..n].to_vec();
     loop {
-        // Drain whatever plaintext rustls already holds.
+        // Feed any socket bytes we are holding into rustls.
+        if !pending.is_empty() {
+            let mut cur = std::io::Cursor::new(&pending[..]);
+            while (cur.position() as usize) < pending.len() {
+                let rd = conn.read_tls(&mut cur)?;
+                if rd == 0 {
+                    break;
+                }
+                conn.process_new_packets().map_err(|e| anyhow!("tls: {}", e))?;
+            }
+            pending.clear();
+        }
+        // Drain whatever plaintext rustls now holds.
         loop {
             let mut tmp = [0u8; 4096];
             match conn.reader().read(&mut tmp) {
                 Ok(0) => break,
-                Ok(n) => plain.extend_from_slice(&tmp[..n]),
+                Ok(k) => plain.extend_from_slice(&tmp[..k]),
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
                 Err(e) => return Err(anyhow!("tls reader: {}", e)),
             }
         }
-        // Full TDS packet yet? (8-byte header, big-endian length at [2..4].)
-        if plain.len() >= 8 {
-            let total = u16::from_be_bytes([plain[2], plain[3]]) as usize;
-            if total >= 8 && plain.len() >= total {
-                return Ok(plain[8..total].to_vec());
-            }
+        if let Some(body) = take_tds_packet(&plain) {
+            return Ok(body);
         }
         // Pull more TLS records off the socket.
         let mut buf = [0u8; 8192];
-        let n = timeout(dur, sock.read(&mut buf)).await??;
-        if n == 0 {
-            if plain.len() >= 8 {
-                return Ok(plain[8..].to_vec());
-            }
-            return Err(anyhow!("server closed before the TDS login response"));
+        let m = timeout(dur, sock.read(&mut buf)).await??;
+        if m == 0 {
+            return finish_partial(&plain);
         }
-        let mut cur = std::io::Cursor::new(&buf[..n]);
-        while (cur.position() as usize) < n {
-            let rd = conn.read_tls(&mut cur)?;
-            if rd == 0 {
-                break;
-            }
-            conn.process_new_packets().map_err(|e| anyhow!("tls: {}", e))?;
+        pending.extend_from_slice(&buf[..m]);
+    }
+}
+
+/// True if the buffer looks like the start of a TLS record: a content
+/// type of `0x14` (ChangeCipherSpec) … `0x17` (ApplicationData) followed
+/// by a `0x03xx` protocol version. A cleartext TDS packet starts with a
+/// TDS type byte (e.g. `0x04` TABULAR_RESULT) that never falls in that
+/// range, so the two are unambiguous.
+fn is_tls_record(buf: &[u8]) -> bool {
+    buf.len() >= 3 && (0x14..=0x17).contains(&buf[0]) && buf[1] == 0x03
+}
+
+/// If `plain` holds a complete TDS packet (8-byte header, big-endian
+/// length at `[2..4]`), return its body with the header stripped.
+fn take_tds_packet(plain: &[u8]) -> Option<Vec<u8>> {
+    if plain.len() >= 8 {
+        let total = u16::from_be_bytes([plain[2], plain[3]]) as usize;
+        if total >= 8 && plain.len() >= total {
+            return Some(plain[8..total].to_vec());
         }
+    }
+    None
+}
+
+/// The peer closed mid-response: salvage the body if we at least have a
+/// TDS header, otherwise report the truncation.
+fn finish_partial(plain: &[u8]) -> Result<Vec<u8>> {
+    if plain.len() >= 8 {
+        Ok(plain[8..].to_vec())
+    } else {
+        Err(anyhow!("server closed before the TDS login response"))
     }
 }
 
@@ -591,11 +667,30 @@ mod tests {
     }
 
     #[test]
-    fn prelogin_advertises_encrypt_off() {
-        // The client must now advertise ENCRYPT_OFF (not NOT_SUP) so a
-        // modern server engages TLS for the login instead of rejecting us.
+    fn prelogin_advertises_encrypt_on() {
+        // The client advertises ENCRYPT_ON so a modern server encrypts the
+        // whole session (login response included), not just the login
+        // packet — otherwise the reply comes back in cleartext and the
+        // TLS read path chokes on it.
         let p = build_prelogin();
-        assert_eq!(parse_prelogin_encryption(&p[8..]), ENCRYPT_OFF);
+        assert_eq!(parse_prelogin_encryption(&p[8..]), ENCRYPT_ON);
+    }
+
+    #[test]
+    fn is_tls_record_distinguishes_tls_from_cleartext_tds() {
+        assert!(is_tls_record(&[0x17, 0x03, 0x03, 0x00, 0x20])); // TLS ApplicationData
+        assert!(is_tls_record(&[0x16, 0x03, 0x01, 0x00])); // TLS Handshake
+        assert!(!is_tls_record(&[0x04, 0x01, 0x00, 0x2b])); // cleartext TDS response
+        assert!(!is_tls_record(&[0x17])); // too short to decide
+    }
+
+    #[test]
+    fn take_tds_packet_needs_the_full_declared_length() {
+        // Header declares total = 12 (0x000c BE at [2..4]); 4 body bytes.
+        let pkt = vec![0x04, 0x01, 0x00, 0x0c, 0, 0, 1, 0, 0xAD, 0xBB, 0xCC, 0xDD];
+        assert_eq!(take_tds_packet(&pkt), Some(vec![0xAD, 0xBB, 0xCC, 0xDD]));
+        assert_eq!(take_tds_packet(&pkt[..10]), None); // body not fully arrived
+        assert_eq!(take_tds_packet(&[0x04, 0x01]), None); // not even a header
     }
 
     #[test]

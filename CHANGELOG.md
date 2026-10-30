@@ -4,6 +4,38 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.19] - 2026-10-30
+
+**Fixes the v0.100.18 mssql TDS-over-TLS login: the handshake completed but the
+LOGIN7 reply failed with "connection error".** 681/681 tests. (Stays Alpha pending
+the Kali re-test it unblocks.)
+
+### Fixed
+- **MSSQL brute: TLS handshake succeeded but the login reply could not be read.**
+  The adapter advertised `ENCRYPTION = OFF`, which makes SQL Server negotiate
+  *login-only* encryption: the handshake and LOGIN7 are encrypted, but the server's
+  reply comes back as a **cleartext** TDS packet. The old read path fed those
+  cleartext bytes to rustls, which rejected them as a malformed TLS record — the
+  v0.100.18 Kali re-test saw exactly this ("handshake completa, LOGIN7-over-TLS
+  fallisce"). Two changes fix it (`brute_mssql.rs`):
+  - PRELOGIN now advertises `ENCRYPTION = ON`, so the server encrypts the **whole
+    session** — the login reply stays inside TLS, with no mid-stream switch back to
+    cleartext.
+  - The reply read is now defensive: it peeks the first byte off the socket and
+    decrypts through rustls if it is a TLS record (`0x14`–`0x17` / `0x03xx`) or
+    parses it as a raw TDS packet if the server answered in cleartext — correct
+    under either negotiation.
+
+### Added
+- `RUSTYMAP_MSSQL_DEBUG=1` now also traces the first post-login bytes on the wire
+  and whether they are a TLS record or a cleartext TDS packet — so if the re-test
+  still misses, the trace pinpoints it in one run.
+
+### Note
+- mssql **stays Alpha** until the Kali re-test confirms a HIT vs `hydra mssql://` on
+  a real SQL Server 2022. Can't be validated from the Windows dev box (no SQL
+  Server). HIT = hydra → promote (8th brute at Production).
+
 ## [0.100.18] - 2026-10-29
 
 **`--brute-protocol mssql` now does TDS-over-TLS login — works against modern
