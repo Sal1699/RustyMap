@@ -9,6 +9,11 @@
 //!     match common DB error fingerprints (MySQL, PostgreSQL, MSSQL,
 //!     Oracle, SQLite). False-positive-low because we look for
 //!     specific error strings, not just status changes.
+//!   - **A03 Injection — command injection**: per-param inject a shell
+//!     separator + `echo <token>` (plus a blind `sleep` time-probe). A
+//!     HIT needs the token to appear *alone* (the command ran), not the
+//!     literal `echo <token>` (mere reflection) — the reflection guard
+//!     stops XSS-reflective pages from false-positiving.
 //!   - **A04 Insecure Design — open redirect**: per-param send
 //!     `https://evil.example.org/`, follow no redirects, check the
 //!     response Location header echoes our value.
@@ -23,8 +28,8 @@ use crate::web_crawl::{seed_cookie_jar, Endpoint};
 use anyhow::Result;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::time::Duration;
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OwaspFinding {
@@ -39,7 +44,7 @@ pub struct OwaspFinding {
 #[derive(Debug, Clone)]
 pub struct ProbeConfig {
     pub timeout: Duration,
-    pub checks: Vec<&'static str>, // "xss", "sqli", "redirect", "ssrf"
+    pub checks: Vec<&'static str>, // "xss", "sqli", "redirect", "ssrf", "cmdi"
     /// Cookie-header-style string ("PHPSESSID=…; security=low") so the
     /// probes hit the authenticated surface the crawl mapped. Without it
     /// every probe lands on the app's login redirect and finds nothing.
@@ -50,7 +55,7 @@ impl Default for ProbeConfig {
     fn default() -> Self {
         Self {
             timeout: Duration::from_secs(8),
-            checks: vec!["xss", "sqli", "redirect", "ssrf"],
+            checks: vec!["xss", "sqli", "redirect", "ssrf", "cmdi"],
             cookie: None,
         }
     }
@@ -68,6 +73,17 @@ const SQL_ERROR_FINGERPRINTS: &[&str] = &[
     "ora-01756",
     "microsoft odbc",
     "sqlserver jdbc driver",
+    // Expanded engine coverage (v0.101.0): broader MySQL / PostgreSQL /
+    // MSSQL / Oracle / DB2 error strings, all low-FP.
+    "mysql_fetch_array()",
+    "supplied argument is not a valid mysql",
+    "syntax error at or near",
+    "sqlstate[",
+    "ora-00921",
+    "ora-00936",
+    "incorrect syntax near",
+    "microsoft ole db provider for sql server",
+    "db2 sql error",
 ];
 
 pub async fn probe(endpoints: &[Endpoint], cfg: &ProbeConfig) -> Result<Vec<OwaspFinding>> {
@@ -119,6 +135,11 @@ pub async fn probe(endpoints: &[Endpoint], cfg: &ProbeConfig) -> Result<Vec<Owas
             }
             if cfg.checks.contains(&"ssrf") {
                 if let Some(f) = test_ssrf(&client, ep, param).await {
+                    findings.push(f);
+                }
+            }
+            if cfg.checks.contains(&"cmdi") {
+                if let Some(f) = test_cmdi(&client, ep, param).await {
                     findings.push(f);
                 }
             }
@@ -195,12 +216,14 @@ async fn test_ssrf(client: &reqwest::Client, ep: &Endpoint, param: &str) -> Opti
     let payload = "http://127.0.0.1:1/";
     let body = send_with_param(client, ep, param, payload).await?;
     let lower = body.to_lowercase();
+    // No "127.0.0.1:1" marker: the payload itself contains it, so merely
+    // reflecting our input would false-positive. We match only backend
+    // connection-failure strings, which prove the server tried to reach us.
     let markers = [
         "connection refused",
         "failed to connect",
         "couldn't connect",
         "no route to host",
-        "127.0.0.1:1",
     ];
     for m in markers {
         if let Some(idx) = lower.find(m) {
@@ -216,6 +239,79 @@ async fn test_ssrf(client: &reqwest::Client, ep: &Endpoint, param: &str) -> Opti
         }
     }
     None
+}
+
+async fn test_cmdi(client: &reqwest::Client, ep: &Endpoint, param: &str) -> Option<OwaspFinding> {
+    let token = format!("rmci{}", rand_token());
+    // Marker-based: a shell separator + `echo <token>`. If the value is
+    // interpolated into a shell command the token prints on its own; if the
+    // app merely reflects our input the literal `echo <token>` comes back,
+    // which `cmdi_hit` rejects as reflection, not execution.
+    for sep in [";", "|", "`"] {
+        let payload = if sep == "`" {
+            format!("`echo {}`", token)
+        } else {
+            format!("{} echo {}", sep, token)
+        };
+        if let Some(body) = send_with_param(client, ep, param, &payload).await {
+            if cmdi_hit(&body, &token) {
+                return Some(OwaspFinding {
+                    category: "A03 Command Injection",
+                    url: ep.url.clone(),
+                    method: ep.method.clone(),
+                    param: param.to_string(),
+                    payload,
+                    evidence: snippet_around(&body, &token, 80),
+                });
+            }
+        }
+    }
+    // Blind/time-based: inject a sleep and compare against a baseline. A
+    // genuine injection delays the response by ~the sleep; a reflected or
+    // ignored payload returns at baseline speed. Cheap for non-vulnerable
+    // params (the sleep never runs, so elapsed stays near baseline).
+    let sleep_secs = 5u64;
+    let baseline = measure(client, ep, param, "1").await?;
+    for sep in [";", "|"] {
+        let payload = format!("{} sleep {}", sep, sleep_secs);
+        if let Some(elapsed) = measure(client, ep, param, &payload).await {
+            if elapsed >= baseline + Duration::from_secs(sleep_secs - 1) {
+                return Some(OwaspFinding {
+                    category: "A03 Command Injection (time-based)",
+                    url: ep.url.clone(),
+                    method: ep.method.clone(),
+                    param: param.to_string(),
+                    payload,
+                    evidence: format!(
+                        "response delayed to {:.1}s vs {:.1}s baseline",
+                        elapsed.as_secs_f64(),
+                        baseline.as_secs_f64()
+                    ),
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Marker-based command-injection decision: the token must appear in the
+/// body (the `echo` ran) but NOT as the literal `echo <token>` — the
+/// latter is just our payload reflected (e.g. on an XSS-reflective page),
+/// which must not count as a command-injection hit.
+fn cmdi_hit(body: &str, token: &str) -> bool {
+    body.contains(token) && !body.contains(&format!("echo {}", token))
+}
+
+/// Time a single request to `param=value`; `None` if it errors or times out.
+async fn measure(
+    client: &reqwest::Client,
+    ep: &Endpoint,
+    param: &str,
+    value: &str,
+) -> Option<Duration> {
+    let start = Instant::now();
+    let _ = send_with_param_resp(client, ep, param, value).await?;
+    Some(start.elapsed())
 }
 
 async fn send_with_param(
@@ -242,22 +338,37 @@ async fn send_with_param_resp(
         }
         client.post(url).form(&form).send().await.ok()
     } else {
-        // Build a fresh query string with our payload on the target param.
-        let mut pairs: Vec<(String, String)> = url
+        // Build the query with EVERY endpoint param, not just those already
+        // in the URL. Apps like DVWA gate the query on a sibling field
+        // (`isset($_REQUEST['Submit'])`), so a GET that omits it never runs
+        // the vulnerable code path — the reason the probes found nothing on
+        // authenticated DVWA before this fix.
+        let existing: HashMap<String, String> = url
             .query_pairs()
             .map(|(k, v)| (k.into_owned(), v.into_owned()))
             .collect();
-        let mut found = false;
-        for (k, v) in pairs.iter_mut() {
-            if k == param {
-                *v = value.into();
-                found = true;
+        let mut pairs: Vec<(String, String)> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        for p in &ep.params {
+            let v = if p == param {
+                value.to_string()
+            } else {
+                existing.get(p).cloned().unwrap_or_else(|| "1".to_string())
+            };
+            pairs.push((p.clone(), v));
+            seen.insert(p.clone());
+        }
+        // Preserve any pre-existing query params the endpoint list didn't name.
+        for (k, v) in &existing {
+            if !seen.contains(k) {
+                pairs.push((k.clone(), v.clone()));
+                seen.insert(k.clone());
             }
         }
-        if !found {
-            pairs.push((param.into(), value.into()));
+        // Ensure the target param is present even if it wasn't in the list.
+        if !seen.contains(param) {
+            pairs.push((param.to_string(), value.to_string()));
         }
-        // For form-discovered endpoints with no current query, add ours.
         url.query_pairs_mut().clear().extend_pairs(&pairs);
         client.get(url).send().await.ok()
     }
@@ -327,5 +438,31 @@ mod tests {
         assert!(SQL_ERROR_FINGERPRINTS
             .iter()
             .any(|fp| lower.contains(fp)));
+    }
+
+    #[test]
+    fn cmdi_hit_requires_execution_not_reflection() {
+        let token = "rmci1a2b3c";
+        // Payload merely reflected (literal "echo <token>" present) → no hit.
+        let reflected = format!("You entered: ; echo {}", token);
+        assert!(!cmdi_hit(&reflected, token));
+        // Backtick payload reflected verbatim → still "echo <token>" → no hit.
+        let reflected_bt = format!("arg=`echo {}`", token);
+        assert!(!cmdi_hit(&reflected_bt, token));
+        // Command actually ran: the token prints on its own → hit.
+        let executed = format!("PING output…\n{}\nrtt min/avg", token);
+        assert!(cmdi_hit(&executed, token));
+        // Token absent entirely → no hit.
+        assert!(!cmdi_hit("nothing here", token));
+    }
+
+    #[test]
+    fn sql_fingerprints_lowercase_and_expanded() {
+        // All fingerprints are lowercase (we match a lowercased body).
+        assert!(SQL_ERROR_FINGERPRINTS.iter().all(|fp| *fp == fp.to_lowercase()));
+        // Coverage expanded past the original MySQL/PG/MSSQL/Oracle/SQLite set.
+        assert!(SQL_ERROR_FINGERPRINTS.contains(&"incorrect syntax near"));
+        assert!(SQL_ERROR_FINGERPRINTS.contains(&"syntax error at or near"));
+        assert!(SQL_ERROR_FINGERPRINTS.len() >= 20);
     }
 }

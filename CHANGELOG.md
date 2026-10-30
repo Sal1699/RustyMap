@@ -4,6 +4,41 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.101.0] - 2026-10-30
+
+**`--owasp-scan` gains a command-injection probe and now actually reports findings
+on authenticated apps** (DVWA low: XSS + SQLi + CMDi, 0 false positives in the
+v0.101.0 Kali R&D run). 683/683 tests. **Stays Alpha** — no JS rendering; ZAP /
+sqlmap still outperform on real engagements.
+
+### Added
+- **A03 command-injection probe (`--owasp-checks cmdi`, on by default).** Per param
+  it injects a shell separator + `echo <token>` (`;`, `|`, backtick) and, as a
+  blind fallback, a `sleep` time-probe measured against a per-param baseline. A
+  marker hit requires the token to appear **alone** (the command ran), never the
+  literal `echo <token>` (mere reflection) — so XSS-reflective pages don't
+  false-positive. (`owasp_probes.rs`, `main.rs`, `cli.rs`, `guide.rs`.)
+
+### Fixed
+- **GET probes omitted sibling form fields, so nothing fired on gated apps.** A
+  form-discovered GET endpoint was probed with only the target param, but DVWA (and
+  many apps) gate the query on `isset($_REQUEST['Submit'])` — so the vulnerable path
+  never ran and the scan reported 0 findings even when authenticated. GET requests
+  now carry **every** endpoint param (target = payload, siblings = their existing
+  value or `1`). (`owasp_probes.rs`.)
+- **SSRF false positive from a too-greedy marker.** The `127.0.0.1:1` marker matched
+  our own reflected payload; removed, leaving only backend connection-failure
+  strings that prove the server actually dialed out.
+
+### Changed
+- **9 more SQL error fingerprints** (broader MySQL / PostgreSQL / MSSQL / Oracle /
+  DB2 coverage) for the error-based SQLi probe.
+
+### Note
+- `--owasp-scan` **stays Alpha**: these changes make it find real bugs on DVWA, but
+  it still has no JavaScript rendering and is noisier than ZAP / sqlmap. Re-validate
+  on DVWA and report the finding + FP counts vs `zap-baseline.py`.
+
 ## [0.100.19] - 2026-10-30
 
 **Fixes the v0.100.18 mssql TDS-over-TLS login: the handshake completed but the

@@ -392,8 +392,8 @@ pub fn print_guide() {
     line("--crawl-max-urls N    Tetto numero URL (default 200)");
     line("--web-cookie HEADER   Cookie da iniettare (es. \"session=abc; csrf=…\")");
     line("--no-robots           Ignora robots.txt durante --web-crawl");
-    line("--owasp-scan URL      Crawl + probe XSS/SQLi/open-redirect/SSRF");
-    line("--owasp-checks LIST   Subset: xss,sqli,redirect,ssrf");
+    line("--owasp-scan URL      Crawl + probe XSS/SQLi/CMDi/open-redirect/SSRF");
+    line("--owasp-checks LIST   Subset: xss,sqli,redirect,ssrf,cmdi");
     line("--cloud-buckets SEED  Enum public S3/GCS/Azure (~30 permutazioni dal seed)");
     line("--cloud-buckets-limit N  Tetto permutazioni provate (default 30)");
     line("--cloud-metadata      Probe IMDS 169.254.169.254 (AWS/GCP/Azure/OpenStack)");

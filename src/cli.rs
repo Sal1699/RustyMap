@@ -1146,7 +1146,7 @@ pub struct Cli {
     #[arg(long = "owasp-scan", value_name = "URL")]
     pub owasp_scan: Option<String>,
 
-    /// Restrict OWASP probes to comma-separated set: xss,sqli,redirect,ssrf
+    /// Restrict OWASP probes to comma-separated set: xss,sqli,redirect,ssrf,cmdi
     #[arg(long = "owasp-checks", value_name = "LIST")]
     pub owasp_checks: Option<String>,
 

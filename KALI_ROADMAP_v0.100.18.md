@@ -10,7 +10,21 @@ Companions: `KALI_ALPHA_SWEEP.md` (per-Alpha recipes + sweep results),
 `HYDRA_PARITY.md` (brute matrix), `LAB_VALIDATION.md` (dated run log),
 `CHANGELOG.md`. This file supersedes `KALI_TEST_ROADMAP.md` as the current plan.
 
-## Where we are (v0.100.18)
+## Progress since v0.100.18 (2026-10-30 Kali report)
+
+- **1A mssql** re-test: TLS handshake completed but the LOGIN7 reply failed
+  ("connection error"). Root cause: `ENCRYPTION=OFF` negotiates *login-only*
+  encryption, so the reply came back in cleartext and the TLS read rejected it.
+  **Fixed in v0.100.19** (advertise `ENCRYPTION=ON` + defensive reply read).
+- **1B owasp auth fix** CONFIRMED (cookie reaches crawler + probes, 24pg/35ep).
+- **3A owasp** (CMDi probe + GET form-params fix + 9 SQL fingerprints + SSRF FP
+  trim) **shipped in v0.101.0** — your R&D showed 6 findings / 0 FP on DVWA.
+- **2B `--sI`** scored **9/9 vs nmap** on a real zombie — meets the promote bar;
+  promotion pending your OK (you noted "possibile con più target").
+- **2A rdp** SKIP (xrdp ≠ Windows CredSSP/NLA — needs a real Windows host);
+  **2C misp** SKIP (no instance). **3B/3C** still to implement (you reverted them).
+
+## Where we are (v0.101.0)
 
 - **Production:** all scan types; `-O` / `--sV` / `--tls-grade` / `--cve-for` /
   `--ssh-audit` / `--smb-audit` detection; **7/7 network brute**
@@ -23,10 +37,10 @@ Companions: `KALI_ALPHA_SWEEP.md` (per-Alpha recipes + sweep results),
 ## Prep (every session)
 
 ```sh
-cd ~/RustyMap && git fetch origin --tags && git pull origin main   # expect v0.100.18
+cd ~/RustyMap && git fetch origin --tags && git pull origin main   # expect v0.101.0
 cargo build --release ; RM=./target/release/rustymap
-$RM --version                     # rustymap 0.100.18
-cargo test 2>&1 | tail -1         # 679 passed (680 on Linux-only tests)
+$RM --version                     # rustymap 0.101.0
+cargo test 2>&1 | tail -1         # 683 passed (684 on Linux — one extra platform test)
 ```
 Raw scans / `--fast-engine` / `-O` / `--sI` / `--os-fp-v6` need `sudo`.
 **All Alpha features need `--experimental-confirm`.** Record a dated row in
@@ -142,12 +156,12 @@ that row.
 
 | Item | Status | Next action |
 |------|--------|-------------|
-| 1A mssql TDS-over-TLS | code shipped v0.100.18 | re-test vs hydra → promote |
-| 1B owasp-scan auth fix | code shipped v0.100.17 | re-run DVWA → confirm findings |
-| 2A rdp | Alpha | validate when a Windows RDP host exists |
-| 2B sI | Alpha | validate if an IPID zombie is found |
-| 2C threat-intel-misp | Alpha | validate with a lab MISP |
-| 3A owasp CMDi probe | not started | say "vai" to build |
-| 3B os-fp-v6 DB | not started | say "vai" to build |
-| 3C ipa mach-O | not started | say "vai" to build |
-| 3D rdp pubKeyAuth | not started | say "vai" to build |
+| 1A mssql TDS-over-TLS | bug found v0.100.18, **fixed v0.100.19** | re-test vs hydra → promote (8th brute) |
+| 1B owasp-scan auth fix | **confirmed** (24pg/35ep) | folded into 3A |
+| 2A rdp | Alpha — **SKIP** (xrdp ≠ CredSSP) | needs a real Windows RDP host |
+| 2B sI | Alpha — **9/9 vs nmap** on a zombie | promote on your OK ("più target"?) |
+| 2C threat-intel-misp | Alpha — SKIP | validate with a lab MISP |
+| 3A owasp CMDi + params | **shipped v0.101.0** | re-run DVWA → confirm 6 findings / 0 FP |
+| 3B os-fp-v6 DB | not started | re-implementing next → v0.102.0 |
+| 3C ipa mach-O | not started | re-implementing after 3B |
+| 3D rdp pubKeyAuth | not started | say "vai" to build (needs Windows host to test) |
