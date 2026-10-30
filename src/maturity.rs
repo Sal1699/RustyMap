@@ -95,7 +95,7 @@ const REGISTRY: &[Feature] = &[
     Feature { key: "--brute-protocol rdp", tier: Tier::Alpha,
         note: "RDP CredSSP best-effort (v0.65): pubKeyAuth NOT implemented (would need RC4 of TLS SPKI under NTLM session key). Negative results (specific NTSTATUS error codes) are reliable; positive results are SUGGESTIVE, not authoritative. Validate against a real Windows RDP server before reporting findings." },
     Feature { key: "--brute-protocol mssql", tier: Tier::Alpha,
-        note: "MSSQL TDS 7.4 SQL Server Auth (v0.65). Implemented from MS-TDS spec but not yet validated against a real SQL Server instance." },
+        note: "MSSQL TDS 7.4 SQL Server Auth (v0.65). v0.100.18 added the TDS-over-TLS login path (TLS handshake tunneled inside TDS 0x12 packets, then LOGIN7 sent as TLS application data) so it works against modern SQL Server 2016+/2022 — which always encrypt the login; the v0.100.17 Kali MISS on a cleartext login confirmed that gap. Legacy NOT_SUP servers still use the cleartext path. Awaiting a Kali re-test vs hydra on a real SQL Server before promotion." },
     Feature { key: "--ipa-scan", tier: Tier::Alpha,
         note: "iOS IPA static analysis via plist. Only Info.plist inspected; mach-O entitlements / embedded provisioning profiles not parsed." },
     Feature { key: "--threat-intel-misp", tier: Tier::Alpha,

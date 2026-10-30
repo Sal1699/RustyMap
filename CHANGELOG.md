@@ -4,6 +4,36 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.100.18] - 2026-10-29
+
+**`--brute-protocol mssql` now does TDS-over-TLS login — works against modern
+SQL Server 2016+/2022.** 679/679 tests. (Stays Alpha pending a Kali re-test.)
+
+### Fixed
+- **MSSQL brute could not authenticate against SQL Server 2016+/2022.** The
+  adapter advertised `ENCRYPTION = NOT_SUP` in PRELOGIN and sent a cleartext
+  LOGIN7, but modern SQL Server *always* encrypts the login exchange and rejected
+  it — the v0.100.17 Kali sweep MISSED even the correct credential. The adapter now:
+  - advertises `ENCRYPTION = OFF` (encryption supported) in PRELOGIN;
+  - performs a TLS handshake whose records are each wrapped in a TDS `0x12`
+    (PRELOGIN) packet — the framing quirk unique to TDS;
+  - after the handshake sends the LOGIN7 packet as TLS application data (raw TLS
+    records on the wire) and reads the login reply the same way.
+  Driven over rustls' low-level `ClientConnection` (any server cert accepted — SQL
+  Server self-signs by default). Legacy `NOT_SUP` servers keep the cleartext path.
+  (`brute_mssql.rs`.)
+
+### Added
+- `RUSTYMAP_MSSQL_DEBUG=1` prints a stderr trace of the negotiated encryption byte,
+  handshake completion, and the login-response head — so the first Kali run is
+  diagnosable (lesson from the SMB brute saga).
+
+### Note
+- mssql **stays Alpha** until a Kali re-test confirms it: run
+  `--brute-protocol mssql --brute-pair 'sa:<pw>'` against a real SQL Server 2022 and
+  compare to `hydra mssql://`. HIT = hydra → promote (8th brute at Production). Can't
+  be validated from the Windows dev box (no SQL Server).
+
 ## [0.100.17] - 2026-10-29
 
 **v0.100.17 Kali sweep outcomes: promoted `--ics-scan` and `--apk-scan` to

@@ -20,7 +20,7 @@ real target → tell me and I flip the tier. Record outcomes in `LAB_VALIDATION.
 
 | # | Feature | Ran | RustyMap | Reference | Verdict |
 |---|---------|-----|----------|-----------|---------|
-| 1 | `--brute-protocol mssql` | ✅ | MISS on correct + wrong cred (cleartext LOGIN7) | hydra HIT `sa:Str0ng!Pass` | **Stay Alpha** — needs TDS-over-TLS login for SQL Server 2022 |
+| 1 | `--brute-protocol mssql` | 🔁 re-test | MISS (cleartext LOGIN7) → **TDS-over-TLS login added v0.100.18** | hydra HIT `sa:Str0ng!Pass` | RE-TEST — TLS login implemented; HIT=hydra → promote (8th brute). `RUSTYMAP_MSSQL_DEBUG=1` if it still misses |
 | 2 | `--brute-protocol rdp` | ⊘ skip | — | — | No RDP target (port filtered on Win host) |
 | 3 | `--apk-scan` | ✅ | 5 dangerous perms, debuggable, allowBackup, exported, AdMob/Analytics, **0 FP** | InsecureBankv2 known issues — all match | **→ PRODUCTION (v0.100.17)** |
 | 4 | `--ipa-scan` | ✅ | ATS disabled, URL schemes, bundle metadata | synthetic IPA (known-insecure plist) | PASS (limited) — stay Alpha (no mach-O/entitlements) |
@@ -47,10 +47,11 @@ docker run -e 'ACCEPT_EULA=Y' -e 'MSSQL_SA_PASSWORD=Str0ng!Pass' -p 1433:1433 -d
 $RM --brute-protocol mssql --brute-target 127.0.0.1:1433 --brute-pair 'sa:Str0ng!Pass' --experimental-confirm --brute-confirm-authorized
 hydra -l sa -p 'Str0ng!Pass' mssql://127.0.0.1    # reference
 ```
-**Known gap:** the adapter sends a cleartext LOGIN7; SQL Server 2016+ TLS-encrypts
-the login packet. If RM fails to authenticate the *correct* cred → that confirms a
-TDS-over-TLS login gap → tell me, I'll implement TLS login. If it HITs and matches
-hydra → promote (8th brute).
+**Status (v0.100.18):** the TDS-over-TLS login is now **implemented** — the v0.100.17
+cleartext MISS confirmed the gap. PRELOGIN advertises `ENCRYPTION=OFF`; the TLS
+handshake is tunneled in TDS `0x12` packets; LOGIN7 goes as TLS application data.
+Re-run the two commands above: HIT = hydra → promote (8th brute). If it still
+misses, run with `RUSTYMAP_MSSQL_DEBUG=1` and paste the trace.
 
 ## 2. 🟡 `--brute-protocol rdp` — RDP cred brute
 ```sh

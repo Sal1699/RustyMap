@@ -77,8 +77,10 @@ docker run -e 'ACCEPT_EULA=Y' -e 'MSSQL_SA_PASSWORD=Str0ng!Pass' -p 1433:1433 -d
 $RM --brute-protocol mssql --brute-target 127.0.0.1:1433 --brute-pair 'sa:Str0ng!Pass' --experimental-confirm --brute-confirm-authorized
 hydra -l sa -p 'Str0ng!Pass' mssql://127.0.0.1
 ```
-**Pass → promote:** HIT = hydra. If it MISSES the correct cred → confirms the
-cleartext-LOGIN7-vs-TLS gap; tell me and I implement TDS-over-TLS login.
+**Pass → promote:** HIT = hydra. **v0.100.18 implemented the TDS-over-TLS login**
+(the v0.100.17 MISS confirmed the gap), so re-run this: HIT = hydra → promote
+(8th brute at Production). If it still misses, set `RUSTYMAP_MSSQL_DEBUG=1` and
+paste the trace (encryption byte + login-response head).
 
 ### B2 🟡 `--ics-scan` — Modbus/S7/DNP3/EnIP/BACnet
 ```sh
@@ -164,7 +166,7 @@ fingerprint correctly. Stays Alpha by design (privacy-sensitive output).
 | Item | Ran? | RustyMap | Reference | Verdict |
 |------|------|----------|-----------|---------|
 | A1 ICMP back-off | ✅ | 15 `[raw-icmp]` lines, cwnd 62→32→16 | tcpdump type-3 | **PASS** — NEEDS-KALI #4 closed |
-| B1 mssql | ✅ | MISS (cleartext LOGIN7) | hydra HIT | Stay Alpha — needs TDS-over-TLS |
+| B1 mssql | 🔁 | MISS → TDS-over-TLS added v0.100.18 | hydra HIT | RE-TEST — TLS login implemented, re-run to confirm |
 | B2 ics | ✅ | Modbus+S7 raw bytes | nmap scripts ERROR | **PROMOTED → Production** (v0.100.17) |
 | B3 os-fp-v6 | ✅ | "legacy/embedded 70%" | nmap: no match | Stay Alpha — thin v6 DB |
 | B4 apk | ✅ | 5 perms, debuggable, 0 FP | InsecureBankv2 known | **PROMOTED → Production** (v0.100.17) |
