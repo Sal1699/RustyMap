@@ -4,6 +4,37 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.101.1] - 2026-10-31
+
+**Fixes the mssql LOGIN7 packet so the brute can finally authenticate against SQL
+Server.** A Kali re-test (hydra HIT, RustyMap MISS, `connection error`) traced it
+to a malformed LOGIN7 header. 684/684 tests. (Stays Alpha pending the Kali HIT it
+unblocks.)
+
+### Fixed
+- **MSSQL brute: the LOGIN7 fixed header was 86 bytes, not the 94 required by
+  [MS-TDS] §2.2.6.4.** It omitted the trailing `ibChangePassword` /
+  `cchChangePassword` / `cbSSPILong` fields (8 bytes), so every variable-string
+  offset (hostname, username, password, …) was 8 bytes short — SQL Server 2022
+  parsed a malformed LOGIN7 and silently dropped the connection after our packet.
+  The v0.101.0 debug trace showed exactly this: PRELOGIN `0x01`, TLS handshake
+  complete, LOGIN7 sent, then no reply. This pre-dated the TLS work (the header
+  was wrong since the original v0.65 adapter); v0.100.19's `ENCRYPT_ON` +
+  defensive-read fixes were necessary but not sufficient. The fixed header is now
+  94 bytes with the trailing fields zeroed. New test `login7_fixed_header_is_94_bytes`
+  asserts `ibHostName == 94`. (`brute_mssql.rs`.)
+- **`read_login_response` could drop a TLS record split across TCP segments.**
+  After feeding socket bytes to rustls it called `pending.clear()`, discarding any
+  bytes `read_tls` had not consumed (a partial record). It now drains only the
+  consumed prefix and keeps the tail for the next read. Latent — login replies are
+  usually a single segment — but a real correctness bug.
+
+### Note
+- mssql **stays Alpha** until the Kali re-test confirms a HIT vs `hydra mssql://`
+  on a real SQL Server 2022. Not testable from the Windows dev box (no SQL
+  Server). HIT = hydra → promote (8th brute at Production). Credit: the detailed
+  Kali RCA that pinned the exact byte offset.
+
 ## [0.101.0] - 2026-10-30
 
 **`--owasp-scan` gains a command-injection probe and now actually reports findings

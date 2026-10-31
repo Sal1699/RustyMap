@@ -160,26 +160,8 @@ pub fn build_login7(user: &str, password: &str, database: &str) -> Vec<u8> {
     let lang_u: Vec<u8> = Vec::new();
     let db_u: Vec<u8> = database.encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
 
-    // Fixed-length header is 36 bytes (Length thru ClientPID) +
-    // 8 offset/length pairs of 4 bytes each = 36 + 8*4 = 68 bytes
-    // header + ClientID(6) + offset/length tables for the variable
-    // strings = larger.
-    //
-    // We use the canonical layout: 86-byte fixed prefix, then the
-    // string offset table (each entry 2-byte offset + 2-byte length,
-    // 10 entries = 40 bytes), then ClientID(6), then SSPI offset(4),
-    // then variable strings.
-    //
-    // For simplicity (and matching the impacket reference) we lay out:
-    //   fixed (94 bytes): Length, TDSVersion, PacketSize, Version,
-    //                     ClientPID, ConnectionID, OptionFlags1-3,
-    //                     TypeFlags, ClientTimeZone, ClientLCID,
-    //                     offset table (10 entries of 4 bytes),
-    //                     ClientID(6 bytes), SSPI offset(4),
-    //                     SSPI length(2) — actually MS-TDS specifies
-    //                     fixed = 86 bytes.
-    //
-    // We follow [MS-TDS] §2.2.6.3 LOGIN7. Hand-construct with care.
+    // Assemble the 94-byte fixed header, then the variable string block.
+    // (Byte map below.) We follow [MS-TDS] §2.2.6.4 LOGIN7.
 
     let strings: [&[u8]; 9] = [
         &host_u,      // ibHostName
@@ -193,39 +175,24 @@ pub fn build_login7(user: &str, password: &str, database: &str) -> Vec<u8> {
         &db_u,        // ibDatabase
     ];
 
-    let header_size: usize = 4 + 4 + 4 + 4 + 4 + 4 + 1 + 1 + 1 + 1 + 4 + 4 + 4
-                            + 9 * 4   // 9 (offset/length) pairs
-                            + 6       // ClientID
-                            + 4       // SSPI offset/length (LE 4 bytes)
-                            + 4       // ibAtchDBFile + cchAtchDBFile
-                            + 4       // ibChangePassword + cchChangePassword
-                            + 4;      // cbSSPILong
-    // wait — the canonical layout is more delicate. Let me follow the
-    // approach impacket uses: build with fixed-offset layout.
-
-    // Reference layout from MS-TDS LOGIN7 §2.2.6.3 (we omit the ChangePassword
-    // and SSPI long fields beyond their 4-byte zeros):
-    //   bytes 0-3:   Length (back-patched)
-    //   4-7:         TDSVersion = 0x74000004 (TDS 7.4)
-    //   8-11:        PacketSize = 4096
-    //   12-15:       ClientProgVer = 0x07000000
-    //   16-19:       ClientPID
-    //   20-23:       ConnectionID = 0
-    //   24:          OptionFlags1 = 0xE0 (default DB / language / charset / FloatType / DumpLoad)
-    //   25:          OptionFlags2 = 0x03 (Init lang fatal, ODBC on)
-    //   26:          TypeFlags = 0x00
-    //   27:          OptionFlags3 = 0x00
-    //   28-31:       ClientTimeZone = 0
-    //   32-35:       ClientLCID = 0
-    //   36-85:       OffsetTable: 9 string entries × 4 bytes + 14 bytes
-    //                            (ClientID 6 + SSPIoff/len 4 + AtchDB off/len 4)
-    //   86…:         variable strings
+    // Fixed header byte map ([MS-TDS] §2.2.6.4) — 94 bytes:
+    //   0-3   Length (back-patched)        32-35 ClientLCID = 0
+    //   4-7   TDSVersion = 0x74000004       36-71 9 string offset/length pairs
+    //   8-11  PacketSize = 4096             72-77 ClientID (6)
+    //   12-15 ClientProgVer = 0x07000000    78-81 ibSSPI / cbSSPI
+    //   16-19 ClientPID                     82-85 ibAtchDBFile / cchAtchDBFile
+    //   20-23 ConnectionID = 0              86-89 ibChangePassword / cchChangePassword
+    //   24-27 OptionFlags1=0xE0 2=0x03      90-93 cbSSPILong (DWORD)
+    //         TypeFlags=0 OptionFlags3=0    94…   variable strings
+    //   28-31 ClientTimeZone = 0
     //
-    // Total fixed header = 86 bytes.
-    let _ = header_size;
+    // Before v0.101.1 this was built as 86 bytes — the trailing
+    // ibChangePassword/cchChangePassword/cbSSPILong (8 bytes) were missing,
+    // so every string offset was short by 8 and SQL Server 2022 read a
+    // malformed LOGIN7 and silently dropped the connection.
 
-    let fixed_size: u16 = 86;
-    let mut header = Vec::with_capacity(86);
+    let fixed_size: u16 = 94;
+    let mut header = Vec::with_capacity(94);
     header.extend_from_slice(&[0u8; 4]); // Length placeholder
     header.extend_from_slice(&0x74000004u32.to_le_bytes()); // TDSVersion 7.4
     header.extend_from_slice(&4096u32.to_le_bytes());       // PacketSize
@@ -262,6 +229,11 @@ pub fn build_login7(user: &str, password: &str, database: &str) -> Vec<u8> {
     // ibAtchDBFile / cchAtchDBFile
     header.extend_from_slice(&cursor.to_le_bytes());
     header.extend_from_slice(&0u16.to_le_bytes());
+    // ibChangePassword / cchChangePassword (TDS 7.2+): no password change.
+    header.extend_from_slice(&cursor.to_le_bytes());
+    header.extend_from_slice(&0u16.to_le_bytes());
+    // cbSSPILong (DWORD): length of a long SSPI blob; unused here.
+    header.extend_from_slice(&0u32.to_le_bytes());
     assert_eq!(header.len(), fixed_size as usize);
 
     // Concatenate header + variable data
@@ -494,7 +466,11 @@ async fn read_login_response(
                 }
                 conn.process_new_packets().map_err(|e| anyhow!("tls: {}", e))?;
             }
-            pending.clear();
+            // Keep any bytes read_tls did not consume (a TLS record split
+            // across TCP segments): the next socket read appends its tail.
+            let consumed = cur.position() as usize;
+            drop(cur);
+            pending.drain(..consumed);
         }
         // Drain whatever plaintext rustls now holds.
         loop {
@@ -635,6 +611,20 @@ mod tests {
         // TDS version 0x74000004 at offset 8+4 (after 8-byte header + Length)
         let tds_ver = u32::from_le_bytes([p[12], p[13], p[14], p[15]]);
         assert_eq!(tds_ver, 0x74000004);
+    }
+
+    #[test]
+    fn login7_fixed_header_is_94_bytes() {
+        // [MS-TDS] §2.2.6.4: the LOGIN7 fixed header is 94 bytes (prefix + the
+        // full OffsetLength block incl. ibChangePassword/cchChangePassword and
+        // cbSSPILong), so the first variable string (ibHostName) points at
+        // offset 94. This was 86 before v0.101.1 — SQL Server read a malformed
+        // LOGIN7 and dropped the connection without replying.
+        let p = build_login7("u", "p", "db");
+        // 8-byte TDS packet header, then the 36-byte fixed prefix, then
+        // ibHostName (first OffsetLength entry, u16 LE).
+        let ib_hostname = u16::from_le_bytes([p[8 + 36], p[8 + 37]]);
+        assert_eq!(ib_hostname, 94);
     }
 
     #[test]

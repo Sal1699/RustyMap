@@ -12,10 +12,12 @@ Companions: `KALI_ALPHA_SWEEP.md` (per-Alpha recipes + sweep results),
 
 ## Progress since v0.100.18 (2026-10-30 Kali report)
 
-- **1A mssql** re-test: TLS handshake completed but the LOGIN7 reply failed
-  ("connection error"). Root cause: `ENCRYPTION=OFF` negotiates *login-only*
-  encryption, so the reply came back in cleartext and the TLS read rejected it.
-  **Fixed in v0.100.19** (advertise `ENCRYPTION=ON` + defensive reply read).
+- **1A mssql**: v0.100.18 re-test → handshake OK but the LOGIN7 reply failed
+  (login-only encryption → cleartext reply), **fixed v0.100.19** (`ENCRYPTION=ON`
+  + defensive read). v0.101.0 re-test → handshake + LOGIN7 sent but the server
+  dropped with no reply; root cause was a **malformed LOGIN7 header (86 bytes vs
+  the 94 MS-TDS §2.2.6.4 requires** — missing ibChangePassword/cchChangePassword/
+  cbSSPILong), **fixed v0.101.1**. Now spec-conformant → the re-test should HIT.
 - **1B owasp auth fix** CONFIRMED (cookie reaches crawler + probes, 24pg/35ep).
 - **3A owasp** (CMDi probe + GET form-params fix + 9 SQL fingerprints + SSRF FP
   trim) **shipped in v0.101.0** — your R&D showed 6 findings / 0 FP on DVWA.
@@ -37,10 +39,10 @@ Companions: `KALI_ALPHA_SWEEP.md` (per-Alpha recipes + sweep results),
 ## Prep (every session)
 
 ```sh
-cd ~/RustyMap && git fetch origin --tags && git pull origin main   # expect v0.101.0
+cd ~/RustyMap && git fetch origin --tags && git pull origin main   # expect v0.101.1
 cargo build --release ; RM=./target/release/rustymap
-$RM --version                     # rustymap 0.101.0
-cargo test 2>&1 | tail -1         # 683 passed (684 on Linux — one extra platform test)
+$RM --version                     # rustymap 0.101.1
+cargo test 2>&1 | tail -1         # 684 passed (685 on Linux — one extra platform test)
 ```
 Raw scans / `--fast-engine` / `-O` / `--sI` / `--os-fp-v6` need `sudo`.
 **All Alpha features need `--experimental-confirm`.** Record a dated row in
@@ -156,7 +158,7 @@ that row.
 
 | Item | Status | Next action |
 |------|--------|-------------|
-| 1A mssql TDS-over-TLS | bug found v0.100.18, **fixed v0.100.19** | re-test vs hydra → promote (8th brute) |
+| 1A mssql TDS-over-TLS | LOGIN7 header bug **fixed v0.101.1** (after v0.100.19) | re-test vs hydra → promote (8th brute) |
 | 1B owasp-scan auth fix | **confirmed** (24pg/35ep) | folded into 3A |
 | 2A rdp | Alpha — **SKIP** (xrdp ≠ CredSSP) | needs a real Windows RDP host |
 | 2B sI | Alpha — **9/9 vs nmap** on a zombie | promote on your OK ("più target"?) |
