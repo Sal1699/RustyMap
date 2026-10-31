@@ -83,6 +83,8 @@ const REGISTRY: &[Feature] = &[
         note: "LDAP simple-bind brute (v0.64). Lab v0.100.3 agrees with hydra ldap3:// on osixia/openldap: correct bind on cn=admin,dc=example,dc=org and correct rejection of a wrong password. SASL/GSSAPI still not supported — simple bind only." },
     Feature { key: "--brute-protocol vnc", tier: Tier::Production,
         note: "RFB 3.x DES challenge-response (v0.64). The v0.100.4 RFB 3.3 handshake fix was confirmed on Kali v0.100.5: agrees with hydra on Metasploitable 2 VNC (RFB 3.3, password 'password'). RFB 4+ and Apple Remote Desktop variants still not covered." },
+    Feature { key: "--brute-protocol mssql", tier: Tier::Production,
+        note: "MSSQL TDS 7.4 SQL Server Auth (v0.65). Lab-validated vs hydra on a SQL Server 2022 container (v0.101.1): HIT on sa:Str0ng!Pass = hydra, wrong password rejected. The path took three releases — the TDS-over-TLS login (v0.100.18: TLS handshake tunneled in TDS 0x12 packets, LOGIN7 as TLS application data), whole-session ENCRYPTION=ON + a defensive reply read (v0.100.19), and the LOGIN7 fixed-header fix (v0.101.1: 86→94 bytes; ibChangePassword/cchChangePassword/cbSSPILong were missing, shifting every variable-string offset so the server dropped the packet). SQL Server Authentication only — Windows/SSPI (NTLM/Kerberos) SSO out of scope." },
 
     // ── Promoted from Alpha after the v0.100.17 Kali sweep (real-target
     // agreement with — or outperformance of — the reference tool) ──
@@ -94,8 +96,6 @@ const REGISTRY: &[Feature] = &[
     // ── Alpha — known limits or freshly landed; --experimental-confirm gate ──
     Feature { key: "--brute-protocol rdp", tier: Tier::Alpha,
         note: "RDP CredSSP best-effort (v0.65): pubKeyAuth NOT implemented (would need RC4 of TLS SPKI under NTLM session key). Negative results (specific NTSTATUS error codes) are reliable; positive results are SUGGESTIVE, not authoritative. Validate against a real Windows RDP server before reporting findings." },
-    Feature { key: "--brute-protocol mssql", tier: Tier::Alpha,
-        note: "MSSQL TDS 7.4 SQL Server Auth (v0.65). v0.100.18 added the TDS-over-TLS login path (TLS handshake tunneled inside TDS 0x12 packets, then LOGIN7 sent as TLS application data) so it works against modern SQL Server 2016+/2022 — which always encrypt the login; the v0.100.17 Kali MISS on a cleartext login confirmed that gap. Legacy NOT_SUP servers still use the cleartext path. Awaiting a Kali re-test vs hydra on a real SQL Server before promotion." },
     Feature { key: "--ipa-scan", tier: Tier::Alpha,
         note: "iOS IPA static analysis via plist. Only Info.plist inspected; mach-O entitlements / embedded provisioning profiles not parsed." },
     Feature { key: "--threat-intel-misp", tier: Tier::Alpha,

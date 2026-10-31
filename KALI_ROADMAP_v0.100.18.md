@@ -17,7 +17,8 @@ Companions: `KALI_ALPHA_SWEEP.md` (per-Alpha recipes + sweep results),
   + defensive read). v0.101.0 re-test → handshake + LOGIN7 sent but the server
   dropped with no reply; root cause was a **malformed LOGIN7 header (86 bytes vs
   the 94 MS-TDS §2.2.6.4 requires** — missing ibChangePassword/cchChangePassword/
-  cbSSPILong), **fixed v0.101.1**. Now spec-conformant → the re-test should HIT.
+  cbSSPILong), **fixed v0.101.1**. v0.101.1 re-test → **HIT `sa:Str0ng!Pass` =
+  hydra, wrong rejected → PROMOTED to Production v0.101.2 (8th brute).** ✅
 - **1B owasp auth fix** CONFIRMED (cookie reaches crawler + probes, 24pg/35ep).
 - **3A owasp** (CMDi probe + GET form-params fix + 9 SQL fingerprints + SSRF FP
   trim) **shipped in v0.101.0** — your R&D showed 6 findings / 0 FP on DVWA.
@@ -26,22 +27,22 @@ Companions: `KALI_ALPHA_SWEEP.md` (per-Alpha recipes + sweep results),
 - **2A rdp** SKIP (xrdp ≠ Windows CredSSP/NLA — needs a real Windows host);
   **2C misp** SKIP (no instance). **3B/3C** still to implement (you reverted them).
 
-## Where we are (v0.101.0)
+## Where we are (v0.101.2)
 
 - **Production:** all scan types; `-O` / `--sV` / `--tls-grade` / `--cve-for` /
-  `--ssh-audit` / `--smb-audit` detection; **7/7 network brute**
-  (ftp/ssh/smb/mysql/postgres/ldap/vnc); **`--ics-scan`**, **`--apk-scan`**.
+  `--ssh-audit` / `--smb-audit` detection; **8 network brute at Production**
+  (ftp/ssh/smb/mysql/postgres/ldap/vnc/mssql); **`--ics-scan`**, **`--apk-scan`**.
 - **0 Beta.**
-- **9 Alpha:** brute `rdp`, brute `mssql`, `--ipa-scan`, `--owasp-scan`,
-  `--web-crawl`, `--os-fp-v6`, `--sI`, `--threat-intel-misp`, `--osdb-submit`.
-- **679/679 tests.**
+- **8 Alpha:** brute `rdp`, `--ipa-scan`, `--owasp-scan`, `--web-crawl`,
+  `--os-fp-v6`, `--sI`, `--threat-intel-misp`, `--osdb-submit`.
+- **684/684 tests** (685 on Linux).
 
 ## Prep (every session)
 
 ```sh
-cd ~/RustyMap && git fetch origin --tags && git pull origin main   # expect v0.101.1
+cd ~/RustyMap && git fetch origin --tags && git pull origin main   # expect v0.101.2
 cargo build --release ; RM=./target/release/rustymap
-$RM --version                     # rustymap 0.101.1
+$RM --version                     # rustymap 0.101.2
 cargo test 2>&1 | tail -1         # 684 passed (685 on Linux — one extra platform test)
 ```
 Raw scans / `--fast-engine` / `-O` / `--sI` / `--os-fp-v6` need `sudo`.
@@ -158,7 +159,7 @@ that row.
 
 | Item | Status | Next action |
 |------|--------|-------------|
-| 1A mssql TDS-over-TLS | LOGIN7 header bug **fixed v0.101.1** (after v0.100.19) | re-test vs hydra → promote (8th brute) |
+| 1A mssql TDS-over-TLS | ✅ **Production v0.101.2** (HIT=hydra) | done — 8th network brute |
 | 1B owasp-scan auth fix | **confirmed** (24pg/35ep) | folded into 3A |
 | 2A rdp | Alpha — **SKIP** (xrdp ≠ CredSSP) | needs a real Windows RDP host |
 | 2B sI | Alpha — **9/9 vs nmap** on a zombie | promote on your OK ("più target"?) |

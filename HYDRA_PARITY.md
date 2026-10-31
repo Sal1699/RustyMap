@@ -36,7 +36,7 @@ clean exit, (4) RustyMap's rate-limit is honored (watch timing).
 | 8 | PostgreSQL | `postgres` | `hydra -L users.txt -P pass.txt postgres://$TARGET` |
 | 9 | LDAP | `ldap` | `hydra -L users.txt -P pass.txt ldap2://$TARGET` |
 | 10 | VNC | `vnc` | `hydra -P pass.txt vnc://$TARGET` |
-| 11 | MSSQL | `mssql` (Alpha — needs `--experimental-confirm`) | `hydra -L users.txt -P pass.txt mssql://$TARGET` |
+| 11 | MSSQL | `mssql` | `hydra -L users.txt -P pass.txt mssql://$TARGET` |
 | 12 | RDP | `rdp` (Alpha — needs `--experimental-confirm`) | `hydra -L users.txt -P pass.txt rdp://$TARGET` |
 | 13 | HTTP-basic | `http-basic --brute-http-url http://$TARGET/protected` | `hydra -L users.txt -P pass.txt $TARGET http-get /protected` |
 | 14 | HTTP-form | `http-form --brute-form-spec 'url=http://$TARGET/login,user=username,pass=password,fail=Invalid'` | `hydra -L users.txt -P pass.txt $TARGET http-post-form "/login:username=^USER^&password=^PASS^:Invalid"` |
@@ -52,20 +52,23 @@ clean exit, (4) RustyMap's rate-limit is honored (watch timing).
 | smb | ✅ (v0.100.13) finds `msfadmin:msfadmin` in 6 attempts = crackmapexec + hydra; `root:wrong` rejected (no guest-map FP). Four-bug chain fixed v0.100.10→.13 (UID, ByteCount, CAP_EXTENDED_SECURITY, Type-3 Version length) | **Production** (v0.100.14) |
 | mysql | ✅ (v0.100.5 re-test) empty password `root:` HIT = hydra after the v0.100.4 fix | **Production** (v0.100.5) |
 | vnc | ✅ (v0.100.5 re-test) RFB 3.3 `password` HIT = hydra after the v0.100.4 fix | **Production** (v0.100.5) |
+| mssql | ✅ (v0.101.1) SQL Server 2022 (Docker): HIT `sa:Str0ng!Pass` = hydra, wrong rejected. Needed TDS-over-TLS login + the LOGIN7 94-byte header fix (v0.100.18→.101.1) | **Production** (v0.101.2) |
 
 > ldap note: hydra `ldap2://` reported 0 on this container; `ldap3://` works and
 > RustyMap agrees with it. SSH validated v0.100.8 on a modern OpenSSH (Docker
 > linuxserver/openssh-server :2222, password auth) → Production v0.100.9. Only
 > SMB validated v0.100.13 on Metasploitable 2 Samba 3.0.20: finds
 > msfadmin:msfadmin in 6 attempts = crackmapexec + hydra, root:wrong rejected →
-> Production v0.100.14. All 7 network brute adapters are now Production
-> (ftp/ssh/smb/mysql/postgres/ldap/vnc). Four-bug chain fixed v0.100.10→.13:
+> Production v0.100.14, and mssql joined them at Production in v0.101.2 (SQL
+> Server 2022, HIT = hydra) → 8 network brute adapters now Production
+> (ftp/ssh/smb/mysql/postgres/ldap/vnc/mssql). Four-bug chain fixed v0.100.10→.13:
 > UID correlation, ByteCount, CAP_EXTENDED_SECURITY, Type-3 Version length.
 
 **Notes**
-- MSSQL + RDP are **Alpha** tier (RDP CredSSP pubKeyAuth is best-effort —
-  negative results reliable, positives suggestive). They need
+- RDP is the only brute still **Alpha** (CredSSP pubKeyAuth is best-effort —
+  negative results reliable, positives suggestive). It needs
   `--experimental-confirm`; treat positives as hints and confirm manually.
+  MSSQL was promoted to Production in v0.101.2 (HIT = hydra on SQL Server 2022).
 - SNMP is community-string based: pass the community list via
   `--brute-passlist communities.txt` (no usernames).
 - Expected safe outcome on a hardened/absent service: both tools report 0

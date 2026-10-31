@@ -4,6 +4,26 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.101.2] - 2026-10-31
+
+**`--brute-protocol mssql` promoted Alpha → Production — the 8th network brute.**
+Kali re-test on SQL Server 2022: HIT on `sa:Str0ng!Pass` = hydra, wrong password
+rejected. 684/684 tests.
+
+### Changed
+- **mssql brute promoted to Production.** Validated vs `hydra mssql://` on a SQL
+  Server 2022 container (v0.101.1 binary): the correct credential HIT matched
+  hydra and the wrong credential was rejected (no more "connection error"). The
+  path took three releases — the TDS-over-TLS login (v0.100.18), whole-session
+  `ENCRYPTION=ON` + a defensive reply read (v0.100.19), and the LOGIN7 94-byte
+  header fix (v0.101.1). SQL Server Authentication only; it no longer needs
+  `--experimental-confirm`. (`maturity.rs`.)
+
+### Note
+- **8 network brute protocols now at Production:** ftp / ssh / smb / mysql /
+  postgres / ldap / vnc / mssql. `rdp` is the only brute still Alpha (CredSSP
+  pubKeyAuth unimplemented — needs a real Windows host). **0 Beta, 8 Alpha.**
+
 ## [0.101.1] - 2026-10-31
 
 **Fixes the mssql LOGIN7 packet so the brute can finally authenticate against SQL
