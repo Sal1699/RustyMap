@@ -54,6 +54,8 @@ const REGISTRY: &[Feature] = &[
     Feature { key: "--sU", tier: Tier::Production, note: "UDP scan" },
     Feature { key: "--sn", tier: Tier::Production, note: "Host discovery (ping sweep)" },
     Feature { key: "--Pn", tier: Tier::Production, note: "No host discovery (treat all as up)" },
+    Feature { key: "--sI", tier: Tier::Production,
+        note: "Idle/zombie scan. Lab-validated v0.101.3: all 9 probed port states (open/closed/filtered) matched nmap -sI on a real predictable-IPID zombie. Inherently requires such a zombie — modern OSes randomize IPID — but that is a target prerequisite (nmap -sI needs the same), not a defect." },
 
     // ── Promoted to Production after real-target lab validation (nmap /
     // hydra / crackmapexec / sslscan). Full history in LAB_VALIDATION.md. ──
@@ -102,8 +104,6 @@ const REGISTRY: &[Feature] = &[
         note: "MISP IoC pull + match (`--threat-intel-misp URL --misp-api-key KEY`, flag hits with `--threat-intel-match`). Pull-only, no de-duplication across syncs; rate-limit handling minimal." },
     Feature { key: "--osdb-submit", tier: Tier::Alpha,
         note: "Builds an OS-fingerprint submission pack for HOST:LABEL and writes it to stdout or `--osdb-submit-out FILE` (does NOT auto-submit anywhere). Review the pack before sharing it — it describes your host/network." },
-    Feature { key: "--sI", tier: Tier::Alpha,
-        note: "Idle/zombie scan. Requires a zombie with predictable IPID; modern OSes have randomized IPID and won't work. Complex, low real-world coverage." },
     Feature { key: "--os-fp-v6", tier: Tier::Alpha,
         note: "IPv6 OS fingerprint (`os_fp_v6.rs` / `os_fp_multi.rs`). Less mature than IPv4 path; database coverage thinner." },
     Feature { key: "--owasp-scan", tier: Tier::Alpha,

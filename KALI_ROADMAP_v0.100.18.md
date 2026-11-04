@@ -22,27 +22,28 @@ Companions: `KALI_ALPHA_SWEEP.md` (per-Alpha recipes + sweep results),
 - **1B owasp auth fix** CONFIRMED (cookie reaches crawler + probes, 24pg/35ep).
 - **3A owasp** (CMDi probe + GET form-params fix + 9 SQL fingerprints + SSRF FP
   trim) **shipped in v0.101.0** — your R&D showed 6 findings / 0 FP on DVWA.
-- **2B `--sI`** scored **9/9 vs nmap** on a real zombie — meets the promote bar;
-  promotion pending your OK (you noted "possibile con più target").
+- **2B `--sI`** scored **9/9 vs nmap** on a real zombie → **promoted to Production
+  v0.101.3** (user-authorized 2026-11-04).
 - **2A rdp** SKIP (xrdp ≠ Windows CredSSP/NLA — needs a real Windows host);
   **2C misp** SKIP (no instance). **3B/3C** still to implement (you reverted them).
 
-## Where we are (v0.101.2)
+## Where we are (v0.101.3)
 
 - **Production:** all scan types; `-O` / `--sV` / `--tls-grade` / `--cve-for` /
   `--ssh-audit` / `--smb-audit` detection; **8 network brute at Production**
-  (ftp/ssh/smb/mysql/postgres/ldap/vnc/mssql); **`--ics-scan`**, **`--apk-scan`**.
+  (ftp/ssh/smb/mysql/postgres/ldap/vnc/mssql); **`--ics-scan`**, **`--apk-scan`**,
+  **`--sI`** (idle scan).
 - **0 Beta.**
-- **8 Alpha:** brute `rdp`, `--ipa-scan`, `--owasp-scan`, `--web-crawl`,
-  `--os-fp-v6`, `--sI`, `--threat-intel-misp`, `--osdb-submit`.
+- **7 Alpha:** brute `rdp`, `--ipa-scan`, `--owasp-scan`, `--web-crawl`,
+  `--os-fp-v6`, `--threat-intel-misp`, `--osdb-submit`.
 - **684/684 tests** (685 on Linux).
 
 ## Prep (every session)
 
 ```sh
-cd ~/RustyMap && git fetch origin --tags && git pull origin main   # expect v0.101.2
+cd ~/RustyMap && git fetch origin --tags && git pull origin main   # expect v0.101.3
 cargo build --release ; RM=./target/release/rustymap
-$RM --version                     # rustymap 0.101.2
+$RM --version                     # rustymap 0.101.3
 cargo test 2>&1 | tail -1         # 684 passed (685 on Linux — one extra platform test)
 ```
 Raw scans / `--fast-engine` / `-O` / `--sI` / `--os-fp-v6` need `sudo`.
@@ -162,7 +163,7 @@ that row.
 | 1A mssql TDS-over-TLS | ✅ **Production v0.101.2** (HIT=hydra) | done — 8th network brute |
 | 1B owasp-scan auth fix | **confirmed** (24pg/35ep) | folded into 3A |
 | 2A rdp | Alpha — **SKIP** (xrdp ≠ CredSSP) | needs a real Windows RDP host |
-| 2B sI | Alpha — **9/9 vs nmap** on a zombie | promote on your OK ("più target"?) |
+| 2B sI | ✅ **Production v0.101.3** (9/9 vs nmap) | done — user-authorized |
 | 2C threat-intel-misp | Alpha — SKIP | validate with a lab MISP |
 | 3A owasp CMDi + params | **shipped v0.101.0** | re-run DVWA → confirm 6 findings / 0 FP |
 | 3B os-fp-v6 DB | not started | re-implementing next → v0.102.0 |

@@ -4,6 +4,23 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.101.3] - 2026-11-04
+
+**`--sI` idle/zombie scan promoted Alpha → Production.** Kali lab: all 9 probed
+port states matched `nmap -sI` on a real predictable-IPID zombie. 684/684 tests.
+
+### Changed
+- **`--sI` (idle scan) promoted to Production.** Validated vs `nmap -sI` on a
+  predictable-IPID zombie: open/closed/filtered states agreed 9/9. It still needs
+  such a zombie (modern OSes randomize IPID), but that is an inherent prerequisite
+  of idle scanning — `nmap -sI` requires the same — not a defect. No longer needs
+  `--experimental-confirm`. (`maturity.rs`.)
+
+### Note
+- Non-Production now: **0 Beta, 7 Alpha** (brute `rdp`, `--ipa-scan`,
+  `--owasp-scan`, `--web-crawl`, `--os-fp-v6`, `--threat-intel-misp`,
+  `--osdb-submit`).
+
 ## [0.101.2] - 2026-10-31
 
 **`--brute-protocol mssql` promoted Alpha → Production — the 8th network brute.**
