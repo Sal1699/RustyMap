@@ -4,6 +4,26 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.101.5] - 2026-11-10
+
+**Fixes invalid `--oX` XML when a service banner carries raw control bytes** (bug
+N5 — the only output-format FAIL in the v0.101.3 report). 689/689 tests.
+
+### Fixed
+- **`--oX` produced unparseable XML for binary service banners (bug N5).** A MySQL
+  (or other binary-protocol) banner can carry raw C0 control bytes (NUL, etc.). The
+  escaper handled the markup specials (`< > & " '`) but passed control bytes
+  through, and those are illegal in XML 1.0 even as numeric references, so the
+  document failed to parse. `escape()` now drops C0 control characters (except
+  tab/newline/CR) before escaping. (`xml_out.rs`.)
+
+### Note
+- Still open from the report: **1.A** UDP `open` vs `open|filtered` (ALTA — needs
+  protocol-specific payloads + a UDP-response listener; coming next as a MINOR
+  release), **5.D** vuln-ssl-ccs label on a TLS port, **N2** `--osdb-submit` pack,
+  and **N6** `--ssh-audit` probing only `:22` (INFO). 0.B / N1 / N3 were already
+  fixed in v0.101.4 — re-test to confirm.
+
 ## [0.101.4] - 2026-11-10
 
 **Three bug fixes from the v0.101.3 Kali regression report:** 0.B (NXDOMAIN →

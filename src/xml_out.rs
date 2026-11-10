@@ -11,7 +11,14 @@ use anyhow::Result;
 use std::fmt::Write;
 
 fn escape(s: &str) -> String {
-    s.replace('&', "&amp;")
+    // Drop C0 control bytes (except tab/newline/CR) first: they are illegal in
+    // XML 1.0 even as numeric references, and service banners captured from
+    // binary protocols like MySQL carry them verbatim, making the whole
+    // document unparseable (lab bug N5). Then escape the markup specials.
+    s.chars()
+        .filter(|&c| c == '\t' || c == '\n' || c == '\r' || c >= ' ')
+        .collect::<String>()
+        .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
@@ -40,6 +47,21 @@ mod tests {
     fn escape_is_identity_for_plain_text() {
         assert_eq!(escape("hello world"), "hello world");
         assert_eq!(escape("OpenSSH 7.4"), "OpenSSH 7.4");
+    }
+
+    #[test]
+    fn escape_strips_illegal_xml_control_chars() {
+        // A MySQL-style banner with raw control bytes (NUL, 0x05, 0x01) must not
+        // land in the XML verbatim (lab bug N5): illegal in XML 1.0.
+        let banner = "5.0.51a\u{0}\u{5}mysql_native_password\u{1}";
+        let out = escape(banner);
+        assert!(!out.contains('\u{0}'));
+        assert!(!out.contains('\u{5}'));
+        assert!(!out.contains('\u{1}'));
+        assert!(out.contains("5.0.51a"));
+        assert!(out.contains("mysql_native_password"));
+        // Tab / newline / CR are legal XML 1.0 whitespace and are preserved.
+        assert_eq!(escape("a\tb\nc\rd"), "a\tb\nc\rd");
     }
 }
 
