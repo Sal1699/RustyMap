@@ -4,6 +4,37 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.101.4] - 2026-11-10
+
+**Three bug fixes from the v0.101.3 Kali regression report:** 0.B (NXDOMAIN →
+loopback scanned silently), N1 (crawler follows logout), N3/4.C (http-methods
+flags a redirect as accepted). 688/688 tests.
+
+### Fixed
+- **A named host that resolved to loopback was scanned silently (bug 0.B, HIGH).**
+  A nonexistent domain served by a catch-all resolver (e.g. dnsmasq
+  `address=/#/127.0.0.1`) comes back as 127.0.0.1, and RustyMap scanned localhost
+  with no notice. It now prints a prominent warning whenever a hostname resolves to
+  a loopback address, exempting explicit `localhost`-family targets. (A genuine
+  NXDOMAIN already errors out; this covers catch-all / typo resolutions that return
+  an address.) (`target.rs`.)
+- **The web crawler followed `/logout` links and killed its own session (bug N1).**
+  During the BFS it visited logout/signout/disconnect URLs, so every endpoint found
+  afterwards — and every `--owasp-scan` probe — ran logged-out (0 findings unless
+  you narrowed the seed + depth by hand). The crawler now skips session-destroying
+  links. Improves both `--web-crawl` and `--owasp-scan`. (`web_crawl.rs`.)
+- **`--http-methods` flagged a 3xx redirect as "ACCEPTED" (bug N3/4.C).** A PUT or
+  DELETE that answered 301 was reported ACCEPTED/critical. Probe responses are now
+  classified by status class: 2xx = Accepted, **3xx = Redirect** (not acceptance),
+  4xx/5xx = Refused; a method advertised in the `Allow` header still shows Listed.
+  A redirect no longer carries the method's severity. Also stopped sending each
+  probe twice. (`http_methods.rs`.)
+
+### Note
+- Still open from the report (next batch): **1.A** UDP `open` vs `open|filtered`
+  (needs protocol-specific payloads), **5.D** vuln-ssl-ccs "port not TLS" label on a
+  TLS port, **N2** `--osdb-submit` pack not integrating `-O` / `-sV` results.
+
 ## [0.101.3] - 2026-11-04
 
 **`--sI` idle/zombie scan promoted Alpha → Production.** Kali lab: all 9 probed

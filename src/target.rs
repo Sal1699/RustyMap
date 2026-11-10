@@ -210,6 +210,7 @@ async fn expand_one(
         })?;
         let mut any = false;
         for ip in lookup.iter() {
+            warn_if_loopback_resolution(spec, ip);
             out.push(Target {
                 ip,
                 hostname: Some(spec.to_string()),
@@ -232,6 +233,7 @@ async fn expand_one(
         Ok(addrs) => {
             let mut any = false;
             for sa in addrs {
+                warn_if_loopback_resolution(spec, sa.ip());
                 out.push(Target {
                     ip: sa.ip(),
                     hostname: Some(spec.to_string()),
@@ -250,6 +252,36 @@ async fn expand_one(
             spec,
             e
         )),
+    }
+}
+
+/// True when a *named host* resolved to a loopback address with no explicit
+/// reason to — almost always a DNS catch-all (e.g. dnsmasq `address=/#/127.0.0.1`),
+/// a captive portal, or a typo, rather than a host anyone meant to scan. An
+/// explicit `localhost`-family target is exempt. (Lab bug 0.B.)
+fn is_loopback_surprise(spec: &str, ip: IpAddr) -> bool {
+    if !ip.is_loopback() {
+        return false;
+    }
+    let s = spec.trim().trim_end_matches('.').to_ascii_lowercase();
+    let intentional = matches!(
+        s.as_str(),
+        "localhost" | "localhost.localdomain" | "ip6-localhost" | "ip6-loopback"
+    ) || s.ends_with(".localhost");
+    !intentional
+}
+
+/// Scanning localhost by accident should never be silent: warn loudly when a
+/// named host resolves to loopback (lab bug 0.B — a nonexistent domain came
+/// back as 127.0.0.1 via a catch-all resolver and was scanned with no notice).
+fn warn_if_loopback_resolution(spec: &str, ip: IpAddr) {
+    if is_loopback_surprise(spec, ip) {
+        eprintln!(
+            "\u{26a0} warning: '{}' resolved to loopback {} — likely a DNS catch-all \
+             or a typo, not a real target. RustyMap is about to scan localhost; pass \
+             the intended IP explicitly if that is not what you want.",
+            spec, ip
+        );
     }
 }
 
@@ -312,6 +344,21 @@ mod tests {
     #[test]
     fn iface_to_scope_id_returns_zero_for_unknown() {
         assert_eq!(iface_to_scope_id("definitely-not-a-real-iface-xyz"), 0);
+    }
+
+    #[test]
+    fn loopback_resolution_surprise_flagged_except_localhost() {
+        let lo: IpAddr = "127.0.0.1".parse().unwrap();
+        // A named host that lands on loopback (DNS catch-all / typo) → warn.
+        assert!(is_loopback_surprise("questo.dominio.non.esiste.xyz", lo));
+        assert!(is_loopback_surprise("typo.internal", "::1".parse().unwrap()));
+        // Explicit localhost-family targets are intentional → no warning.
+        assert!(!is_loopback_surprise("localhost", lo));
+        assert!(!is_loopback_surprise("LOCALHOST.", lo));
+        assert!(!is_loopback_surprise("foo.localhost", lo));
+        assert!(!is_loopback_surprise("ip6-localhost", "::1".parse().unwrap()));
+        // A non-loopback resolution is never a surprise.
+        assert!(!is_loopback_surprise("example.com", "93.184.216.34".parse().unwrap()));
     }
 
     #[test]

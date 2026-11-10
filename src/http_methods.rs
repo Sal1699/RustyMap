@@ -31,8 +31,9 @@ pub struct MethodResult {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AllowedKind {
     Listed,    // appeared in Allow header
-    Accepted,  // server returned 2xx/3xx on probe
-    Refused,   // 401 / 403 / 405 / 501
+    Accepted,  // server returned 2xx on probe
+    Redirect,  // server returned 3xx — a redirect is NOT method acceptance
+    Refused,   // 4xx / 5xx on probe
     Unknown,
 }
 
@@ -86,33 +87,14 @@ pub async fn enumerate(url: &str, dur: Duration) -> Result<MethodsFinding> {
         std::process::id()
     );
     for &m in DANGEROUS {
-        let allowed = match send_probe(&client, m, &probe_path).await {
-            Ok((status, _)) if (200..400).contains(&status) => AllowedKind::Accepted,
-            Ok((status, _)) if matches!(status, 401 | 403 | 405 | 501) => AllowedKind::Refused,
-            Ok(_) => {
-                // Other status (404 etc.): inconclusive. Fall back to
-                // listed/unknown based on Allow.
-                if listed.contains(m) {
-                    AllowedKind::Listed
-                } else {
-                    AllowedKind::Unknown
-                }
-            }
-            Err(_) => AllowedKind::Unknown,
-        };
-        // Always include the listed-by-OPTIONS signal even when probe failed
-        let allowed = if matches!(allowed, AllowedKind::Unknown) && listed.contains(m) {
-            AllowedKind::Listed
-        } else {
-            allowed
-        };
-        let status = send_probe(&client, m, &probe_path)
-            .await
-            .map(|(s, _)| s)
-            .unwrap_or(0);
+        // One probe per method (the old code sent two — wasteful + double
+        // side effect). Classify from the single response.
+        let probe = send_probe(&client, m, &probe_path).await;
+        let status = probe.as_ref().ok().map(|(s, _)| *s);
+        let allowed = classify(status, listed.contains(m));
         finding.results.push(MethodResult {
             method: m.to_string(),
-            status,
+            status: status.unwrap_or(0),
             allowed,
         });
     }
@@ -131,6 +113,20 @@ async fn send_probe(
     Ok((status, body))
 }
 
+/// Classify a dangerous-method probe. A 2xx is real acceptance; a method
+/// advertised in the `Allow` header is a genuine signal even when the probe to
+/// a non-existent path is inconclusive; a 3xx is a redirect, NOT acceptance
+/// (lab bug N3/4.C flagged a 301 on PUT as critical); 4xx/5xx is a refusal.
+fn classify(status: Option<u16>, listed: bool) -> AllowedKind {
+    match status {
+        Some(s) if (200..300).contains(&s) => AllowedKind::Accepted,
+        _ if listed => AllowedKind::Listed,
+        Some(s) if (300..400).contains(&s) => AllowedKind::Redirect,
+        Some(s) if (400..600).contains(&s) => AllowedKind::Refused,
+        _ => AllowedKind::Unknown,
+    }
+}
+
 pub fn severity(method: &str) -> &'static str {
     match method {
         "PUT" => "critical",
@@ -147,7 +143,7 @@ pub fn severity(method: &str) -> &'static str {
 pub fn effective_severity(method: &str, allowed: AllowedKind) -> &'static str {
     match allowed {
         AllowedKind::Accepted | AllowedKind::Listed => severity(method),
-        AllowedKind::Refused | AllowedKind::Unknown => "info",
+        AllowedKind::Redirect | AllowedKind::Refused | AllowedKind::Unknown => "info",
     }
 }
 
@@ -164,6 +160,7 @@ pub fn print_finding(f: &MethodsFinding) {
         let label = match r.allowed {
             AllowedKind::Accepted => "ACCEPTED".red().bold().to_string(),
             AllowedKind::Listed => "LISTED".yellow().to_string(),
+            AllowedKind::Redirect => "REDIRECT".yellow().to_string(),
             AllowedKind::Refused => "REFUSED".green().to_string(),
             AllowedKind::Unknown => "UNKNOWN".dimmed().to_string(),
         };
@@ -206,5 +203,26 @@ mod tests {
         assert!(listed.contains("OPTIONS"));
         assert!(listed.contains("TRACE"));
         assert!(listed.contains("PUT"));
+    }
+
+    #[test]
+    fn classify_redirect_is_not_accepted() {
+        // lab N3/4.C: a 3xx redirect and a 4xx must never read as Accepted.
+        assert_eq!(classify(Some(201), false), AllowedKind::Accepted);
+        assert_eq!(classify(Some(301), false), AllowedKind::Redirect);
+        assert_eq!(classify(Some(302), false), AllowedKind::Redirect);
+        assert_eq!(classify(Some(405), false), AllowedKind::Refused);
+        assert_eq!(classify(Some(422), false), AllowedKind::Refused);
+        assert_eq!(classify(None, false), AllowedKind::Unknown);
+        // Allow-header listing beats an inconclusive/redirect probe; 2xx wins over all.
+        assert_eq!(classify(Some(301), true), AllowedKind::Listed);
+        assert_eq!(classify(Some(200), true), AllowedKind::Accepted);
+    }
+
+    #[test]
+    fn redirect_downgrades_effective_severity() {
+        assert_eq!(effective_severity("PUT", AllowedKind::Accepted), "critical");
+        assert_eq!(effective_severity("PUT", AllowedKind::Redirect), "info");
+        assert_eq!(effective_severity("PUT", AllowedKind::Refused), "info");
     }
 }

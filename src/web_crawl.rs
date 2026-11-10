@@ -130,6 +130,12 @@ pub async fn crawl(seed: &str, cfg: &CrawlConfig) -> Result<CrawlResult> {
             if link.host_str().unwrap_or("") != host {
                 continue;
             }
+            // Don't follow session-destroying links during the BFS — visiting
+            // /logout.php kills the authenticated session, so every endpoint
+            // found afterwards (and every OWASP probe) runs logged-out (bug N1).
+            if is_session_destroying(&link) {
+                continue;
+            }
             let s = link.to_string();
             if !seen.insert(s.clone()) {
                 continue;
@@ -146,6 +152,16 @@ pub async fn crawl(seed: &str, cfg: &CrawlConfig) -> Result<CrawlResult> {
         pages_visited: pages,
         endpoints,
     })
+}
+
+/// Links that would end the crawl's authenticated session (logout / signout /
+/// etc.). We skip these during the BFS so the session cookie survives — a
+/// crawler that follows `/logout.php` runs the rest of the scan logged-out
+/// (lab bug N1). Matches both the path and the query string.
+fn is_session_destroying(url: &Url) -> bool {
+    let hay = format!("{} {}", url.path(), url.query().unwrap_or("")).to_ascii_lowercase();
+    const MARKERS: &[&str] = &["logout", "log-out", "signout", "sign-out", "logoff", "disconnect"];
+    MARKERS.iter().any(|m| hay.contains(m))
 }
 
 /// Seed a cookie jar from a cookie-header-style string ("a=1; b=2"),
@@ -311,6 +327,20 @@ mod tests {
         let url = Url::parse("https://x.test/admin/dash").unwrap();
         assert!(disallowed(&["/admin".to_string()], &url));
         assert!(!disallowed(&["/api".to_string()], &url));
+    }
+
+    #[test]
+    fn session_destroying_links_detected() {
+        let d = |s: &str| is_session_destroying(&Url::parse(s).unwrap());
+        assert!(d("http://x.test/logout.php"));
+        assert!(d("http://x.test/user/logout"));
+        assert!(d("http://x.test/index.php?do=logout"));
+        assert!(d("http://x.test/accounts/sign-out/"));
+        assert!(d("http://x.test/disconnect"));
+        // Must NOT trip on login or unrelated paths.
+        assert!(!d("http://x.test/login.php"));
+        assert!(!d("http://x.test/vulnerabilities/sqli/?id=1"));
+        assert!(!d("http://x.test/about"));
     }
 
     #[test]
