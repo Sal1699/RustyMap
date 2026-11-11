@@ -8,7 +8,7 @@ use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::udp::{ipv4_checksum, MutableUdpPacket, UdpPacket};
 use pnet::packet::Packet;
 use pnet::transport::{
-    icmp_packet_iter, transport_channel, TransportChannelType::Layer4,
+    icmp_packet_iter, udp_packet_iter, transport_channel, TransportChannelType::Layer4,
     TransportProtocol::Ipv4, TransportReceiver, TransportSender,
 };
 use std::collections::HashMap;
@@ -17,37 +17,48 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-type PendingMap = Arc<Mutex<HashMap<(Ipv4Addr, u16), mpsc::Sender<IcmpHint>>>>;
+type PendingMap = Arc<Mutex<HashMap<(Ipv4Addr, u16), mpsc::Sender<ProbeHint>>>>;
+
+/// Fixed source port for every probe; both the ICMP and UDP reply listeners
+/// correlate replies back to a pending probe on it.
+const SRC_PORT: u16 = 45678;
 
 #[derive(Debug, Clone, Copy)]
-enum IcmpHint {
-    PortUnreachable, // closed
-    OtherUnreachable, // filtered (admin prohibited, host unreachable, etc.)
+enum ProbeHint {
+    UdpResponse,      // a UDP reply from the port → definitively OPEN (bug 1.A)
+    PortUnreachable,  // ICMP type 3 code 3 → closed
+    OtherUnreachable, // ICMP type 3 other code → filtered (admin-prohibited, etc.)
 }
 
 pub struct UdpScanner {
     tx: Arc<Mutex<TransportSender>>,
     pending: PendingMap,
     _icmp_thread: thread::JoinHandle<()>,
+    _udp_thread: thread::JoinHandle<()>,
 }
 
 impl UdpScanner {
     pub fn new() -> Result<Self> {
-        let (tx, _rx_unused) = transport_channel(4096, Layer4(Ipv4(IpNextHeaderProtocols::Udp)))
+        // Keep the UDP channel's receiver (don't discard it): a UDP reply from a
+        // probed port is the only positive proof the port is OPEN (bug 1.A).
+        let (tx, udp_rx) = transport_channel(4096, Layer4(Ipv4(IpNextHeaderProtocols::Udp)))
             .map_err(|e| anyhow!("failed to open raw UDP socket: {} — {}", e, crate::privilege::raw_privilege_hint()))?;
-        // Separate receiver for ICMP
+        // Separate receiver for ICMP (closed / filtered hints).
         let (_tx_unused, icmp_rx) = transport_channel(4096, Layer4(Ipv4(IpNextHeaderProtocols::Icmp)))
             .map_err(|e| anyhow!("failed to open raw ICMP socket: {}", e))?;
 
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
-        let pending_rx = Arc::clone(&pending);
+        let icmp_pending = Arc::clone(&pending);
+        let udp_pending = Arc::clone(&pending);
 
-        let icmp_thread = thread::spawn(move || icmp_listener(icmp_rx, pending_rx));
+        let icmp_thread = thread::spawn(move || icmp_listener(icmp_rx, icmp_pending));
+        let udp_thread = thread::spawn(move || udp_listener(udp_rx, udp_pending));
 
         Ok(Self {
             tx: Arc::new(Mutex::new(tx)),
             pending,
             _icmp_thread: icmp_thread,
+            _udp_thread: udp_thread,
         })
     }
 
@@ -58,22 +69,27 @@ impl UdpScanner {
         dst_port: u16,
         timeout: Duration,
     ) -> PortState {
-        let src_port: u16 = 45678; // fixed; ICMP reply embeds our original header for correlation
-        let (sender, receiver) = mpsc::channel::<IcmpHint>();
+        let src_port = SRC_PORT;
+        let (sender, receiver) = mpsc::channel::<ProbeHint>();
         self.pending.lock().unwrap().insert((dst_ip, dst_port), sender);
 
-        let mut buf = [0u8; 8];
+        // A protocol-specific payload (DNS/NTP/SNMP/…) makes the service answer
+        // so the port reads OPEN; unknown ports get an empty datagram and rely on
+        // ICMP to tell closed from open|filtered.
+        let payload = udp_payload(dst_port);
+        let mut buf = vec![0u8; 8 + payload.len()];
         {
-            let mut pkt = MutableUdpPacket::new(&mut buf).unwrap();
+            let mut pkt = MutableUdpPacket::new(&mut buf[..]).unwrap();
             pkt.set_source(src_port);
             pkt.set_destination(dst_port);
-            pkt.set_length(8);
+            pkt.set_length((8 + payload.len()) as u16);
+            pkt.set_payload(payload);
             pkt.set_checksum(ipv4_checksum(&pkt.to_immutable(), &src_ip, &dst_ip));
         }
 
         let send_result = {
             let mut tx = self.tx.lock().unwrap();
-            let pkt = UdpPacket::new(&buf).unwrap();
+            let pkt = UdpPacket::new(&buf[..]).unwrap();
             tx.send_to(pkt, IpAddr::V4(dst_ip))
         };
 
@@ -81,9 +97,10 @@ impl UdpScanner {
             PortState::Filtered
         } else {
             match receiver.recv_timeout(timeout) {
-                Ok(IcmpHint::PortUnreachable) => PortState::Closed,
-                Ok(IcmpHint::OtherUnreachable) => PortState::Filtered,
-                // No ICMP reply → port open|filtered (nmap convention)
+                Ok(ProbeHint::UdpResponse) => PortState::Open,
+                Ok(ProbeHint::PortUnreachable) => PortState::Closed,
+                Ok(ProbeHint::OtherUnreachable) => PortState::Filtered,
+                // No reply at all → nmap's open|filtered.
                 Err(_) => PortState::OpenFiltered,
             }
         };
@@ -117,9 +134,9 @@ fn icmp_listener(mut rx: TransportReceiver, pending: PendingMap) {
             let orig_dst_port = u16::from_be_bytes([udp_bytes[2], udp_bytes[3]]);
 
             let hint = if code == 3 {
-                IcmpHint::PortUnreachable
+                ProbeHint::PortUnreachable
             } else {
-                IcmpHint::OtherUnreachable
+                ProbeHint::OtherUnreachable
             };
             let sender_opt = {
                 let pend = pending.lock().unwrap();
@@ -129,6 +146,87 @@ fn icmp_listener(mut rx: TransportReceiver, pending: PendingMap) {
                 let _ = s.send(hint);
             }
         }
+    }
+}
+
+/// Listen for UDP replies from probed ports. A datagram whose *source*
+/// (ip, port) matches a pending probe and is addressed back to our fixed source
+/// port is positive proof the port is OPEN (bug 1.A). Usually only a
+/// protocol-matched `udp_payload` elicits one.
+fn udp_listener(mut rx: TransportReceiver, pending: PendingMap) {
+    let mut iter = udp_packet_iter(&mut rx);
+    while let Ok((packet, src)) = iter.next() {
+        let IpAddr::V4(src_ip) = src else { continue };
+        if packet.get_destination() != SRC_PORT {
+            continue;
+        }
+        let src_port = packet.get_source();
+        let sender_opt = {
+            let pend = pending.lock().unwrap();
+            pend.get(&(src_ip, src_port)).cloned()
+        };
+        if let Some(s) = sender_opt {
+            let _ = s.send(ProbeHint::UdpResponse);
+        }
+    }
+}
+
+/// Protocol-specific UDP probe payloads (mirrors nmap-payloads) for ports whose
+/// service only answers a well-formed request. A reply lets `udp_listener` mark
+/// the port OPEN; unknown ports get an empty datagram and depend on ICMP to
+/// separate closed from open|filtered.
+fn udp_payload(port: u16) -> &'static [u8] {
+    match port {
+        // DNS: a CHAOS TXT query for "version.bind". BIND answers it; other
+        // resolvers refuse but still reply — either way the port is proven up.
+        53 => &[
+            0x00, 0x06, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x07, b'v', b'e', b'r', b's', b'i', b'o', b'n', 0x04, b'b', b'i', b'n', b'd',
+            0x00, 0x00, 0x10, 0x00, 0x03,
+        ],
+        // NTP v3 client-mode request (LI=0, VN=3, Mode=3); servers always reply.
+        123 => &[
+            0x1b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ],
+        // SNMPv1 GetRequest for sysDescr.0 (1.3.6.1.2.1.1.1.0), community "public".
+        161 => &[
+            0x30, 0x26, 0x02, 0x01, 0x00, 0x04, 0x06, b'p', b'u', b'b', b'l', b'i', b'c',
+            0xa0, 0x19, 0x02, 0x01, 0x01, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00, 0x30, 0x0e,
+            0x30, 0x0c, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00, 0x05, 0x00,
+        ],
+        // NetBIOS name service node-status query for "*".
+        137 => &[
+            0xa2, 0x48, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x20, 0x43, 0x4b, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41,
+            0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41,
+            0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x00,
+            0x00, 0x21, 0x00, 0x01,
+        ],
+        // SSDP M-SEARCH (UPnP discovery).
+        1900 => b"M-SEARCH * HTTP/1.1\r\nHOST:239.255.255.250:1900\r\nMAN:\"ssdp:discover\"\r\nMX:1\r\nST:ssdp:all\r\n\r\n",
+        // IKE/ISAKMP main-mode SA proposal (3DES / SHA1 / MODP-1024).
+        500 => &[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x01, 0x10, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x28, 0x01, 0x01, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x20, 0x01, 0x01, 0x00, 0x00, 0x80, 0x01, 0x00, 0x05,
+            0x80, 0x02, 0x00, 0x02, 0x80, 0x03, 0x00, 0x01, 0x80, 0x04, 0x00, 0x02,
+            0x80, 0x0b, 0x00, 0x01, 0x00, 0x0c, 0x00, 0x04, 0x00, 0x00, 0x70, 0x80,
+        ],
+        // RPC portmapper NULL call (program 100000 v2).
+        111 => &[
+            0x72, 0xfe, 0x1d, 0x13, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+            0x00, 0x01, 0x86, 0xa0, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        ],
+        // MS-SQL Server browser: a single 0x02 byte elicits the instance list.
+        1434 => &[0x02],
+        _ => &[],
     }
 }
 
@@ -213,5 +311,27 @@ pub fn run_udp_scan(
         os: None,
         device: None,
         mac: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn udp_payloads_cover_common_services() {
+        // NTP client-mode request (the bug-1.A validation case): 48 bytes, first
+        // byte 0x1b (LI=0, VN=3, Mode=3).
+        assert_eq!(udp_payload(123).len(), 48);
+        assert_eq!(udp_payload(123)[0], 0x1b);
+        // DNS version.bind query, SNMP SEQUENCE, SSDP M-SEARCH, IKE, ms-sql.
+        assert!(udp_payload(53).windows(4).any(|w| w == b"bind"));
+        assert_eq!(udp_payload(161)[0], 0x30);
+        assert!(udp_payload(1900).starts_with(b"M-SEARCH"));
+        assert!(udp_payload(500).len() > 40);
+        assert_eq!(udp_payload(1434), &[0x02]);
+        // Unknown ports get no payload (empty datagram; ICMP-only classification).
+        assert!(udp_payload(9999).is_empty());
+        assert!(udp_payload(80).is_empty());
     }
 }

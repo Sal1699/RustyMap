@@ -4,6 +4,32 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.102.0] - 2026-11-11
+
+**UDP scan now proves `open` with protocol payloads + a UDP-response listener**
+(bug 1.A — the last HIGH-severity gap from the v0.101.3 regression report).
+690/690 tests.
+
+### Added
+- **`--sU` distinguishes `open` from `open|filtered` by eliciting a real reply.**
+  The scanner used to send an empty datagram and listen only for ICMP, so a live
+  service that needs a well-formed request (NTP, DNS, SNMP, …) never answered and
+  read `open|filtered` where nmap reports `open`. It now:
+  - sends a **protocol-specific payload** for common UDP services (DNS 53, NTP 123,
+    SNMP 161, NetBIOS 137, IKE 500, RPC 111, SSDP 1900, MS-SQL browser 1434),
+    mirroring `nmap-payloads`;
+  - runs a **UDP-response listener** (a second raw receiver, twin of the ICMP one):
+    a reply from the probed port is positive proof it is **open**.
+  Classification is now: UDP reply → `open`, ICMP port-unreachable → `closed`,
+  other ICMP unreachable → `filtered`, silence → `open|filtered`. Unknown ports
+  keep the empty-datagram behaviour. (`udp_scan.rs`.)
+
+### Note
+- **Validate on Kali:** `sudo rustymap --sU -p 53,123,161,500 scanme.nmap.org` vs
+  `nmap -sU` — 123/ntp should now read `open` (was `open|filtered`), 53/500 closed.
+- Still open from the report (smaller, next in sequence): **5.D** vuln-ssl-ccs
+  label on a TLS port, **N2** `--osdb-submit` pack, **N6** `--ssh-audit` only :22.
+
 ## [0.101.5] - 2026-11-10
 
 **Fixes invalid `--oX` XML when a service banner carries raw control bytes** (bug
