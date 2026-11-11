@@ -28,6 +28,7 @@ pub enum CcsStatus {
     Vulnerable,
     Patched,
     Unknown,
+    NotApplicable, // port IS TLS but rejected the legacy TLS 1.0 handshake the check needs
     NotTls,
 }
 
@@ -38,6 +39,7 @@ impl CcsStatus {
             CcsStatus::Vulnerable => "VULNERABLE",
             CcsStatus::Patched => "PATCHED",
             CcsStatus::Unknown => "UNKNOWN",
+            CcsStatus::NotApplicable => "n/a (modern TLS — legacy CCS check doesn't apply)",
             CcsStatus::NotTls => "n/a (port not TLS)",
         }
     }
@@ -59,17 +61,29 @@ pub async fn probe(ip: IpAddr, port: u16, dur: Duration) -> Result<CcsFinding> {
     let hello = client_hello(0x0301);
     timeout(dur, s.write_all(&hello)).await??;
 
-    // Drain the ServerHello flight. We don't parse it — just collect
-    // bytes until we see a handshake type 0x0e (ServerHelloDone) or
-    // 1 second of silence.
-    let drain_ok = drain_until_hello_done(&mut s, dur).await;
-    if !drain_ok {
-        return Ok(CcsFinding {
-            host: ip.to_string(),
-            port,
-            status: CcsStatus::NotTls,
-            alert_desc: None,
-        });
+    // Read the server's response to our legacy TLS 1.0 ClientHello. We need the
+    // full handshake (ServerHelloDone) to inject the early CCS. A modern server
+    // that refuses TLS 1.0 / RSA kx (e.g. GitHub) answers with a TLS alert
+    // instead — it IS a TLS port, just newer than any vulnerable openssl, so the
+    // check is Not-Applicable rather than "port not TLS" (lab bug 5.D).
+    match read_server_flight(&mut s, dur).await {
+        HsOutcome::HelloDone => {}
+        HsOutcome::TlsRejected => {
+            return Ok(CcsFinding {
+                host: ip.to_string(),
+                port,
+                status: CcsStatus::NotApplicable,
+                alert_desc: None,
+            });
+        }
+        HsOutcome::NotTls => {
+            return Ok(CcsFinding {
+                host: ip.to_string(),
+                port,
+                status: CcsStatus::NotTls,
+                alert_desc: None,
+            });
+        }
     }
 
     // Inject an early ChangeCipherSpec.
@@ -139,32 +153,54 @@ pub fn client_hello(version: u16) -> Vec<u8> {
     ch
 }
 
-/// Read bytes until we see a ServerHelloDone (handshake type 0x0e)
-/// inside a handshake record, or hit `dur` without seeing one.
-async fn drain_until_hello_done(s: &mut TcpStream, dur: Duration) -> bool {
+/// Outcome of reading the server's reply to our legacy ClientHello.
+enum HsOutcome {
+    HelloDone,   // saw ServerHelloDone → the full handshake the CCS injection needs
+    TlsRejected, // reply WAS a TLS record/alert but not a completed legacy handshake
+    NotTls,      // reply wasn't TLS at all (or nothing came back)
+}
+
+/// Read the server's flight and classify it. The first response byte tells us
+/// whether the port speaks TLS at all (content type 0x14–0x17 + version 0x03xx);
+/// within a TLS reply we then look for a ServerHelloDone (0x0e) to know the
+/// legacy handshake completed. A TLS alert with no ServerHelloDone means the
+/// server rejected our obsolete hello — TLS, but the CCS check can't run (5.D).
+async fn read_server_flight(s: &mut TcpStream, dur: Duration) -> HsOutcome {
     let deadline = std::time::Instant::now() + dur;
     let mut buf = vec![0u8; 4096];
+    let mut is_tls = false;
+    let mut first = true;
     loop {
         let remaining = match deadline.checked_duration_since(std::time::Instant::now()) {
             Some(r) => r,
-            None => return false,
+            None => break,
         };
         let n = match timeout(remaining, s.read(&mut buf)).await {
             Ok(Ok(n)) => n,
-            _ => return false,
+            _ => break,
         };
         if n == 0 {
-            return false;
+            break;
         }
-        // Look for handshake records (type 0x16) carrying 0x0e
-        // (ServerHelloDone). Crude scan — sufficient because 0x0e
-        // is a rare byte in early TLS records and we don't care
-        // about false alarms here: if we mis-trigger we just send
-        // the CCS slightly early, which still elicits the same
-        // diagnostic alert from a patched server.
+        if first {
+            // TLS record? content type 0x14 (CCS) … 0x17 (appdata), major 0x03.
+            is_tls = n >= 2 && (0x14..=0x17).contains(&buf[0]) && buf[1] == 0x03;
+            if !is_tls {
+                return HsOutcome::NotTls;
+            }
+            first = false;
+        }
+        // ServerHelloDone byte inside the handshake flight → ready for the CCS.
         if buf[..n].iter().any(|&b| b == 0x0e) {
-            return true;
+            return HsOutcome::HelloDone;
         }
+    }
+    // Saw TLS but never a ServerHelloDone (alert / rejected legacy handshake), or
+    // nothing TLS at all.
+    if is_tls {
+        HsOutcome::TlsRejected
+    } else {
+        HsOutcome::NotTls
     }
 }
 
@@ -175,6 +211,7 @@ pub fn print_finding(f: &CcsFinding) {
         CcsStatus::Vulnerable => "VULNERABLE".red().bold().to_string(),
         CcsStatus::Patched => "PATCHED".green().to_string(),
         CcsStatus::Unknown => "UNKNOWN".yellow().to_string(),
+        CcsStatus::NotApplicable => "n/a (modern TLS — legacy CCS check doesn't apply)".dimmed().to_string(),
         CcsStatus::NotTls => "n/a (port not TLS)".dimmed().to_string(),
     };
     let alert = f
@@ -223,5 +260,8 @@ mod tests {
         assert_ne!(CcsStatus::Vulnerable.label(), CcsStatus::Patched.label());
         assert_ne!(CcsStatus::Patched.label(), CcsStatus::Unknown.label());
         assert_eq!(CcsStatus::NotTls.label(), "n/a (port not TLS)");
+        // A modern-TLS server that rejects the legacy hello is NOT "port not TLS".
+        assert_ne!(CcsStatus::NotApplicable.label(), CcsStatus::NotTls.label());
+        assert!(CcsStatus::NotApplicable.label().contains("TLS"));
     }
 }

@@ -4,6 +4,21 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.102.1] - 2026-11-11
+
+**`--vuln-ssl-ccs` no longer mislabels a modern TLS port as "port not TLS"** (bug
+5.D). 690/690 tests.
+
+### Fixed
+- **CCS-injection check reported "port not TLS" on a TLS port (bug 5.D).** The
+  probe sends a legacy TLS 1.0 ClientHello (old RSA ciphers, no SNI) to inject the
+  early ChangeCipherSpec; a modern server (e.g. GitHub) that refuses TLS 1.0 / RSA
+  key exchange answers with a TLS alert and never completes the handshake, which
+  the code read as "not TLS". It now inspects the reply — a TLS record/alert means
+  the port IS TLS but rejected the obsolete handshake, reported as **"n/a (modern
+  TLS — legacy CCS check doesn't apply)"**, distinct from a genuinely non-TLS port.
+  (`vuln_ssl_ccs.rs`.)
+
 ## [0.102.0] - 2026-11-11
 
 **UDP scan now proves `open` with protocol payloads + a UDP-response listener**
