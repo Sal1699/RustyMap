@@ -4,6 +4,23 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.102.2] - 2026-11-11
+
+**`--osdb-submit` now runs a real scan so the pack carries the OS guess and
+service versions** (bug N2). 690/690 tests.
+
+### Fixed
+- **`--osdb-submit` pack was sparse — only a TTL-based guess (bug N2).** The
+  handler built the pack from an empty-ports host, so `os_fp` could only TTL-guess
+  (the "Linux | X | 55%" pack) and no service banners were collected, even when the
+  user passed `-O -sV -p`. It now runs a connect scan on the requested ports
+  (falling back to a common set when `-p` is absent), service-detects the open
+  ports, and OS-fingerprints with real port states before building the pack — so it
+  reflects the true OS family / confidence and the service versions. (`main.rs`.)
+
+### Note
+- Last report item left: **N6** `--ssh-audit` probes only `:22` (INFO).
+
 ## [0.102.1] - 2026-11-11
 
 **`--vuln-ssl-ccs` no longer mislabels a modern TLS port as "port not TLS"** (bug

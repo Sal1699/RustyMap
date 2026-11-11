@@ -1446,20 +1446,36 @@ async fn run(mut args: Cli) -> Result<()> {
         };
         let targets = target::expand_targets(&[host_part.to_string()], !args.no_dns).await?;
         let dur = args.timeout();
+        // Honour the user's -p so a real scan feeds the pack: with no ports
+        // os_fp can only TTL-guess (the old sparse "55%" pack) and -sV finds
+        // nothing (lab bug N2). Fall back to a small common set when -p is absent.
+        let scan_ports = {
+            let parsed = ports::parse_ports(&args.ports_spec()).unwrap_or_default();
+            if parsed.is_empty() {
+                vec![21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 443, 445, 3306, 3389, 8080]
+            } else {
+                parsed
+            }
+        };
+        let ports_arc = std::sync::Arc::new(scan_ports);
         for t in &targets {
-            // Build a minimal HostResult with up=true; the user is
-            // expected to run their full scan separately and edit the
-            // pack to include the signals the scan captured. We pre-
-            // populate ttl via the existing ping helper inside os_fp.
-            let mut h = scanner::HostResult {
-                target: t.clone(),
-                up: true,
-                ports: Vec::new(),
-                elapsed: std::time::Duration::from_millis(0),
-                os: None,
-                device: None,
-                mac: None,
-            };
+            // Real connect scan so os_fp has open/closed ports to probe and -sV
+            // can grab banners; then fingerprint + service-detect so the pack
+            // carries the OS guess and service versions, not just a bare TTL.
+            let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let mut h = scanner::tcp_connect_scan(
+                t.clone(),
+                std::sync::Arc::clone(&ports_arc),
+                dur,
+                100,                       // parallel
+                false,                     // show_closed
+                cancel,
+                None,                      // no rate limiter
+                std::time::Duration::ZERO, // no scan delay
+            )
+            .await;
+            h.up = true; // build the pack for the named host regardless
+            probe_services(std::slice::from_mut(&mut h), dur, args.version_intensity).await;
             let fp = tokio::task::spawn_blocking({
                 let host_clone = h.clone();
                 let to = dur;
