@@ -105,7 +105,7 @@ const REGISTRY: &[Feature] = &[
     Feature { key: "--osdb-submit", tier: Tier::Alpha,
         note: "Builds an OS-fingerprint submission pack for HOST:LABEL and writes it to stdout or `--osdb-submit-out FILE` (does NOT auto-submit anywhere). Review the pack before sharing it — it describes your host/network." },
     Feature { key: "--os-fp-v6", tier: Tier::Alpha,
-        note: "IPv6 OS fingerprint (`os_fp_v6.rs` / `os_fp_multi.rs`). Less mature than IPv4 path; database coverage thinner." },
+        note: "IPv6 OS fingerprint (`os_fp_v6.rs` / `os_fp_multi.rs`). v0.105.0 expanded the SYN-ACK classifier (Linux era, modern/legacy Windows, macOS/FreeBSD, OpenBSD-no-TS, NetBSD, Solaris/illumos/AIX, network gear). Still coarser than the v4 path — the full nmap S1–S12 raw IPv6 probe suite isn't implemented. Awaiting validation on real v6 hosts (Win/Linux/mac/BSD) before promotion." },
     Feature { key: "--owasp-scan", tier: Tier::Alpha,
         note: "Basic XSS/SQLi/open-redirect/SSRF probes (CLI flag: --owasp-scan URL). Heavy false-positive rate; dedicated tools (ZAP, sqlmap) outperform on real engagements." },
     Feature { key: "--web-crawl", tier: Tier::Alpha,

@@ -4,6 +4,28 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.105.0] - 2026-11-12
+
+**`--os-fp-v6` classifier expanded to more OS families and eras** — the third
+"falli tutti" item (v0.101.3 §16). 697/697 tests. Stays Alpha pending
+real-v6-host validation.
+
+### Changed
+- **Richer IPv6 SYN-ACK classification (`classify_v6`).** Beyond the previous
+  Linux / Windows / macOS-FreeBSD / generic buckets, the classifier now separates:
+  Linux kernel eras (2.6 / 3.x–4.x / 5.x–6.x, incl. Android) by window size;
+  modern vs legacy Windows (WS 8 + SACK vs WS 2); macOS/FreeBSD/DragonFly (WS 6 +
+  TS) vs **OpenBSD** (WS 6, no TS — it disables timestamps); NetBSD; and
+  Solaris/illumos/AIX (low WS + TS); plus a network-device/embedded bucket.
+  Confidence tops ~82% for the strong window-scale signatures. (`os_fp_v6.rs`.)
+
+### Note
+- `--os-fp-v6` **stays Alpha**: this sharpens the classifier on the SYN-ACK
+  signals already collected, but the full nmap **S1–S12 raw IPv6 probe suite** is
+  still future work (large, and needs real v6 hosts to develop + validate).
+  Re-test `--os-fp-v6-multi <host> --os-fp-v6-ports 22,80,443` vs `nmap -6 -O` on
+  a few real hosts; agreement on ≥3 families → promote.
+
 ## [0.104.0] - 2026-11-12
 
 **`--ipa-scan` now parses the Mach-O binary and the provisioning-profile

@@ -13,11 +13,13 @@
 //!   - **TCP options ordering** in the SYN-ACK (MSS / SACK-permitted /
 //!     timestamp / window-scale presence pattern).
 //!
-//! We don't have a curated ~5000-entry DB like nmap-os-db-ipv6 — we
-//! do best-effort classification into the major OS families (Linux /
-//! BSD-family / Windows / network gear) plus an "unknown" bucket.
-//! The match-confidence is reported low (max ~70%) reflecting the
-//! limited signal set.
+//! We don't have a curated ~5000-entry DB like nmap-os-db-ipv6 — we do
+//! best-effort classification from the SYN-ACK signature (window-scale /
+//! timestamp / SACK / window) into OS families and eras: Linux (by kernel
+//! era), Windows (modern vs legacy), macOS/FreeBSD/DragonFly, OpenBSD,
+//! NetBSD, Solaris/illumos/AIX, network gear, plus an "unknown" bucket.
+//! Confidence tops out ~82% for the strong window-scale signatures. The
+//! fuller nmap S1–S12 raw-probe suite is future work (needs real v6 hosts).
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -126,30 +128,47 @@ pub fn parse_ws(opts: &str) -> Option<u8> {
 /// IPv6 detection past the port-only heuristic (#6). Returns
 /// `(family, confidence)`.
 pub fn classify_v6(window: u16, ws: Option<u8>, ts: bool, sack: bool) -> Option<(String, u8)> {
-    // Window-scale is the strongest single discriminator across stacks:
-    //   Linux → 7, Windows 10/11/Server → 8, macOS/*BSD → 6.
+    // Window-scale is the strongest single discriminator across stacks
+    // (Linux → 7, Windows → 8, macOS/*BSD → 6); timestamps, SACK and the
+    // advertised window then separate families and eras.
     let label = match ws {
+        // Linux: window-scale 7 + timestamps; window size narrows the kernel era.
         Some(7) if ts => {
             let hint = match window {
-                64800 | 65160 | 65483 => " 5.x/6.x",
-                28960 | 29200 | 14480 => " 3.x/4.x",
+                64800 | 65160 | 65483 | 65535 => " 5.x/6.x",
+                28960 | 29200 | 14480 => " 3.x/4.x (or Android)",
+                5792 | 5840 => " 2.6 (legacy)",
                 _ => "",
             };
             (format!("Linux{}", hint), 82)
         }
-        Some(8) if sack => ("Windows 10/11 or Server 2016+".to_string(), 82),
-        Some(6) if ts => ("macOS or FreeBSD".to_string(), 78),
-        Some(5) if ts => ("Apple iOS/macOS (older)".to_string(), 72),
-        Some(w) if ts => (format!("Unix-like (window scale {})", w), 68),
-        Some(_) => ("Unix-like (no timestamp)".to_string(), 60),
+        Some(7) => ("Linux (no timestamp)".to_string(), 68),
+        // Windows: window-scale 8, with SACK as the confirming signal.
+        Some(8) if sack => ("Windows 8.1/10/11 or Server 2012+".to_string(), 82),
+        Some(8) => ("Windows".to_string(), 70),
+        // Legacy Windows (XP / Vista / Server 2003) negotiated window-scale 2.
+        Some(2) => ("Windows XP/Vista/Server 2003 (legacy)".to_string(), 66),
+        // macOS / FreeBSD / DragonFly BSD: window-scale 6 with timestamps.
+        Some(6) if ts => ("macOS / FreeBSD / DragonFly BSD".to_string(), 78),
+        // OpenBSD disables TCP timestamps by default: window-scale 6, no TS.
+        Some(6) => ("OpenBSD".to_string(), 76),
+        // Older Apple iOS/macOS negotiated window-scale 5.
+        Some(5) if ts => ("Apple iOS / macOS (older)".to_string(), 72),
+        Some(5) => ("NetBSD / older BSD".to_string(), 64),
+        // Solaris / illumos / AIX: small window-scale, timestamps on.
+        Some(0..=4) if ts => ("Solaris / illumos / AIX".to_string(), 62),
+        // Window-scale present but no TS/SACK → network device / embedded stack.
+        Some(w) if !ts && !sack => {
+            (format!("network device or embedded stack (WS {}, no TS/SACK)", w), 58)
+        }
+        Some(w) if ts => (format!("Unix-like (window scale {})", w), 66),
+        Some(_) => ("Unix-like".to_string(), 60),
+        // No window-scale at all.
         None if !ts && !sack => ("legacy / embedded stack (no WS/TS/SACK)".to_string(), 55),
+        None if ts => ("Unix-like (no window scaling)".to_string(), 58),
         None => ("Unknown IPv6 stack".to_string(), 40),
     };
-    if label.1 == 0 {
-        None
-    } else {
-        Some(label)
-    }
+    Some(label)
 }
 
 /// Best-effort family hint when only the open-port set is visible.
@@ -334,6 +353,25 @@ mod tests {
         // macOS/BSD: WS 6 + timestamp.
         let (os, _) = classify_v6(65535, Some(6), true, true).unwrap();
         assert!(os.contains("macOS") || os.contains("FreeBSD"), "{}", os);
+    }
+
+    #[test]
+    fn classify_v6_expanded_families() {
+        // OpenBSD: window-scale 6 WITHOUT timestamps (it disables them).
+        let (os, _) = classify_v6(16384, Some(6), false, true).unwrap();
+        assert!(os.contains("OpenBSD"), "{}", os);
+        // Legacy Windows: window-scale 2.
+        let (os, _) = classify_v6(65535, Some(2), false, true).unwrap();
+        assert!(os.contains("Windows"), "{}", os);
+        // Solaris / illumos / AIX: small window-scale with timestamps.
+        let (os, _) = classify_v6(49640, Some(1), true, true).unwrap();
+        assert!(os.contains("Solaris") || os.contains("AIX"), "{}", os);
+        // Linux with no timestamp still reads Linux.
+        let (os, _) = classify_v6(64240, Some(7), false, true).unwrap();
+        assert!(os.contains("Linux"), "{}", os);
+        // macOS/FreeBSD (WS6 + TS) must NOT be mislabelled OpenBSD.
+        let (os, _) = classify_v6(65535, Some(6), true, true).unwrap();
+        assert!(!os.contains("OpenBSD"), "{}", os);
     }
 
     #[test]
