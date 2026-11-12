@@ -56,7 +56,6 @@ pub struct BruteConfig {
     pub stop_on_success: bool,
     pub confirm_authorized: bool,
     pub default_creds_only: bool,
-    pub form_spec: Option<String>, // free-text for http-form
     pub warn_internet_routable: bool,
 }
 
@@ -323,7 +322,6 @@ mod tests {
             stop_on_success: true,
             confirm_authorized: confirm,
             default_creds_only: default_only,
-            form_spec: None,
             warn_internet_routable: false,
         }
     }

@@ -203,7 +203,7 @@ async fn negotiate_once(addr: SocketAddr, req: &[u8], dur: Duration) -> Result<V
     // implausible body length — means the peer isn't speaking SMB here.
     let resp_len =
         (((nbhdr[1] as u32) << 16) | ((nbhdr[2] as u32) << 8) | (nbhdr[3] as u32)) as usize;
-    if nbhdr[0] != 0x00 || resp_len < 32 || resp_len > 8192 {
+    if nbhdr[0] != 0x00 || !(32..=8192).contains(&resp_len) {
         return Err(anyhow!(
             "not a valid SMB negotiate (NetBIOS type=0x{:02x}, len={})",
             nbhdr[0], resp_len

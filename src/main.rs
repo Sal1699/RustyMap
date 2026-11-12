@@ -267,8 +267,10 @@ async fn run(mut args: Cli) -> Result<()> {
     }
 
     // --spoof-mac: apply BEFORE any scan so subsequent raw probes use it.
-    // Needs --iface-scan or default interface.
-    if let Some(spec) = args.spoof_mac.clone() {
+    // Needs --iface-scan or default interface. The returned guard restores the
+    // original MAC when this function exits — normal finish or error-unwind
+    // (review #9); it is held for the whole scan below.
+    let _mac_restore: Option<spoof_mac::MacRestore> = if let Some(spec) = args.spoof_mac.clone() {
         let mac = spoof_mac::resolve(&spec)?;
         let iface = args.iface_scan.clone().or_else(|| {
             // Pick first non-loopback up interface with an IPv4
@@ -277,11 +279,20 @@ async fn run(mut args: Cli) -> Result<()> {
                 .find(|i| i.is_up() && !i.is_loopback() && !i.ips.is_empty())
                 .map(|i| i.name)
         }).ok_or_else(|| exit::config_err("--spoof-mac needs -e/--iface-scan or a default interface"))?;
-        match spoof_mac::apply(&iface, &mac) {
-            Ok(applied) => eprintln!("[spoof-mac] {} now uses {}", iface, applied),
-            Err(e) => return Err(e),
+        // Snapshot the current MAC before changing it so it can be put back.
+        let original = spoof_mac::current_mac(&iface);
+        let applied = spoof_mac::apply(&iface, &mac)?;
+        eprintln!("[spoof-mac] {} now uses {}", iface, applied);
+        match original {
+            Some(orig) => Some(spoof_mac::MacRestore::new(&iface, orig)),
+            None => {
+                eprintln!("[spoof-mac] note: original MAC unknown — will NOT auto-restore on exit");
+                None
+            }
         }
-    }
+    } else {
+        None
+    };
 
     // --version-light / --version-all → fold into version_intensity.
     if args.version_light {
@@ -1269,7 +1280,6 @@ async fn run(mut args: Cli) -> Result<()> {
             stop_on_success: args.brute_stop_on_success,
             confirm_authorized: args.brute_confirm_authorized,
             default_creds_only: args.brute_default_creds_only,
-            form_spec: args.brute_form_spec.clone(),
             warn_internet_routable: false,
         };
 
@@ -1828,7 +1838,7 @@ async fn run(mut args: Cli) -> Result<()> {
 
     // ----- Web UI (no scan) -----
     if args.serve {
-        let db_path = args.db_path.clone().unwrap_or_else(|| "rustymap.db".to_string());
+        let db_path = resolve_db_path(&args.db_path);
         return tokio::task::spawn_blocking(move || webui::serve(&args.serve_addr, &db_path)).await?;
     }
 
@@ -1842,7 +1852,7 @@ async fn run(mut args: Cli) -> Result<()> {
         return run_list_tags(&args);
     }
     if args.list_scans {
-        let path = args.db_path.clone().unwrap_or_else(|| "rustymap.db".to_string());
+        let path = resolve_db_path(&args.db_path);
         let db = Db::open(&path)?;
         let rows = db.list_scans()?;
         if rows.is_empty() {
@@ -1884,7 +1894,7 @@ async fn run(mut args: Cli) -> Result<()> {
         if args.no_db {
             return Err(exit::config_err("--resume requires the SQLite db; remove --no-db"));
         }
-        let path = args.db_path.clone().unwrap_or_else(|| "rustymap.db".to_string());
+        let path = resolve_db_path(&args.db_path);
         let db = Db::open(&path)?;
         let sid = if spec == "last" {
             db.latest_incomplete()?
@@ -1963,7 +1973,7 @@ async fn run(mut args: Cli) -> Result<()> {
     let mut db_handle = if args.no_db {
         None
     } else {
-        let path = args.db_path.clone().unwrap_or_else(|| "rustymap.db".to_string());
+        let path = resolve_db_path(&args.db_path);
         Some(Db::open(&path)?)
     };
 
@@ -3000,9 +3010,15 @@ async fn run(mut args: Cli) -> Result<()> {
             None
         };
         if let Some(d) = db {
-            let hits = cve::correlate(&d, &sorted);
+            let mut hits = cve::correlate(&d, &sorted);
+            // Tag each hit with KEV / public-exploit availability from the
+            // synced exploit-refs catalog, if present (review #16).
+            cve::enrich_with_exploits(&mut hits);
             cve::print_hits(&hits);
-            audit.event("cve_correlated", json!({ "hits": hits.len() }));
+            audit.event(
+                "cve_correlated",
+                json!({ "hits": hits.len(), "kev": hits.iter().filter(|h| h.kev).count() }),
+            );
             // Correlated CVEs are a security-relevant finding → exit code 1.
             exit::note_findings(!hits.is_empty());
 
@@ -3011,7 +3027,7 @@ async fn run(mut args: Cli) -> Result<()> {
             let cve_findings: Vec<compliance::Finding> = hits
                 .iter()
                 .map(|h| {
-                    compliance::Finding::new("cve", &format!("{}:{}", h.host, h.port), &h.cve)
+                    compliance::Finding::new("cve", format!("{}:{}", h.host, h.port), &h.cve)
                 })
                 .collect();
 
@@ -3893,7 +3909,7 @@ fn run_vault(args: &Cli) -> Result<()> {
 }
 
 fn run_add_tags(args: &Cli) -> Result<()> {
-    let path = args.db_path.clone().unwrap_or_else(|| "rustymap.db".to_string());
+    let path = resolve_db_path(&args.db_path);
     let mut db = Db::open(&path)?;
     for spec in &args.add_tags {
         let (loc, tag) = spec.split_once('=').ok_or_else(|| anyhow!("--tag format: ip[:port]=tagname, got '{}'", spec))?;
@@ -3909,7 +3925,7 @@ fn run_add_tags(args: &Cli) -> Result<()> {
 }
 
 fn run_list_tags(args: &Cli) -> Result<()> {
-    let path = args.db_path.clone().unwrap_or_else(|| "rustymap.db".to_string());
+    let path = resolve_db_path(&args.db_path);
     let db = Db::open(&path)?;
     let rows = db.list_tags(args.tag_ip.as_deref())?;
     if rows.is_empty() {
@@ -3961,7 +3977,7 @@ async fn probe_services(
             .filter(|(_, p)| p.state == PortState::Open)
             .map(|(i, _)| i).collect();
         let concurrency = open_idx.len().clamp(4, 32);
-        let infos: Vec<(usize, Option<service_probe::ServiceInfo>)> = stream::iter(open_idx.into_iter())
+        let infos: Vec<(usize, Option<service_probe::ServiceInfo>)> = stream::iter(open_idx)
             .map(|i| {
                 let port = h.ports[i].port;
                 let host = hostname.clone();
@@ -3994,7 +4010,7 @@ async fn run_connect(
         11..=50 => 8,
         _ => 16,
     };
-    stream::iter(targets.into_iter())
+    stream::iter(targets)
         .map(|t| {
             let ports = Arc::clone(&ports);
             let cancel = Arc::clone(&cancel);
@@ -4042,7 +4058,7 @@ async fn run_syn_emu(
         11..=50 => 8,
         _ => 16,
     };
-    stream::iter(targets.into_iter())
+    stream::iter(targets)
         .map(|t| {
             let ports = Arc::clone(&ports);
             let cancel = Arc::clone(&cancel);
@@ -4064,6 +4080,28 @@ async fn run_syn_emu(
         .buffer_unordered(host_concurrency)
         .collect()
         .await
+}
+
+/// Resolve the scan-history DB path (review #8). Precedence: an explicit
+/// `--db` wins; else an existing `rustymap.db` in the cwd is kept (so older
+/// runs keep finding their history); else a per-user data dir
+/// (`~/.local/share/rustymap/…` on Linux, `%APPDATA%\rustymap\…` on Windows),
+/// created if missing. Falls back to `rustymap.db` in the cwd if no data dir
+/// is available.
+fn resolve_db_path(explicit: &Option<String>) -> String {
+    if let Some(p) = explicit {
+        return p.clone();
+    }
+    if std::path::Path::new("rustymap.db").exists() {
+        return "rustymap.db".to_string();
+    }
+    if let Some(dirs) = directories::ProjectDirs::from("", "", "rustymap") {
+        let dir = dirs.data_dir();
+        if std::fs::create_dir_all(dir).is_ok() {
+            return dir.join("rustymap.db").to_string_lossy().into_owned();
+        }
+    }
+    "rustymap.db".to_string()
 }
 
 async fn run_raw_tcp(
@@ -4091,7 +4129,7 @@ async fn run_raw_tcp(
         2..=16 => 3,
         _ => 4,
     };
-    stream::iter(targets.into_iter())
+    stream::iter(targets)
         .map(|t| {
             let ports = Arc::clone(&ports);
             let scanner_arc = Arc::clone(&scanner_arc);

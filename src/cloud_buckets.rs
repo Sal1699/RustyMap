@@ -241,7 +241,7 @@ pub fn print_findings(seed: &str, findings: &[BucketFinding]) {
         println!("  {}", "no public/existing buckets matched the permutations".green());
         return;
     }
-    println!("  {:<8} {:<11} {:<40} {}", "PROV", "STATUS", "NAME", "URL");
+    println!("  {:<8} {:<11} {:<40} URL", "PROV", "STATUS", "NAME");
     for f in findings {
         let label = match f.status {
             BucketStatus::PublicList => "PUBLIC_LIST".red().bold().to_string(),

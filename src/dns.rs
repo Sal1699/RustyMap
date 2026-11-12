@@ -472,7 +472,7 @@ pub async fn dns_enum(
 
     let wc_arc = Arc::new(wildcard_ips.clone());
 
-    let results: Vec<Option<(String, Vec<std::net::IpAddr>)>> = stream::iter(words.into_iter())
+    let results: Vec<Option<(String, Vec<std::net::IpAddr>)>> = stream::iter(words)
         .map(|sub| {
             let resolver = resolver.clone();
             let domain = domain.to_string();
@@ -534,7 +534,7 @@ pub async fn dns_reverse(
     let ips: Vec<std::net::IpAddr> = net.hosts().collect();
     eprintln!("[dns-reverse] scanning {} host(s) in {}", ips.len(), cidr);
 
-    let results: Vec<Option<(std::net::IpAddr, String)>> = stream::iter(ips.into_iter())
+    let results: Vec<Option<(std::net::IpAddr, String)>> = stream::iter(ips)
         .map(|ip| {
             let resolver = resolver.clone();
             let cancel = Arc::clone(&cancel);

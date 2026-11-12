@@ -215,12 +215,11 @@ fn parse_thin_macho(b: &[u8]) -> Option<MachOInfo> {
                     info.encrypted = cryptid != 0;
                 }
             }
-            0x01 | 0x19 => {
+            0x01 | 0x19
                 // LC_SEGMENT[_64]: segname is 16 bytes at off+8.
-                if off + 24 <= b.len() && b[off + 8..off + 24].starts_with(b"__RESTRICT") {
+                if off + 24 <= b.len() && b[off + 8..off + 24].starts_with(b"__RESTRICT") => {
                     info.restrict = true;
                 }
-            }
             _ => {}
         }
         off += cmdsize;
@@ -333,11 +332,10 @@ fn parse_info_plist(bytes: &[u8], report: &mut IpaReport) {
     if let Some(ats) = dict.get("NSAppTransportSecurity").and_then(|v| v.as_dictionary()) {
         audit_ats(ats, report);
     }
-    if dict.get("TSKConfiguration").is_some() {
-        if !report.pinning_libraries.iter().any(|s| s.contains("TrustKit")) {
+    if dict.get("TSKConfiguration").is_some()
+        && !report.pinning_libraries.iter().any(|s| s.contains("TrustKit")) {
             report.pinning_libraries.push("TrustKit (TSKConfiguration in Info.plist)".into());
         }
-    }
     // iOS 14+ NSPinnedDomains.
     if dict.get("NSPinnedDomains").is_some()
         && !report.pinning_libraries.iter().any(|s| s.contains("NSPinnedDomains"))

@@ -253,13 +253,67 @@ pub fn match_fingerprint(observed: &HashMap<String, TestFields>) -> Vec<(&'stati
 
 // ── nmap-service-probes ────────────────────────────────────
 
+/// A compiled service-probe regex. A handful of `nmap-service-probes` lines use
+/// backreferences / lookaround, which the `regex` crate rejects (it guarantees
+/// linear-time matching and so forbids them). Those lines used to be silently
+/// dropped — losing the service match (review #15). We now fall back to
+/// `fancy-regex` (a backtracking engine) for exactly those patterns, so the
+/// probe still matches; the fast engine stays the common path.
+#[derive(Debug, Clone)]
+pub enum CompiledRe {
+    Fast(Regex),
+    Fancy(Box<fancy_regex::Regex>),
+}
+
+impl CompiledRe {
+    /// Compile, preferring the fast engine and falling back to fancy-regex for
+    /// a pattern it can't represent. `None` if neither engine accepts it.
+    pub fn new(pattern: &str) -> Option<Self> {
+        match Regex::new(pattern) {
+            Ok(r) => Some(CompiledRe::Fast(r)),
+            Err(_) => fancy_regex::Regex::new(pattern)
+                .ok()
+                .map(|r| CompiledRe::Fancy(Box::new(r))),
+        }
+    }
+
+    pub fn is_match(&self, data: &str) -> bool {
+        match self {
+            CompiledRe::Fast(r) => r.is_match(data),
+            // fancy-regex returns Err on a backtracking/size cap — treat any
+            // error as "no match" rather than letting it panic a scan.
+            CompiledRe::Fancy(r) => r.is_match(data).unwrap_or(false),
+        }
+    }
+
+    /// Captured groups as owned strings (index 0 = whole match) so `$1`/`$2`
+    /// substitution doesn't depend on either engine's capture type. `None` when
+    /// the pattern didn't match.
+    pub fn capture_groups(&self, data: &str) -> Option<Vec<Option<String>>> {
+        let owned = |len: usize, get: &dyn Fn(usize) -> Option<String>| {
+            (0..len).map(get).collect::<Vec<_>>()
+        };
+        match self {
+            CompiledRe::Fast(r) => r
+                .captures(data)
+                .map(|c| owned(c.len(), &|i| c.get(i).map(|m| m.as_str().to_string()))),
+            CompiledRe::Fancy(r) => match r.captures(data) {
+                Ok(Some(c)) => {
+                    Some(owned(c.len(), &|i| c.get(i).map(|m| m.as_str().to_string())))
+                }
+                _ => None,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ServiceMatch {
     /// Nmap service name (e.g. "http", "ssh"). Kept for future use
     /// (UI hints / per-service filtering); not consumed today.
     #[allow(dead_code)]
     pub service: String,
-    pub regex: Regex,
+    pub regex: CompiledRe,
     pub product: Option<String>,
     pub version: Option<String>,
     pub info: Option<String>,
@@ -502,7 +556,8 @@ fn parse_match_line(line: &str) -> Option<ServiceMatch> {
         full.push_str("(?i)");
     }
     full.push_str(pattern);
-    let regex = Regex::new(&full).ok()?;
+    // Fast engine first, fancy-regex fallback for backref/lookaround (#15).
+    let regex = CompiledRe::new(&full)?;
 
     // Parse trailing fields: p/.../, v/.../, i/.../
     let mut product = None;
@@ -541,8 +596,10 @@ fn parse_match_line(line: &str) -> Option<ServiceMatch> {
     })
 }
 
-/// Apply nmap-style $1, $2 backrefs against a captures iterator.
-fn substitute(template: &str, caps: &regex::Captures) -> String {
+/// Apply nmap-style `$1`, `$2` backrefs against pre-extracted capture groups
+/// (index 0 = whole match), engine-agnostic so both `regex` and `fancy-regex`
+/// matches substitute the same way (review #15).
+fn substitute(template: &str, groups: &[Option<String>]) -> String {
     let mut out = String::new();
     let mut chars = template.chars().peekable();
     while let Some(c) = chars.next() {
@@ -551,8 +608,8 @@ fn substitute(template: &str, caps: &regex::Captures) -> String {
                 if d.is_ascii_digit() {
                     let idx = d.to_digit(10).unwrap() as usize;
                     chars.next();
-                    if let Some(m) = caps.get(idx) {
-                        out.push_str(m.as_str());
+                    if let Some(Some(g)) = groups.get(idx) {
+                        out.push_str(g);
                     }
                     continue;
                 }
@@ -570,10 +627,10 @@ pub fn match_loaded_probes(
 ) -> Option<(Option<String>, Option<String>, Option<String>)> {
     let probes = service_probes()?;
     for p in probes {
-        if let Some(caps) = p.regex.captures(data) {
-            let product = p.product.as_ref().map(|t| substitute(t, &caps));
-            let version = p.version.as_ref().map(|t| substitute(t, &caps));
-            let info = p.info.as_ref().map(|t| substitute(t, &caps));
+        if let Some(groups) = p.regex.capture_groups(data) {
+            let product = p.product.as_ref().map(|t| substitute(t, &groups));
+            let version = p.version.as_ref().map(|t| substitute(t, &groups));
+            let info = p.info.as_ref().map(|t| substitute(t, &groups));
             return Some((product, version, info));
         }
     }
@@ -676,14 +733,14 @@ SEQ(SP=100-110%GCD=1-6%TS=A)
         assert_eq!(m.service, "http");
         assert_eq!(m.product.as_deref(), Some("$1"));
         assert_eq!(m.version.as_deref(), Some("$2"));
-        let caps = m
+        let groups = m
             .regex
-            .captures("HTTP/1.1 200 OK\r\nServer: nginx/1.27.0\r\n")
+            .capture_groups("HTTP/1.1 200 OK\r\nServer: nginx/1.27.0\r\n")
             .unwrap();
-        assert_eq!(caps.get(1).unwrap().as_str(), "nginx");
-        assert_eq!(caps.get(2).unwrap().as_str(), "1.27.0");
-        assert_eq!(substitute(m.product.as_ref().unwrap(), &caps), "nginx");
-        assert_eq!(substitute(m.version.as_ref().unwrap(), &caps), "1.27.0");
+        assert_eq!(groups[1].as_deref(), Some("nginx"));
+        assert_eq!(groups[2].as_deref(), Some("1.27.0"));
+        assert_eq!(substitute(m.product.as_ref().unwrap(), &groups), "nginx");
+        assert_eq!(substitute(m.version.as_ref().unwrap(), &groups), "1.27.0");
     }
 
     #[test]
@@ -703,5 +760,19 @@ match invalid mzfoozinvalid p/$1/
     fn case_insensitive_flag_works() {
         let m = parse_match_line(r#"http m|server: nginx|i"#).unwrap();
         assert!(m.regex.is_match("HTTP/1.1 200 OK\r\nSERVER: NGINX\r\n"));
+    }
+
+    #[test]
+    #[allow(clippy::invalid_regex)] // the backref is deliberately invalid here
+    fn compiled_re_falls_back_to_fancy_for_backrefs() {
+        // The `regex` crate rejects backreferences; fancy-regex accepts them,
+        // so the probe compiles instead of being dropped (review #15).
+        assert!(Regex::new(r"(a+)\1").is_err());
+        let re = CompiledRe::new(r"(a+)\1").expect("fancy-regex should accept a backref");
+        assert!(matches!(re, CompiledRe::Fancy(_)));
+        assert!(re.is_match("aaaa"));
+        assert!(!re.is_match("abc"));
+        // A plain pattern still rides the fast linear-time engine.
+        assert!(matches!(CompiledRe::new(r"^HTTP/1\.[01]").unwrap(), CompiledRe::Fast(_)));
     }
 }

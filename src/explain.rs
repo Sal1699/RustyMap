@@ -177,7 +177,7 @@ pub fn explain(args: &[String]) -> Vec<Gloss> {
         } else if key.starts_with('-') {
             out.push(Gloss {
                 token: raw.clone(),
-                gloss: format!("(flag sconosciuto — vedi --guide per il catalogo completo)"),
+                gloss: "(flag sconosciuto — vedi --guide per il catalogo completo)".to_string(),
             });
         }
     }

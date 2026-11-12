@@ -82,7 +82,7 @@ async fn probe_modbus(ip: IpAddr, dur: Duration) -> Option<IcsFinding> {
         0x00, 0x01, 0x00, 0x00, 0x00, 0x05, 0xff,
         0x2b, 0x0e, 0x01, 0x00,
     ];
-    req[5] = (req.len() as u16 - 6) as u8 & 0xff;
+    req[5] = (req.len() as u16 - 6) as u8;
 
     let mut s = timeout(dur, TcpStream::connect(SocketAddr::new(ip, 502))).await.ok()?.ok()?;
     timeout(dur, s.write_all(&req)).await.ok()?.ok()?;

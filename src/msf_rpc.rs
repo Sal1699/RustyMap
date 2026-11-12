@@ -155,7 +155,7 @@ fn lookup<'a>(map: &'a [(Value, Value)], key: &str) -> Option<&'a Value> {
 }
 
 fn lookup_str(map: &[(Value, Value)], key: &str) -> Option<String> {
-    lookup(map, key).and_then(|v| value_as_str(v))
+    lookup(map, key).and_then(value_as_str)
 }
 
 fn has_error_flag(map: &[(Value, Value)]) -> bool {

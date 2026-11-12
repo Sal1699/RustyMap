@@ -93,9 +93,7 @@ async fn try_community(host: IpAddr, community: &str, dur: Duration) -> Option<S
 
     f.sys_descr = snmp_get(&sock, &dst, community, request_id, OID_SYS_DESCR, dur).await
         .and_then(|v| v.as_string());
-    if f.sys_descr.is_none() {
-        return None; // wrong community / not SNMPv1
-    }
+    f.sys_descr.as_ref()?;
     f.sys_name = snmp_get(&sock, &dst, community, request_id + 1, OID_SYS_NAME, dur).await
         .and_then(|v| v.as_string());
     f.sys_location = snmp_get(&sock, &dst, community, request_id + 2, OID_SYS_LOCATION, dur).await

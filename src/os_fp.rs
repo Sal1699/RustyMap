@@ -506,7 +506,7 @@ fn refine_from_tcp_fp(host: &HostResult, guess: &mut OsGuess, timeout: Duration)
             // the *combination* max-TTL replies with DF cleared + a
             // predictable ISN + a 0xFFFF SYN/ACK window is Slirp-specific.
             let predictable = !matches!(isn, crate::tcp_fp::IsnClass::Random);
-            let nat_sig = suite.as_ref().map_or(false, |s| s.nat_gateway_signature());
+            let nat_sig = suite.as_ref().is_some_and(|s| s.nat_gateway_signature());
             if predictable && nat_sig && fp.window == 65535 {
                 // This signature ALSO appears on real embedded Linux stacks, so
                 // it is recorded as a HINT only — never the headline OS verdict

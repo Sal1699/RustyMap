@@ -131,7 +131,7 @@ pub fn extract_salt(body: &[u8]) -> Result<[u8; 20]> {
     if p + 12 > body.len() {
         return Err(anyhow!("handshake truncated in salt2"));
     }
-    let salt2_len = 12.min(body.len() - p).max(0);
+    let salt2_len = 12.min(body.len() - p);
     let _ = auth_len;
     let salt2 = &body[p..p + salt2_len];
 

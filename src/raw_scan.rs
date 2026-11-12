@@ -16,7 +16,8 @@ use rand::Rng;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -259,7 +260,7 @@ impl RawTcpScanner {
 
         let (sender, receiver) = mpsc::channel::<Response>();
         {
-            self.pending.lock().unwrap().insert(
+            self.pending.lock().insert(
                 (dst_ip, dst_port),
                 Pending { sender, exp_src_port: src_port, exp_ack },
             );
@@ -274,7 +275,7 @@ impl RawTcpScanner {
         let send_ok = if ev.needs_layer3() {
             // Layer3 path — full IP control (TTL, fragmentation, decoys)
             if let Some(ref tx3) = self.tx3 {
-                let mut tx = tx3.lock().unwrap();
+                let mut tx = tx3.lock();
                 evasion::send_with_decoys(
                     &mut tx,
                     src_ip,
@@ -298,7 +299,7 @@ impl RawTcpScanner {
                 src_port,
                 &ev,
             );
-            let mut tx = self.tx4.lock().unwrap();
+            let mut tx = self.tx4.lock();
             let pkt = TcpPacket::new(&tcp).unwrap();
             tx.send_to(pkt, IpAddr::V4(dst_ip)).is_ok()
         };
@@ -363,7 +364,6 @@ impl RawTcpScanner {
 
         self.pending
             .lock()
-            .unwrap()
             .remove(&(dst_ip, dst_port));
         (state, rtt)
     }
@@ -397,7 +397,7 @@ impl RawTcpScanner {
 
         let (sender, receiver) = mpsc::channel::<Response>();
         {
-            self.pending.lock().unwrap().insert(
+            self.pending.lock().insert(
                 (dst_ip, dst_port),
                 Pending { sender, exp_src_port: src_port, exp_ack },
             );
@@ -409,14 +409,14 @@ impl RawTcpScanner {
 
         let send_ok = if ev.needs_layer3() {
             if let Some(ref tx3) = self.tx3 {
-                let mut tx = tx3.lock().unwrap();
+                let mut tx = tx3.lock();
                 evasion::send_with_decoys(&mut tx, src_ip, dst_ip, dst_port, flags, src_port, &ev)
             } else {
                 false
             }
         } else {
             let tcp = evasion::build_tcp_segment(src_ip, dst_ip, dst_port, flags, seq, src_port, &ev);
-            let mut tx = self.tx4.lock().unwrap();
+            let mut tx = self.tx4.lock();
             let pkt = TcpPacket::new(&tcp).unwrap();
             tx.send_to(pkt, IpAddr::V4(dst_ip)).is_ok()
         };
@@ -431,7 +431,7 @@ impl RawTcpScanner {
 
     /// Remove a pending entry (fast path, after collecting or timing out).
     fn clear_pending(&self, dst_ip: Ipv4Addr, dst_port: u16) {
-        self.pending.lock().unwrap().remove(&(dst_ip, dst_port));
+        self.pending.lock().remove(&(dst_ip, dst_port));
     }
 
     /// Fase 30 (Linux): the `sendmmsg(2)` burst path is only byte-for-byte
@@ -475,7 +475,7 @@ impl RawTcpScanner {
             let exp_ack = matches!(kind, RawTcpKind::Syn).then_some(seq.wrapping_add(1));
             let seg = evasion::build_tcp_segment(src_ip, dst_ip, p, flags, seq, src_port, &ev);
             let (sender, receiver) = mpsc::channel::<Response>();
-            self.pending.lock().unwrap().insert(
+            self.pending.lock().insert(
                 (dst_ip, p),
                 Pending { sender, exp_src_port: src_port, exp_ack },
             );
@@ -673,7 +673,7 @@ fn receiver_loop(mut rx: TransportReceiver, pending: PendingMap) {
         }
 
         let sender_opt = {
-            let pend = pending.lock().unwrap();
+            let pend = pending.lock();
             pend.get(&(remote_ip, remote_port)).and_then(|p| {
                 // Correlate to the exact probe (review #1): the reply must be
                 // addressed back to the local port we sent from, and a genuine

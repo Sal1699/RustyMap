@@ -123,7 +123,7 @@ async fn probe_aws(client: &reqwest::Client, via: Option<&str>) -> Option<ImdsHi
         .send()
         .await
         .ok()
-        .and_then(|r| if r.status().is_success() { Some(r) } else { None })
+        .filter(|r| r.status().is_success())
         .map(|r| async { r.text().await.ok() });
     let token = match token {
         Some(fut) => fut.await,
@@ -204,7 +204,7 @@ async fn probe_gcp(client: &reqwest::Client, via: Option<&str>) -> Option<ImdsHi
         ..Default::default()
     };
     hit.instance_id = json_field(&body, "id");
-    hit.region = json_field(&body, "zone").map(|z| z.split('/').last().unwrap_or(&z).to_string());
+    hit.region = json_field(&body, "zone").map(|z| z.split('/').next_back().unwrap_or(&z).to_string());
     hit.iam_role = json_field(&body, "serviceAccounts");
     hit.raw_excerpt = body.chars().take(400).collect();
     Some(hit)
@@ -268,7 +268,7 @@ fn json_field(body: &str, key: &str) -> Option<String> {
         Some(stripped[..end].to_string())
     } else {
         let end = trimmed
-            .find(|c: char| c == ',' || c == '}' || c == '\n')
+            .find([',', '}', '\n'])
             .unwrap_or(trimmed.len().min(64));
         let candidate = trimmed[..end].trim().to_string();
         if candidate.is_empty() {
@@ -317,6 +317,12 @@ pub fn print_report(r: &MetadataReport) -> Result<()> {
     Ok(())
 }
 
+// Suppress unused-Result on the future-of-Option pattern in probe_aws.
+#[allow(dead_code)]
+fn _crate_used(_: anyhow::Error) {
+    let _ = anyhow!("unused");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,10 +356,4 @@ mod tests {
         assert!(v.starts_with("http://target/?u="));
         assert!(v.contains("%2F"));
     }
-}
-
-// Suppress unused-Result on the future-of-Option pattern in probe_aws.
-#[allow(dead_code)]
-fn _crate_used(_: anyhow::Error) {
-    let _ = anyhow!("unused");
 }

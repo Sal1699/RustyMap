@@ -131,7 +131,7 @@ pub fn parse_offer(buf: &[u8], expected_xid: u32) -> Option<DhcpOffer> {
     if xid != expected_xid {
         return None;
     }
-    if &buf[236..240] != DHCP_MAGIC {
+    if buf[236..240] != DHCP_MAGIC {
         return None;
     }
 
@@ -175,7 +175,7 @@ pub fn parse_offer(buf: &[u8], expected_xid: u32) -> Option<DhcpOffer> {
                 o.router = Some(Ipv4Addr::new(data[0], data[1], data[2], data[3]).to_string());
             }
             6 => {
-                for chunk in data.chunks_exact(4) {
+                for chunk in data.as_chunks::<4>().0 {
                     o.dns_servers.push(
                         Ipv4Addr::new(chunk[0], chunk[1], chunk[2], chunk[3]).to_string(),
                     );

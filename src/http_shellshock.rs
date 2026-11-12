@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn cgi_paths_list_covers_common_layouts() {
         for p in ["/cgi-bin/", "/cgi-sys/", "/cgi-mod/", "/scripts/"] {
-            assert!(CGI_PATHS.iter().any(|x| *x == p), "missing {}", p);
+            assert!(CGI_PATHS.contains(&p), "missing {}", p);
         }
     }
 

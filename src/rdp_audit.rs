@@ -75,7 +75,7 @@ pub async fn audit(ip: IpAddr, port: u16, dur: Duration) -> Result<RdpAudit> {
         return Err(anyhow!("not a TPKT response (first byte 0x{:02x})", tpkt[0]));
     }
     let total = ((tpkt[2] as usize) << 8) | tpkt[3] as usize;
-    if total < 11 || total > 1024 {
+    if !(11..=1024).contains(&total) {
         return Err(anyhow!("bogus TPKT length {}", total));
     }
     let mut rest = vec![0u8; total - 4];

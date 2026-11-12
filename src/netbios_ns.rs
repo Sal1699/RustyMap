@@ -158,12 +158,11 @@ fn parse_nbstat_response(buf: &[u8], host: IpAddr) -> Option<NbtFinding> {
             0x03 => {
                 finding.logged_user = Some(name_trimmed.clone());
             }
-            0x20 if (flags & 0x8000) == 0 => {
+            0x20 if (flags & 0x8000) == 0
                 // File-server service — confirms it's a "Server"
-                if finding.computer_name.is_none() {
+                && finding.computer_name.is_none() => {
                     finding.computer_name = Some(name_trimmed.clone());
                 }
-            }
             _ => {}
         }
         finding.names.push(NbtName {

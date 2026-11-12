@@ -289,7 +289,7 @@ mod tests {
         ske.extend_from_slice(&256u16.to_be_bytes());
         // First byte non-zero high bit → full 2048 bits used.
         ske.push(0xff);
-        ske.extend(std::iter::repeat(0x00).take(255));
+        ske.extend(std::iter::repeat_n(0x00, 255));
         let rec = make_record(&ske);
         let bits = scan_for_ske_dh_prime(&rec);
         assert_eq!(bits, Some(2048));
@@ -301,7 +301,7 @@ mod tests {
         let mut ske = vec![0x0c, 0x00, 0x00, 0x42];
         ske.extend_from_slice(&64u16.to_be_bytes());
         ske.push(0x80); // leading_zeros = 0 → 64*8 = 512
-        ske.extend(std::iter::repeat(0x00).take(63));
+        ske.extend(std::iter::repeat_n(0x00, 63));
         let rec = make_record(&ske);
         assert_eq!(scan_for_ske_dh_prime(&rec), Some(512));
     }

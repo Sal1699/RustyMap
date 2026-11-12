@@ -122,7 +122,7 @@ async fn read_packet(s: &mut TcpStream, dur: Duration) -> Result<Vec<u8>> {
     let mut len = [0u8; 4];
     timeout(dur, s.read_exact(&mut len)).await??;
     let pkt_len = u32::from_be_bytes(len) as usize;
-    if pkt_len < 1 || pkt_len > 35_000 {
+    if !(1..=35_000).contains(&pkt_len) {
         return Err(anyhow!("bogus SSH packet length {}", pkt_len));
     }
     let mut rest = vec![0u8; pkt_len];

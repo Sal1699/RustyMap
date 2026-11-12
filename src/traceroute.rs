@@ -91,6 +91,41 @@ fn parse_hop_line(line: &str) -> Option<Hop> {
     Some(Hop { ttl, ip })
 }
 
+/// Render a list of trace results as a Graphviz DOT graph.
+pub fn render_dot(traces: &[TraceResult]) -> String {
+    let mut out = String::new();
+    out.push_str("digraph rustymap_topology {\n");
+    out.push_str("    rankdir=LR;\n");
+    out.push_str("    node [shape=box, style=rounded];\n");
+    out.push_str("    \"scanner\" [shape=ellipse, style=filled, fillcolor=lightblue];\n");
+
+    let mut seen_edges = std::collections::HashSet::new();
+    for t in traces {
+        let mut prev = "scanner".to_string();
+        for hop in &t.hops {
+            let label = match hop.ip {
+                Some(ip) => ip.to_string(),
+                None => format!("ttl{}-?", hop.ttl),
+            };
+            let key = format!("{}->{}", prev, label);
+            if seen_edges.insert(key) {
+                out.push_str(&format!("    \"{}\" -> \"{}\";\n", prev, label));
+            }
+            prev = label;
+        }
+        let dst_label = t
+            .destination
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| t.target.clone());
+        out.push_str(&format!(
+            "    \"{}\" [shape=box, style=\"rounded,filled\", fillcolor=palegreen];\n",
+            dst_label
+        ));
+    }
+    out.push_str("}\n");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,39 +174,4 @@ mod tests {
         assert!(dot.contains("\"scanner\" -> \"10.0.0.1\""));
         assert!(dot.contains("\"10.0.0.1\" -> \"1.1.1.1\""));
     }
-}
-
-/// Render a list of trace results as a Graphviz DOT graph.
-pub fn render_dot(traces: &[TraceResult]) -> String {
-    let mut out = String::new();
-    out.push_str("digraph rustymap_topology {\n");
-    out.push_str("    rankdir=LR;\n");
-    out.push_str("    node [shape=box, style=rounded];\n");
-    out.push_str("    \"scanner\" [shape=ellipse, style=filled, fillcolor=lightblue];\n");
-
-    let mut seen_edges = std::collections::HashSet::new();
-    for t in traces {
-        let mut prev = "scanner".to_string();
-        for hop in &t.hops {
-            let label = match hop.ip {
-                Some(ip) => ip.to_string(),
-                None => format!("ttl{}-?", hop.ttl),
-            };
-            let key = format!("{}->{}", prev, label);
-            if seen_edges.insert(key) {
-                out.push_str(&format!("    \"{}\" -> \"{}\";\n", prev, label));
-            }
-            prev = label;
-        }
-        let dst_label = t
-            .destination
-            .map(|d| d.to_string())
-            .unwrap_or_else(|| t.target.clone());
-        out.push_str(&format!(
-            "    \"{}\" [shape=box, style=\"rounded,filled\", fillcolor=palegreen];\n",
-            dst_label
-        ));
-    }
-    out.push_str("}\n");
-    out
 }

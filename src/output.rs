@@ -132,40 +132,6 @@ fn rich_exposure_line(host: &HostResult) -> Option<String> {
     Some(format!("{}  ({}{})", head, preview.join(" · ").dimmed(), more))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn syn_open_is_synack() {
-        assert_eq!(reason_for("Syn", PortState::Open), "syn-ack");
-    }
-
-    #[test]
-    fn connect_open_is_established() {
-        assert_eq!(reason_for("Connect", PortState::Open), "conn-established");
-    }
-
-    #[test]
-    fn closed_maps_per_scan_type() {
-        assert_eq!(reason_for("Connect", PortState::Closed), "conn-refused");
-        assert_eq!(reason_for("Syn", PortState::Closed), "rst");
-        assert_eq!(reason_for("Udp", PortState::Closed), "icmp-port-unreach");
-    }
-
-    #[test]
-    fn filtered_is_universal() {
-        assert_eq!(reason_for("Connect", PortState::Filtered), "no-response");
-        assert_eq!(reason_for("Syn", PortState::Filtered), "no-response");
-        assert_eq!(reason_for("Udp", PortState::Filtered), "no-response");
-    }
-
-    #[test]
-    fn ack_unfiltered_is_rst() {
-        assert_eq!(reason_for("Ack", PortState::Unfiltered), "rst");
-    }
-}
-
 pub fn print_host_with_reason(host: &HostResult, verbose: u8, scan_type: &str, show_reason: bool) {
     print_host_inner(host, verbose, scan_type, show_reason);
 }
@@ -621,4 +587,38 @@ pub fn write_grepable(path: &str, hosts: &[HostResult]) -> Result<()> {
         writeln!(f)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn syn_open_is_synack() {
+        assert_eq!(reason_for("Syn", PortState::Open), "syn-ack");
+    }
+
+    #[test]
+    fn connect_open_is_established() {
+        assert_eq!(reason_for("Connect", PortState::Open), "conn-established");
+    }
+
+    #[test]
+    fn closed_maps_per_scan_type() {
+        assert_eq!(reason_for("Connect", PortState::Closed), "conn-refused");
+        assert_eq!(reason_for("Syn", PortState::Closed), "rst");
+        assert_eq!(reason_for("Udp", PortState::Closed), "icmp-port-unreach");
+    }
+
+    #[test]
+    fn filtered_is_universal() {
+        assert_eq!(reason_for("Connect", PortState::Filtered), "no-response");
+        assert_eq!(reason_for("Syn", PortState::Filtered), "no-response");
+        assert_eq!(reason_for("Udp", PortState::Filtered), "no-response");
+    }
+
+    #[test]
+    fn ack_unfiltered_is_rst() {
+        assert_eq!(reason_for("Ack", PortState::Unfiltered), "rst");
+    }
 }

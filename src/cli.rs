@@ -658,7 +658,8 @@ pub struct Cli {
     #[arg(long = "oJL")]
     pub output_jsonl: Option<String>,
 
-    /// SQLite database path for persistent scan history (default: rustymap.db)
+    /// SQLite database path for persistent scan history. Default: ./rustymap.db
+    /// if one already exists, else a per-user data dir (e.g. ~/.local/share/rustymap)
     #[arg(long = "db")]
     pub db_path: Option<String>,
 

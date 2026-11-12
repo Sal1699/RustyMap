@@ -337,10 +337,8 @@ mod tests {
 
     #[test]
     fn filter_by_severity() {
-        let metas = vec![
-            PluginMeta { name: "a".into(), severity: Some(Severity::High), ..Default::default() },
-            PluginMeta { name: "b".into(), severity: Some(Severity::Low), ..Default::default() },
-        ];
+        let metas = [PluginMeta { name: "a".into(), severity: Some(Severity::High), ..Default::default() },
+            PluginMeta { name: "b".into(), severity: Some(Severity::Low), ..Default::default() }];
         let f = CatalogFilter { severity: Some(Severity::High), ..Default::default() };
         let kept: Vec<_> = metas.iter().filter(|m| f.matches(m)).collect();
         assert_eq!(kept.len(), 1);
@@ -349,21 +347,18 @@ mod tests {
 
     #[test]
     fn filter_by_cve_case_insensitive() {
-        let metas = vec![
-            PluginMeta {
+        let metas = [PluginMeta {
                 name: "log4j".into(),
                 cves: vec!["CVE-2021-44228".into()],
                 ..Default::default()
-            },
-        ];
+            }];
         let f = CatalogFilter { cve: Some("cve-2021-44228".into()), ..Default::default() };
         assert_eq!(metas.iter().filter(|m| f.matches(m)).count(), 1);
     }
 
     #[test]
     fn filter_by_tag_intersect_severity() {
-        let metas = vec![
-            PluginMeta {
+        let metas = [PluginMeta {
                 name: "a".into(),
                 tags: vec!["jwt".into()],
                 severity: Some(Severity::High),
@@ -374,8 +369,7 @@ mod tests {
                 tags: vec!["jwt".into()],
                 severity: Some(Severity::Low),
                 ..Default::default()
-            },
-        ];
+            }];
         let f = CatalogFilter { tag: Some("jwt".into()), severity: Some(Severity::High), ..Default::default() };
         let kept: Vec<_> = metas.iter().filter(|m| f.matches(m)).collect();
         assert_eq!(kept.len(), 1);

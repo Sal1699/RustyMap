@@ -356,7 +356,7 @@ pub fn print_guide() {
     line("130  interrotto (Ctrl-C)");
 
     section("DATABASE & DIFF");
-    line("--db FILE             Path SQLite (default: rustymap.db)");
+    line("--db FILE             Path SQLite (default: ./rustymap.db se esiste, altrimenti dir dati utente)");
     line("--no-db               Disabilita persistenza");
     line("--diff                Mostra diff rispetto alla scansione precedente");
     example("rustymap --sT --db lab.db 10.0.0.5");

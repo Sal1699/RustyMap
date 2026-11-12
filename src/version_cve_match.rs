@@ -69,7 +69,7 @@ pub fn parse_banner(banner: &str) -> Option<(String, String)> {
     // Split on '/' first (e.g. nginx/1.18.0).
     if let Some((p, v)) = trimmed.split_once('/') {
         let p = p.trim().to_string();
-        let v = v.trim().split_whitespace().next()?.to_string();
+        let v = v.split_whitespace().next()?.to_string();
         if !p.is_empty() && !v.is_empty() {
             return Some((p, v));
         }

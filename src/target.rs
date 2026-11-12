@@ -75,7 +75,7 @@ pub fn iface_to_scope_id(name: &str) -> u32 {
         // listing with index info, which we already use elsewhere.
         for iface in pnet::datalink::interfaces() {
             if iface.name.eq_ignore_ascii_case(name) || iface.description.eq_ignore_ascii_case(name) {
-                return iface.index as u32;
+                return iface.index;
             }
         }
     }
@@ -311,6 +311,27 @@ fn split_zone_id(spec: &str) -> (&str, Option<&str>) {
     }
 }
 
+fn parse_ipv4_range(spec: &str) -> Option<Vec<Ipv4Addr>> {
+    let (lhs, rhs) = spec.split_once('-')?;
+    let start: Ipv4Addr = lhs.parse().ok()?;
+
+    let end: Ipv4Addr = if let Ok(full) = rhs.parse::<Ipv4Addr>() {
+        full
+    } else {
+        // last octet shorthand
+        let last: u8 = rhs.parse().ok()?;
+        let [a, b, c, _] = start.octets();
+        Ipv4Addr::new(a, b, c, last)
+    };
+
+    let s = u32::from(start);
+    let e = u32::from(end);
+    if e < s || (e - s) > 65535 {
+        return None;
+    }
+    Some((s..=e).map(Ipv4Addr::from).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,25 +428,4 @@ mod tests {
         assert_eq!(out[0].zone.as_deref(), Some("eth0"));
         assert!(matches!(out[0].ip, IpAddr::V6(_)));
     }
-}
-
-fn parse_ipv4_range(spec: &str) -> Option<Vec<Ipv4Addr>> {
-    let (lhs, rhs) = spec.split_once('-')?;
-    let start: Ipv4Addr = lhs.parse().ok()?;
-
-    let end: Ipv4Addr = if let Ok(full) = rhs.parse::<Ipv4Addr>() {
-        full
-    } else {
-        // last octet shorthand
-        let last: u8 = rhs.parse().ok()?;
-        let [a, b, c, _] = start.octets();
-        Ipv4Addr::new(a, b, c, last)
-    };
-
-    let s = u32::from(start);
-    let e = u32::from(end);
-    if e < s || (e - s) > 65535 {
-        return None;
-    }
-    Some((s..=e).map(Ipv4Addr::from).collect())
 }

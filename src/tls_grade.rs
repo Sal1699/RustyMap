@@ -252,7 +252,7 @@ async fn probe_heartbleed(ip: IpAddr, port: u16, dur: Duration) -> bool {
         };
         // Look for an alert (record type 0x15) anywhere in this read —
         // patched server may abort here.
-        if tmp[..n].iter().any(|&b| b == 0x15) && tmp[0] == 0x15 {
+        if tmp[..n].contains(&0x15) && tmp[0] == 0x15 {
             return false;
         }
         // ServerHelloDone often appears as 0x16 ... 0x0e (handshake

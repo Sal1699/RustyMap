@@ -53,15 +53,11 @@ use tokio_rustls::TlsConnector;
 
 type HmacMd5 = Hmac<Md5>;
 
+#[derive(Default)]
 pub struct RdpAdapter {
     pub domain: String,
 }
 
-impl Default for RdpAdapter {
-    fn default() -> Self {
-        Self { domain: String::new() }
-    }
-}
 
 #[async_trait]
 impl BruteAdapter for RdpAdapter {
@@ -171,7 +167,7 @@ async fn read_x224_cc(s: &mut TcpStream, dur: std::time::Duration) -> Result<Vec
     let mut hdr = [0u8; 4];
     timeout(dur, s.read_exact(&mut hdr)).await??;
     let total = ((hdr[2] as usize) << 8) | hdr[3] as usize;
-    if total < 4 || total > 1024 {
+    if !(4..=1024).contains(&total) {
         return Err(anyhow!("bogus TPKT length"));
     }
     let mut body = vec![0u8; total - 4];

@@ -191,7 +191,7 @@ async fn read_server_flight(s: &mut TcpStream, dur: Duration) -> HsOutcome {
             first = false;
         }
         // ServerHelloDone byte inside the handshake flight → ready for the CCS.
-        if buf[..n].iter().any(|&b| b == 0x0e) {
+        if buf[..n].contains(&0x0e) {
             return HsOutcome::HelloDone;
         }
     }

@@ -249,7 +249,7 @@ pub fn build_login7(user: &str, password: &str, database: &str) -> Vec<u8> {
 
 /// MS-TDS password obfuscation: swap nibbles, XOR 0xA5.
 pub fn obfuscate_byte(b: u8) -> u8 {
-    let swapped = (b >> 4) | (b << 4);
+    let swapped = b.rotate_left(4);
     swapped ^ 0xA5
 }
 
@@ -273,7 +273,7 @@ async fn read_tds_packet(s: &mut TcpStream, dur: std::time::Duration) -> Result<
     let mut hdr = [0u8; 8];
     timeout(dur, s.read_exact(&mut hdr)).await??;
     let total = u16::from_be_bytes([hdr[2], hdr[3]]) as usize;
-    if total < 8 || total > 65536 {
+    if !(8..=65536).contains(&total) {
         return Err(anyhow!("bogus TDS packet length {}", total));
     }
     let mut body = vec![0u8; total - 8];
@@ -548,7 +548,7 @@ pub fn classify_login_response(body: &[u8]) -> bool {
                 p += 3 + len;
             }
             // DONE / DONEINPROC / DONEPROC are fixed 13 bytes
-            0xFD | 0xFE | 0xFF => {
+            0xFD..=0xFF => {
                 if p + 13 > body.len() {
                     return false;
                 }
@@ -583,7 +583,7 @@ mod tests {
             let enc = obfuscate_byte(b);
             // Decode: XOR 0xA5 then swap nibbles
             let xored = enc ^ 0xA5;
-            let dec = (xored >> 4) | (xored << 4);
+            let dec = xored.rotate_left(4);
             assert_eq!(dec, b, "round-trip failed for {:#x}", b);
         }
     }

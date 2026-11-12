@@ -14,19 +14,6 @@ fn host_is_loopback_self(host: &str, port: &str) -> bool {
         || h == format!("[::1]:{}", port)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::host_is_loopback_self;
-    #[test]
-    fn host_guard_allows_only_loopback_self() {
-        assert!(host_is_loopback_self("127.0.0.1:8088", "8088"));
-        assert!(host_is_loopback_self("localhost:8088", "8088"));
-        assert!(host_is_loopback_self("LOCALHOST:8088", "8088"));
-        assert!(!host_is_loopback_self("evil.example.com:8088", "8088"));
-        assert!(!host_is_loopback_self("127.0.0.1:9999", "8088")); // wrong port
-    }
-}
-
 pub fn serve(addr: &str, db_path: &str) -> Result<()> {
     let server = Server::http(addr).map_err(|e| anyhow::anyhow!("bind: {}", e))?;
     println!("RustyMap web UI listening on http://{}/", addr);
@@ -106,4 +93,17 @@ fn api_scan_detail(db_path: &str, scan_id: i64) -> Result<Value> {
         }));
     }
     Ok(json!({ "scan_id": scan_id, "hosts": out }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::host_is_loopback_self;
+    #[test]
+    fn host_guard_allows_only_loopback_self() {
+        assert!(host_is_loopback_self("127.0.0.1:8088", "8088"));
+        assert!(host_is_loopback_self("localhost:8088", "8088"));
+        assert!(host_is_loopback_self("LOCALHOST:8088", "8088"));
+        assert!(!host_is_loopback_self("evil.example.com:8088", "8088"));
+        assert!(!host_is_loopback_self("127.0.0.1:9999", "8088")); // wrong port
+    }
 }

@@ -77,9 +77,75 @@ fn fmt_mac(mac: &[u8; 6]) -> String {
     )
 }
 
-/// Apply the MAC to the named interface. Returns Ok if the OS accepted
-/// it. Restoration is the user's responsibility (we don't track the
-/// original MAC across runs).
+/// Read the current MAC of `iface` so it can be restored later (review #9).
+/// Linux reads `/sys/class/net/<iface>/address`; macOS parses `ifconfig`.
+/// Returns `None` on Windows or if the address can't be read/parsed.
+pub fn current_mac(iface: &str) -> Option<[u8; 6]> {
+    #[cfg(target_os = "linux")]
+    {
+        let s = std::fs::read_to_string(format!("/sys/class/net/{}/address", iface)).ok()?;
+        parse_mac_str(s.trim())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("ifconfig").arg(iface).output().ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        // Find the token after "ether" (the link-layer address line).
+        text.split_whitespace()
+            .skip_while(|w| *w != "ether")
+            .nth(1)
+            .and_then(parse_mac_str)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = iface;
+        None
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn parse_mac_str(s: &str) -> Option<[u8; 6]> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 6 {
+        return None;
+    }
+    let mut out = [0u8; 6];
+    for (i, p) in parts.iter().enumerate() {
+        out[i] = u8::from_str_radix(p, 16).ok()?;
+    }
+    Some(out)
+}
+
+/// RAII guard that restores a NIC's original MAC when dropped (review #9). nmap
+/// leaves the spoofed MAC in place; we put it back on a clean exit (normal
+/// finish *or* an error-return/unwind). Best-effort only: a SIGKILL or a hard
+/// crash skips Drop, the same caveat nmap documents — the restore is not a
+/// guarantee.
+pub struct MacRestore {
+    iface: String,
+    original: [u8; 6],
+}
+
+impl MacRestore {
+    pub fn new(iface: &str, original: [u8; 6]) -> Self {
+        Self { iface: iface.to_string(), original }
+    }
+}
+
+impl Drop for MacRestore {
+    fn drop(&mut self) {
+        match apply(&self.iface, &self.original) {
+            Ok(m) => eprintln!("[spoof-mac] restored {} to {}", self.iface, m),
+            Err(e) => eprintln!(
+                "[spoof-mac] WARNING: could not restore {}'s MAC ({}); set it back manually",
+                self.iface, e
+            ),
+        }
+    }
+}
+
+/// Apply the MAC to the named interface. Returns Ok if the OS accepted it.
+/// Pair with [`current_mac`] + [`MacRestore`] to put the original back on exit.
 pub fn apply(iface: &str, mac: &[u8; 6]) -> Result<String> {
     let mac_s = fmt_mac(mac);
 

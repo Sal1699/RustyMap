@@ -46,7 +46,7 @@ pub fn cert_weaknesses(c: &crate::tls_probe::TlsInfo) -> Vec<String> {
     if let Some(bits) = c.key_bits {
         // RSA/DSA < 2048 is weak; EC keys are small by design so only flag
         // the clearly-RSA-sized range.
-        if bits >= 512 && bits < 2048 {
+        if (512..2048).contains(&bits) {
             out.push(format!("weak key: {}-bit (use >= 2048-bit RSA or ECDSA)", bits));
         }
     }

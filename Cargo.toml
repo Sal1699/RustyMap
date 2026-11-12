@@ -1,6 +1,6 @@
 [package]
 name = "rustymap"
-version = "0.106.2"
+version = "0.107.0"
 edition = "2021"
 description = "A Rust port of nmap for network exploration and security auditing"
 license = "MIT"
@@ -33,7 +33,15 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 ctrlc = "3"
 tera = "1"
 regex = "1"
+# Backtracking fallback for the handful of nmap-service-probes patterns that
+# use backreferences / lookaround (the `regex` crate rejects those). Review #15.
+fancy-regex = "0.13"
+# Per-user data dir for the default scan-history DB (review #8).
+directories = "5"
 once_cell = "1"
+# Non-poisoning mutexes so one panicked scan thread can't cascade-panic every
+# other thread's lock().unwrap() on a shared pending map / socket (review #10).
+parking_lot = "0.12"
 rhai = { version = "1.18", features = ["sync"] }
 aes-gcm = "0.10"
 argon2 = "0.5"

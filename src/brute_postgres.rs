@@ -140,7 +140,7 @@ async fn read_message(s: &mut TcpStream, dur: std::time::Duration) -> Result<(u8
     let mut hdr = [0u8; 5];
     timeout(dur, s.read_exact(&mut hdr)).await??;
     let len = u32::from_be_bytes([hdr[1], hdr[2], hdr[3], hdr[4]]) as usize;
-    if len < 4 || len > 65536 {
+    if !(4..=65536).contains(&len) {
         return Err(anyhow::anyhow!("bogus PG message length {}", len));
     }
     let mut body = vec![0u8; len - 4];

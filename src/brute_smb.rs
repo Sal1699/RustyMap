@@ -38,15 +38,11 @@ use tokio::time::timeout;
 
 type HmacMd5 = Hmac<Md5>;
 
+#[derive(Default)]
 pub struct SmbAdapter {
     pub domain: String,
 }
 
-impl Default for SmbAdapter {
-    fn default() -> Self {
-        Self { domain: String::new() } // empty = workgroup mode
-    }
-}
 
 #[async_trait]
 impl BruteAdapter for SmbAdapter {
@@ -434,7 +430,7 @@ pub fn parse_setup_action(body: &[u8]) -> Option<u16> {
 /// signals a guest mapping here (lab: Samba 3.0.20 still false-positived with
 /// this check) — see the `RUSTYMAP_SMB_DEBUG` diagnostics in `try_one`.
 pub fn setup_granted_guest(body: &[u8]) -> bool {
-    parse_setup_action(body).map_or(false, |a| a & 0x0001 != 0)
+    parse_setup_action(body).is_some_and(|a| a & 0x0001 != 0)
 }
 
 #[cfg(test)]

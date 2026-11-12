@@ -10,7 +10,8 @@
 use hickory_resolver::TokioAsyncResolver;
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::{Mutex, OnceLock};
+use parking_lot::Mutex;
+use std::sync::OnceLock;
 
 /// Pure reverse-DNS memo with hit/miss counters.
 #[derive(Default)]
@@ -60,7 +61,7 @@ fn resolver() -> &'static Option<TokioAsyncResolver> {
 /// Reverse-resolve an IP to a PTR hostname, memoised process-wide. A repeated
 /// IP returns the cached answer without touching the resolver again.
 pub async fn reverse(ip: IpAddr) -> Option<String> {
-    if let Some(cached) = cache().lock().unwrap().lookup(&ip) {
+    if let Some(cached) = cache().lock().lookup(&ip) {
         return cached;
     }
     let name = match resolver() {
@@ -71,7 +72,7 @@ pub async fn reverse(ip: IpAddr) -> Option<String> {
         }),
         None => None,
     };
-    cache().lock().unwrap().store(ip, name.clone());
+    cache().lock().store(ip, name.clone());
     name
 }
 
@@ -79,7 +80,7 @@ pub async fn reverse(ip: IpAddr) -> Option<String> {
 /// diagnostics / a future `--scan-stats` line.
 #[allow(dead_code)]
 pub fn global_stats() -> (u64, u64) {
-    cache().lock().unwrap().stats()
+    cache().lock().stats()
 }
 
 #[cfg(test)]

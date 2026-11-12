@@ -74,7 +74,7 @@ pub fn describe(port: u16) -> Option<Desc> {
         513 => ("rlogin — cleartext login; disable", High),
         514 => ("rsh/syslog — cleartext; disable rsh", High),
         3389 => ("RDP — remote desktop; check NLA, BlueKeep (--rdp-audit)", High),
-        5900 | 5901 | 5902 => ("VNC — remote desktop; often weak/no auth", High),
+        5900..=5902 => ("VNC — remote desktop; often weak/no auth", High),
         5985 => ("WinRM (HTTP) — remote mgmt; cleartext transport", High),
         5986 => ("WinRM (HTTPS) — remote mgmt over TLS", Warn),
 

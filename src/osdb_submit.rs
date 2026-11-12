@@ -149,11 +149,11 @@ fn map_to_class(family: &str) -> String {
         let v = extract_version(family).unwrap_or_else(|| "X".into());
         format!("Apple | macOS | {} | general purpose", v)
     } else if lower.contains("cisco") {
-        format!("Cisco | IOS | general | router")
+        "Cisco | IOS | general | router".to_string()
     } else if lower.contains("printer") {
-        format!("Generic | embedded | general | printer")
+        "Generic | embedded | general | printer".to_string()
     } else {
-        format!("Unknown | Unknown | Unknown | general purpose")
+        "Unknown | Unknown | Unknown | general purpose".to_string()
     }
 }
 

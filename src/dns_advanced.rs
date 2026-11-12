@@ -344,6 +344,13 @@ pub fn print_origin_candidates(apex: &str, candidates: &[OriginCandidate]) {
     }
 }
 
+// We use `anyhow!` once for an unreachable path; suppress unused-import
+// lint without the macro coming back.
+#[allow(dead_code)]
+fn _silence_anyhow() -> anyhow::Error {
+    anyhow!("unused")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,11 +370,4 @@ mod tests {
             assert!(providers.iter().any(|s| s.contains(p)), "missing {}", p);
         }
     }
-}
-
-// We use `anyhow!` once for an unreachable path; suppress unused-import
-// lint without the macro coming back.
-#[allow(dead_code)]
-fn _silence_anyhow() -> anyhow::Error {
-    anyhow!("unused")
 }

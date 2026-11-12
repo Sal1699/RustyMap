@@ -25,7 +25,8 @@ use pnet::transport::{
 };
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -100,7 +101,7 @@ fn icmp_listener(mut rx: TransportReceiver, hints: IcmpHints, deadline: Instant)
                 let orig_ip = &payload[4..];
                 if let Some(ip_pkt) = Ipv4Packet::new(orig_ip) {
                     let proto = ip_pkt.get_next_level_protocol().0;
-                    hints.lock().unwrap().insert(proto, icmp_type);
+                    hints.lock().insert(proto, icmp_type);
                 }
             }
             Err(_) => {
@@ -117,7 +118,7 @@ fn raw_proto_listener(mut rx: TransportReceiver, seen: Arc<Mutex<HashMap<u8, boo
         match iter.next() {
             Ok((ip_packet, _src)) => {
                 let proto = ip_packet.get_next_level_protocol().0;
-                seen.lock().unwrap().insert(proto, true);
+                seen.lock().insert(proto, true);
             }
             Err(_) => {
                 std::thread::sleep(Duration::from_millis(20));
@@ -169,7 +170,7 @@ pub fn scan(target: Ipv4Addr, timeout: Duration) -> Result<Vec<ProtoResult>> {
     // Allow listener thread to exit
     drop(icmp_thread);
 
-    let hints = icmp_hints.lock().unwrap().clone();
+    let hints = icmp_hints.lock().clone();
     let mut results = Vec::with_capacity(PROTOS.len());
     for (proto, name, rfc, usage) in PROTOS {
         let state = match hints.get(proto) {

@@ -169,17 +169,17 @@ fn ttl_votes(ttl: u8) -> Vec<FamilyVote> {
     };
     match initial {
         64 => {
-            out.push(("Linux", 20, format!("TTL≈64 (Linux/BSD default)")));
-            out.push(("BSD", 15, format!("TTL≈64 (BSD default)")));
-            out.push(("macOS", 12, format!("TTL≈64 (macOS default)")));
-            out.push(("Android", 10, format!("TTL≈64 (Android default)")));
+            out.push(("Linux", 20, "TTL≈64 (Linux/BSD default)".to_string()));
+            out.push(("BSD", 15, "TTL≈64 (BSD default)".to_string()));
+            out.push(("macOS", 12, "TTL≈64 (macOS default)".to_string()));
+            out.push(("Android", 10, "TTL≈64 (Android default)".to_string()));
         }
         128 => {
-            out.push(("Windows", 25, format!("TTL≈128 (Windows default)")));
+            out.push(("Windows", 25, "TTL≈128 (Windows default)".to_string()));
         }
         255 => {
-            out.push(("Cisco IOS", 25, format!("TTL≈255 (router/Cisco default)")));
-            out.push(("Solaris", 15, format!("TTL≈255 (Solaris default)")));
+            out.push(("Cisco IOS", 25, "TTL≈255 (router/Cisco default)".to_string()));
+            out.push(("Solaris", 15, "TTL≈255 (Solaris default)".to_string()));
         }
         _ => {}
     }

@@ -4,6 +4,48 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.107.0] - 2026-11-12
+
+**Minor-improvements batch from the code review** (items 8 / 9 / 10 / 15 / 16 /
+24 / 25) — update 2 of 3 ("falli tutti dal engine hot-path ai minori ai
+refactor"). Two items are net-new functionality (KEV-annotated CVE output, MAC
+auto-restore), hence the MINOR bump.
+
+### Added
+- **CVE findings are tagged with Known-Exploited / public-exploit availability
+  (review #16).** Scan-time CVE correlation now cross-references the local
+  exploit-refs catalog (CISA KEV + ExploitDB + Metasploit + Nuclei) that
+  `--update-cve-db` syncs, marking hits `⚠ KNOWN-EXPLOITED` and listing where a
+  public exploit exists. No-op until the catalog is synced; the wider
+  NVD/CPE/KEV machinery (`nvd.rs`, `exploit_refs.rs`, `version_cve_match.rs`)
+  already existed — this wires it into the default scan output. (`cve.rs`,
+  `main.rs`.)
+- **`--spoof-mac` restores the original NIC MAC on exit (review #9).** It used to
+  leave the spoofed address in place; a Drop guard now snapshots the original
+  (Linux `/sys/class/net/<if>/address`, macOS `ifconfig`) and puts it back on a
+  clean finish or an error-unwind. Best-effort (a SIGKILL still skips it), same
+  caveat nmap documents. (`spoof_mac.rs`, `main.rs`.)
+
+### Changed
+- **nmap service-probe regexes with backreferences/lookaround now match (review
+  #15).** The `regex` crate rejects those patterns (it guarantees linear time),
+  so those probe lines were silently dropped, losing service detections. They
+  now fall back to a `fancy-regex` backtracking engine; the fast linear engine
+  stays the common path. (`nmap_db.rs`, new `fancy-regex` dep.)
+- **Default scan-history DB moved to a per-user data dir (review #8).** The six
+  copies of the `rustymap.db`-in-cwd fallback are unified into one helper: an
+  explicit `--db` wins, else an existing `./rustymap.db` is kept (backward
+  compat), else a per-user data dir (`~/.local/share/rustymap`, `%APPDATA%`).
+  (`main.rs`, new `directories` dep.)
+- **Shared mutexes are non-poisoning (review #10).** The 24 `.lock().unwrap()`
+  sites on the scan hot path (`raw_scan`, `udp_scan`, `idle_scan`,
+  `ip_proto_scan`, `dns_cache`, `rate`) moved to `parking_lot::Mutex`, so one
+  panicked scan thread can no longer cascade-panic every other thread's lock.
+
+### Internal
+- Removed dead `form_spec` / `base_delay_ms` fields (review #25), and applied
+  clippy's machine-applicable cleanups across ~15 files (review #24).
+
 ## [0.106.2] - 2026-11-12
 
 **Engine hot-path hardening from the code review** (items 1 / 2 / 3 / 12 / 13) —

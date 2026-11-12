@@ -25,46 +25,6 @@ fn escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn escapes_xml_specials() {
-        assert_eq!(escape("a&b"), "a&amp;b");
-        assert_eq!(escape("<x>"), "&lt;x&gt;");
-        assert_eq!(escape("\"x\""), "&quot;x&quot;");
-        assert_eq!(escape("o'reilly"), "o&apos;reilly");
-    }
-
-    #[test]
-    fn escape_handles_combined() {
-        // & must be escaped first to avoid double-escaping the entity refs
-        assert_eq!(escape("a & <b> & \"c\""), "a &amp; &lt;b&gt; &amp; &quot;c&quot;");
-    }
-
-    #[test]
-    fn escape_is_identity_for_plain_text() {
-        assert_eq!(escape("hello world"), "hello world");
-        assert_eq!(escape("OpenSSH 7.4"), "OpenSSH 7.4");
-    }
-
-    #[test]
-    fn escape_strips_illegal_xml_control_chars() {
-        // A MySQL-style banner with raw control bytes (NUL, 0x05, 0x01) must not
-        // land in the XML verbatim (lab bug N5): illegal in XML 1.0.
-        let banner = "5.0.51a\u{0}\u{5}mysql_native_password\u{1}";
-        let out = escape(banner);
-        assert!(!out.contains('\u{0}'));
-        assert!(!out.contains('\u{5}'));
-        assert!(!out.contains('\u{1}'));
-        assert!(out.contains("5.0.51a"));
-        assert!(out.contains("mysql_native_password"));
-        // Tab / newline / CR are legal XML 1.0 whitespace and are preserved.
-        assert_eq!(escape("a\tb\nc\rd"), "a\tb\nc\rd");
-    }
-}
-
 #[allow(dead_code)]
 pub fn write_xml(
     path: &str,
@@ -225,4 +185,44 @@ pub fn write_xml_styled(
 
     crate::file_out::write(path, out.as_bytes())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escapes_xml_specials() {
+        assert_eq!(escape("a&b"), "a&amp;b");
+        assert_eq!(escape("<x>"), "&lt;x&gt;");
+        assert_eq!(escape("\"x\""), "&quot;x&quot;");
+        assert_eq!(escape("o'reilly"), "o&apos;reilly");
+    }
+
+    #[test]
+    fn escape_handles_combined() {
+        // & must be escaped first to avoid double-escaping the entity refs
+        assert_eq!(escape("a & <b> & \"c\""), "a &amp; &lt;b&gt; &amp; &quot;c&quot;");
+    }
+
+    #[test]
+    fn escape_is_identity_for_plain_text() {
+        assert_eq!(escape("hello world"), "hello world");
+        assert_eq!(escape("OpenSSH 7.4"), "OpenSSH 7.4");
+    }
+
+    #[test]
+    fn escape_strips_illegal_xml_control_chars() {
+        // A MySQL-style banner with raw control bytes (NUL, 0x05, 0x01) must not
+        // land in the XML verbatim (lab bug N5): illegal in XML 1.0.
+        let banner = "5.0.51a\u{0}\u{5}mysql_native_password\u{1}";
+        let out = escape(banner);
+        assert!(!out.contains('\u{0}'));
+        assert!(!out.contains('\u{5}'));
+        assert!(!out.contains('\u{1}'));
+        assert!(out.contains("5.0.51a"));
+        assert!(out.contains("mysql_native_password"));
+        // Tab / newline / CR are legal XML 1.0 whitespace and are preserved.
+        assert_eq!(escape("a\tb\nc\rd"), "a\tb\nc\rd");
+    }
 }

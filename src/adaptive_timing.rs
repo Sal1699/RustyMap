@@ -40,7 +40,6 @@ pub struct AdaptiveState {
     pub min_parallel: usize,
     pub max_parallel: usize,
     pub current_parallel: usize,
-    pub base_delay_ms: u64,
     pub current_extra_delay_ms: u64,
     /// Count of consecutive "good" batches — drives the slow ramp
     /// back up to `max_parallel`.
@@ -49,7 +48,7 @@ pub struct AdaptiveState {
 
 #[allow(dead_code)]
 impl AdaptiveState {
-    pub fn new(max_parallel: usize, base_delay_ms: u64) -> Self {
+    pub fn new(max_parallel: usize) -> Self {
         Self {
             rtt_ewma_ms: 0.0,
             loss_window: VecDeque::with_capacity(50),
@@ -57,7 +56,6 @@ impl AdaptiveState {
             min_parallel: (max_parallel / 8).max(4),
             max_parallel: max_parallel.max(4),
             current_parallel: max_parallel.max(4),
-            base_delay_ms,
             current_extra_delay_ms: 0,
             good_streak: 0,
         }
@@ -145,7 +143,7 @@ mod tests {
 
     #[test]
     fn record_grows_window_then_evicts() {
-        let mut s = AdaptiveState::new(50, 0);
+        let mut s = AdaptiveState::new(50);
         s.window_size = 5;
         for _ in 0..10 {
             s.record(ProbeOutcome::Replied, Some(20));
@@ -155,12 +153,12 @@ mod tests {
 
     #[test]
     fn loss_pct_at_extremes() {
-        let mut s = AdaptiveState::new(50, 0);
+        let mut s = AdaptiveState::new(50);
         for _ in 0..10 {
             s.record(ProbeOutcome::Filtered, None);
         }
         assert!((s.loss_pct() - 100.0).abs() < 1e-9);
-        let mut s2 = AdaptiveState::new(50, 0);
+        let mut s2 = AdaptiveState::new(50);
         for _ in 0..10 {
             s2.record(ProbeOutcome::Replied, Some(10));
         }
@@ -169,7 +167,7 @@ mod tests {
 
     #[test]
     fn rtt_ewma_seed_then_smooth() {
-        let mut s = AdaptiveState::new(50, 0);
+        let mut s = AdaptiveState::new(50);
         s.record(ProbeOutcome::Replied, Some(100));
         assert!((s.rtt_ewma_ms - 100.0).abs() < 1e-9);
         s.record(ProbeOutcome::Replied, Some(200));
@@ -179,7 +177,7 @@ mod tests {
 
     #[test]
     fn step_high_loss_halves_parallel_and_adds_delay() {
-        let mut s = AdaptiveState::new(64, 0);
+        let mut s = AdaptiveState::new(64);
         for _ in 0..50 {
             s.record(ProbeOutcome::Filtered, None);
         }
@@ -190,7 +188,7 @@ mod tests {
 
     #[test]
     fn step_moderate_loss_softer_throttle() {
-        let mut s = AdaptiveState::new(50, 0);
+        let mut s = AdaptiveState::new(50);
         s.window_size = 10;
         for i in 0..10 {
             // 10% loss
@@ -207,7 +205,7 @@ mod tests {
 
     #[test]
     fn good_streak_ramps_back_up() {
-        let mut s = AdaptiveState::new(64, 0);
+        let mut s = AdaptiveState::new(64);
         // Force a throttle first
         for _ in 0..50 {
             s.record(ProbeOutcome::Filtered, None);
@@ -227,7 +225,7 @@ mod tests {
 
     #[test]
     fn parallel_never_goes_below_min() {
-        let mut s = AdaptiveState::new(64, 0);
+        let mut s = AdaptiveState::new(64);
         for _ in 0..100 {
             for _ in 0..50 {
                 s.record(ProbeOutcome::Filtered, None);
@@ -239,7 +237,7 @@ mod tests {
 
     #[test]
     fn high_rtt_alone_triggers_soft_backoff() {
-        let mut s = AdaptiveState::new(50, 0);
+        let mut s = AdaptiveState::new(50);
         for _ in 0..30 {
             s.record(ProbeOutcome::Replied, Some(600));
         }

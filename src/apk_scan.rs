@@ -354,7 +354,7 @@ fn decode_utf16_entry(buf: &[u8], p: usize) -> Option<String> {
         return None;
     }
     let units: Vec<u16> = buf[p + hdr..p + hdr + bytes_needed]
-        .chunks_exact(2)
+        .as_chunks::<2>().0.iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     String::from_utf16(&units).ok()

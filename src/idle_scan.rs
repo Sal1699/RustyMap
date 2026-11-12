@@ -14,7 +14,8 @@ use pnet::transport::{
 use rand::Rng;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::{mpsc, Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -67,7 +68,6 @@ impl IdleScanner {
         let (sender, receiver) = mpsc::channel::<u16>();
         self.pending
             .lock()
-            .unwrap()
             .insert((self.zombie_ip, src_port), sender);
 
         let cfg = EvasionConfig::default();
@@ -84,7 +84,7 @@ impl IdleScanner {
         let ip = build_ip_packet(src_ip, self.zombie_ip, &tcp, cfg.ip_ttl);
 
         let sent = {
-            let mut tx = self.tx.lock().unwrap();
+            let mut tx = self.tx.lock();
             let pkt = Ipv4Packet::new(&ip).unwrap();
             tx.send_to(pkt, IpAddr::V4(self.zombie_ip)).is_ok()
         };
@@ -96,7 +96,6 @@ impl IdleScanner {
         };
         self.pending
             .lock()
-            .unwrap()
             .remove(&(self.zombie_ip, src_port));
         result
     }
@@ -118,7 +117,7 @@ impl IdleScanner {
         );
         let ip = build_ip_packet(self.zombie_ip, target_ip, &tcp, cfg.ip_ttl);
 
-        let mut tx = self.tx.lock().unwrap();
+        let mut tx = self.tx.lock();
         let pkt = Ipv4Packet::new(&ip).unwrap();
         let _ = tx.send_to(pkt, IpAddr::V4(target_ip));
     }
@@ -196,7 +195,7 @@ fn receiver_loop(mut rx: TransportReceiver, pending: PendingMap, zombie_ip: Ipv4
         if let Some(tcp) = TcpPacket::new(ip_packet.payload()) {
             let our_src_port = tcp.get_destination();
             let sender_opt = {
-                let p = pending.lock().unwrap();
+                let p = pending.lock();
                 p.get(&(src, our_src_port)).cloned()
             };
             if let Some(s) = sender_opt {

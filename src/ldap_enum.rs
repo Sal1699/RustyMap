@@ -90,7 +90,7 @@ pub async fn enumerate(host: IpAddr, port: u16, dur: Duration) -> Result<Option<
         if let Some(entry) = parse_search_entry(&resp) {
             apply_entry(&mut finding, entry);
         }
-        if resp.iter().any(|&b| b == APP_SEARCH_RESULT_DONE) {
+        if resp.contains(&APP_SEARCH_RESULT_DONE) {
             break;
         }
     }

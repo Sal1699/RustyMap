@@ -967,7 +967,7 @@ pub async fn probe(
     // Fase 32 send-directives: when the user loaded `--nmap-service-probes`,
     // replay nmap's OWN probe payloads for this port if the built-ins didn't
     // name a product. Additive + gated — no DB loaded ⇒ no-op.
-    if best.as_ref().map_or(true, |b| b.product.is_none())
+    if best.as_ref().is_none_or(|b| b.product.is_none())
         && crate::nmap_db::service_probe_defs().is_some()
     {
         if let Some(info) = db_probe(addr, timeout_dur).await {

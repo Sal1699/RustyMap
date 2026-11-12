@@ -13,7 +13,8 @@ use pnet::transport::{
 };
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::{mpsc, Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -71,7 +72,7 @@ impl UdpScanner {
     ) -> PortState {
         let src_port = SRC_PORT;
         let (sender, receiver) = mpsc::channel::<ProbeHint>();
-        self.pending.lock().unwrap().insert((dst_ip, dst_port), sender);
+        self.pending.lock().insert((dst_ip, dst_port), sender);
 
         // A protocol-specific payload (DNS/NTP/SNMP/…) makes the service answer
         // so the port reads OPEN; unknown ports get an empty datagram and rely on
@@ -88,7 +89,7 @@ impl UdpScanner {
         }
 
         let send_result = {
-            let mut tx = self.tx.lock().unwrap();
+            let mut tx = self.tx.lock();
             let pkt = UdpPacket::new(&buf[..]).unwrap();
             tx.send_to(pkt, IpAddr::V4(dst_ip))
         };
@@ -105,7 +106,7 @@ impl UdpScanner {
             }
         };
 
-        self.pending.lock().unwrap().remove(&(dst_ip, dst_port));
+        self.pending.lock().remove(&(dst_ip, dst_port));
         state
     }
 }
@@ -139,7 +140,7 @@ fn icmp_listener(mut rx: TransportReceiver, pending: PendingMap) {
                 ProbeHint::OtherUnreachable
             };
             let sender_opt = {
-                let pend = pending.lock().unwrap();
+                let pend = pending.lock();
                 pend.get(&(orig_dst, orig_dst_port)).cloned()
             };
             if let Some(s) = sender_opt {
@@ -162,7 +163,7 @@ fn udp_listener(mut rx: TransportReceiver, pending: PendingMap) {
         }
         let src_port = packet.get_source();
         let sender_opt = {
-            let pend = pending.lock().unwrap();
+            let pend = pending.lock();
             pend.get(&(src_ip, src_port)).cloned()
         };
         if let Some(s) = sender_opt {

@@ -40,6 +40,15 @@ pub struct CveHit {
     /// Bug-02 fix (v0.66.3).
     #[serde(default)]
     pub unconfirmed: bool,
+    /// CISA Known-Exploited flag, filled from the exploit-refs catalog if the
+    /// user has synced it (`--update-cve-db`). Prioritise these. Review #16.
+    #[serde(default)]
+    pub kev: bool,
+    /// One-line public-exploit availability (KEV / ExploitDB / Metasploit /
+    /// Nuclei), filled from the same catalog; `None` when nothing is known or
+    /// the catalog isn't present. Review #16.
+    #[serde(default)]
+    pub exploit_summary: Option<String>,
 }
 
 pub struct Compiled {
@@ -118,11 +127,32 @@ pub fn correlate(db: &[Compiled], hosts: &[HostResult]) -> Vec<CveHit> {
                     matched_product: product.clone(),
                     matched_version: if version.is_empty() { None } else { Some(version.clone()) },
                     unconfirmed,
+                    kev: false,
+                    exploit_summary: None,
                 });
             }
         }
     }
     out
+}
+
+/// Cross-reference correlated CVEs against the local exploit-refs catalog
+/// (CISA KEV + ExploitDB + Metasploit + Nuclei) built by `--update-cve-db`,
+/// tagging each hit with its known-exploited flag and a one-line availability
+/// summary (review #16). No-op when the catalog hasn't been synced.
+pub fn enrich_with_exploits(hits: &mut [CveHit]) {
+    let cat = crate::exploit_refs::load();
+    if cat.by_cve.is_empty() {
+        return;
+    }
+    for h in hits.iter_mut() {
+        if let Some(refs) = cat.by_cve.get(&h.cve) {
+            if refs.is_actionable() {
+                h.kev = refs.kev;
+                h.exploit_summary = Some(refs.summary());
+            }
+        }
+    }
 }
 
 pub fn print_hits(hits: &[CveHit]) {
@@ -134,11 +164,13 @@ pub fn print_hits(hits: &[CveHit]) {
     for h in hits {
         let ver = h.matched_version.clone().unwrap_or_else(|| "?".into());
         let qualifier = if h.unconfirmed { " (unconfirmed — version unknown)" } else { "" };
+        let kev_mark = if h.kev { " ⚠ KNOWN-EXPLOITED" } else { "" };
         println!(
-            "  [{}] {}:{} {} {} — {}{}",
-            h.severity.to_uppercase(), h.host, h.port, h.matched_product, ver, h.cve, qualifier
+            "  [{}] {}:{} {} {} — {}{}{}",
+            h.severity.to_uppercase(), h.host, h.port, h.matched_product, ver, h.cve, kev_mark, qualifier
         );
         println!("       {}", h.description);
         if let Some(r) = &h.reference { println!("       ref: {}", r); }
+        if let Some(e) = &h.exploit_summary { println!("       exploits: {}", e); }
     }
 }

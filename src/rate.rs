@@ -235,7 +235,7 @@ pub fn min_send_span(max_pps: u32, count: usize) -> Duration {
 /// (constructor returns `None`, so the hot path skips the call entirely).
 pub struct GlobalRateLimiter {
     max_pps: u32,
-    next_at: std::sync::Mutex<std::time::Instant>,
+    next_at: parking_lot::Mutex<std::time::Instant>,
 }
 
 impl GlobalRateLimiter {
@@ -245,7 +245,7 @@ impl GlobalRateLimiter {
         }
         Some(Arc::new(Self {
             max_pps,
-            next_at: std::sync::Mutex::new(std::time::Instant::now()),
+            next_at: parking_lot::Mutex::new(std::time::Instant::now()),
         }))
     }
 
@@ -259,7 +259,7 @@ impl GlobalRateLimiter {
         let span = min_send_span(self.max_pps, count);
         let now = std::time::Instant::now();
         let start = {
-            let mut next = self.next_at.lock().unwrap();
+            let mut next = self.next_at.lock();
             let start = if *next > now { *next } else { now };
             *next = start + span;
             start

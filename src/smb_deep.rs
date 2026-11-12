@@ -269,16 +269,15 @@ fn parse_target_info(av: &[u8], info: &mut SmbDeepInfo) {
             3 => info.dns_computer = Some(decode_utf16le(value)),
             4 => info.dns_domain = Some(decode_utf16le(value)),
             5 => info.dns_forest = Some(decode_utf16le(value)),
-            7 => {
+            7
                 // FILETIME (8 bytes, LE)
-                if value.len() == 8 {
+                if value.len() == 8 => {
                     let mut ts: u64 = 0;
                     for i in 0..8 {
                         ts |= (value[i] as u64) << (8 * i);
                     }
                     info.timestamp_filetime = Some(ts);
                 }
-            }
             _ => {}
         }
     }
@@ -286,7 +285,7 @@ fn parse_target_info(av: &[u8], info: &mut SmbDeepInfo) {
 
 fn decode_utf16le(b: &[u8]) -> String {
     let units: Vec<u16> = b
-        .chunks_exact(2)
+        .as_chunks::<2>().0.iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     String::from_utf16_lossy(&units)

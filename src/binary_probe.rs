@@ -229,7 +229,7 @@ fn parse_smb2_dialect(buf: &[u8]) -> Option<&'static str> {
     if buf.len() < 74 {
         return None;
     }
-    if &buf[4..8] != [0xFE, b'S', b'M', b'B'] {
+    if buf[4..8] != [0xFE, b'S', b'M', b'B'] {
         return None;
     }
     // Command (offset 4+12 = 16) must be NEGOTIATE (0).
