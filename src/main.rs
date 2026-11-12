@@ -1683,11 +1683,12 @@ async fn run(mut args: Cli) -> Result<()> {
                             "redirect" => Some("redirect"),
                             "ssrf" => Some("ssrf"),
                             "cmdi" => Some("cmdi"),
+                            "lfi" => Some("lfi"),
                             _ => None,
                         })
                         .collect()
                 })
-                .unwrap_or_else(|| vec!["xss", "sqli", "redirect", "ssrf", "cmdi"]);
+                .unwrap_or_else(|| vec!["xss", "sqli", "redirect", "ssrf", "cmdi", "lfi"]);
             let pcfg = owasp_probes::ProbeConfig {
                 timeout: std::time::Duration::from_secs(8),
                 checks,

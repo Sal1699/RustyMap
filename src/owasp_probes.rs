@@ -5,10 +5,10 @@
 //!   - **A03 Injection — reflected XSS**: per-param send a token-
 //!     wrapped `<svg/onload>` payload, look for the payload echoed
 //!     unencoded in the response body.
-//!   - **A03 Injection — error-based SQLi**: per-param send `'`,
-//!     match common DB error fingerprints (MySQL, PostgreSQL, MSSQL,
-//!     Oracle, SQLite). False-positive-low because we look for
-//!     specific error strings, not just status changes.
+//!   - **A03 Injection — SQLi (error-based + blind)**: per-param send `'`
+//!     and match common DB error fingerprints (MySQL, PostgreSQL, MSSQL,
+//!     Oracle, SQLite); if none surface, fall back to a time-based blind
+//!     probe (a DB `sleep` vs a per-param baseline). Low-FP.
 //!   - **A03 Injection — command injection**: per-param inject a shell
 //!     separator + `echo <token>` (plus a blind `sleep` time-probe). A
 //!     HIT needs the token to appear *alone* (the command ran), not the
@@ -20,6 +20,9 @@
 //!   - **A10 SSRF (best-effort)**: per-param send `http://127.0.0.1:1/`,
 //!     match a connection-refused error string in the body. Limited
 //!     because most apps don't expose backend errors verbatim.
+//!   - **A03 Injection — LFI / path traversal**: per-param send
+//!     `../…/etc/passwd` (and Windows `win.ini`) variants, match the
+//!     unmistakable `root:x:0:0:` / `[extensions]` signatures. Low-FP.
 //!
 //! Each finding includes the param it triggered on and the evidence
 //! snippet so reviewers can verify by hand.
@@ -44,7 +47,7 @@ pub struct OwaspFinding {
 #[derive(Debug, Clone)]
 pub struct ProbeConfig {
     pub timeout: Duration,
-    pub checks: Vec<&'static str>, // "xss", "sqli", "redirect", "ssrf", "cmdi"
+    pub checks: Vec<&'static str>, // "xss", "sqli", "redirect", "ssrf", "cmdi", "lfi"
     /// Cookie-header-style string ("PHPSESSID=…; security=low") so the
     /// probes hit the authenticated surface the crawl mapped. Without it
     /// every probe lands on the app's login redirect and finds nothing.
@@ -55,7 +58,7 @@ impl Default for ProbeConfig {
     fn default() -> Self {
         Self {
             timeout: Duration::from_secs(8),
-            checks: vec!["xss", "sqli", "redirect", "ssrf", "cmdi"],
+            checks: vec!["xss", "sqli", "redirect", "ssrf", "cmdi", "lfi"],
             cookie: None,
         }
     }
@@ -84,6 +87,16 @@ const SQL_ERROR_FINGERPRINTS: &[&str] = &[
     "incorrect syntax near",
     "microsoft ole db provider for sql server",
     "db2 sql error",
+];
+
+/// Signatures that appear only when a path-traversal payload actually read a
+/// system file — unmistakable, so the LFI probe stays low-FP.
+const LFI_SIGNATURES: &[&str] = &[
+    "root:x:0:0:",              // Unix /etc/passwd
+    "root:!:0:0:",              // AIX /etc/passwd
+    "; for 16-bit app support", // Windows win.ini header
+    "[extensions]",             // Windows win.ini section
+    "[fonts]",                  // Windows win.ini section
 ];
 
 pub async fn probe(endpoints: &[Endpoint], cfg: &ProbeConfig) -> Result<Vec<OwaspFinding>> {
@@ -143,6 +156,11 @@ pub async fn probe(endpoints: &[Endpoint], cfg: &ProbeConfig) -> Result<Vec<Owas
                     findings.push(f);
                 }
             }
+            if cfg.checks.contains(&"lfi") {
+                if let Some(f) = test_lfi(&client, ep, param).await {
+                    findings.push(f);
+                }
+            }
         }
     }
     Ok(findings)
@@ -181,6 +199,35 @@ async fn test_sqli(client: &reqwest::Client, ep: &Endpoint, param: &str) -> Opti
                 evidence: body[idx.saturating_sub(20)..(idx + fp.len() + 60).min(body.len())]
                     .to_string(),
             });
+        }
+    }
+    // Blind (time-based) SQLi: if no error string surfaced, see whether a
+    // DB-sleep payload delays the response well past a per-param baseline
+    // (reuses `measure()` + a baseline, like the CMDi time-probe).
+    let sleep_secs = 5u64;
+    let baseline = measure(client, ep, param, "1").await?;
+    const BLIND: &[&str] = &[
+        "' AND SLEEP(5)-- -",          // MySQL / MariaDB, string context
+        "1 AND SLEEP(5)",              // MySQL / MariaDB, numeric context
+        "' AND pg_sleep(5)-- -",       // PostgreSQL
+        "'; WAITFOR DELAY '0:0:5'-- ", // MSSQL
+    ];
+    for payload in BLIND {
+        if let Some(elapsed) = measure(client, ep, param, payload).await {
+            if elapsed >= baseline + Duration::from_secs(sleep_secs - 1) {
+                return Some(OwaspFinding {
+                    category: "A03 Blind SQLi (time-based)",
+                    url: ep.url.clone(),
+                    method: ep.method.clone(),
+                    param: param.to_string(),
+                    payload: payload.to_string(),
+                    evidence: format!(
+                        "response delayed to {:.1}s vs {:.1}s baseline",
+                        elapsed.as_secs_f64(),
+                        baseline.as_secs_f64()
+                    ),
+                });
+            }
         }
     }
     None
@@ -312,6 +359,42 @@ async fn measure(
     let start = Instant::now();
     let _ = send_with_param_resp(client, ep, param, value).await?;
     Some(start.elapsed())
+}
+
+async fn test_lfi(client: &reqwest::Client, ep: &Endpoint, param: &str) -> Option<OwaspFinding> {
+    const PAYLOADS: &[&str] = &[
+        "../../../../../../../../etc/passwd",
+        "....//....//....//....//....//....//etc/passwd",
+        "..%2f..%2f..%2f..%2f..%2f..%2f..%2fetc%2fpasswd",
+        "/etc/passwd",
+        "../../../../../../../../windows/win.ini",
+        "..\\..\\..\\..\\..\\..\\windows\\win.ini",
+    ];
+    for payload in PAYLOADS {
+        if let Some(body) = send_with_param(client, ep, param, payload).await {
+            let lower = body.to_lowercase();
+            if let Some(sig) = lfi_signature(&lower) {
+                let idx = lower.find(sig).unwrap_or(0);
+                return Some(OwaspFinding {
+                    category: "A03 LFI / Path Traversal",
+                    url: ep.url.clone(),
+                    method: ep.method.clone(),
+                    param: param.to_string(),
+                    payload: payload.to_string(),
+                    evidence: body[idx.saturating_sub(20)..(idx + sig.len() + 60).min(body.len())]
+                        .to_string(),
+                });
+            }
+        }
+    }
+    None
+}
+
+/// The LFI signature present in a (lowercased) body, if any. These strings only
+/// appear when a traversal payload actually read a system file, so matching one
+/// is high-confidence.
+fn lfi_signature(body_lower: &str) -> Option<&'static str> {
+    LFI_SIGNATURES.iter().copied().find(|sig| body_lower.contains(sig))
 }
 
 async fn send_with_param(
@@ -464,5 +547,17 @@ mod tests {
         assert!(SQL_ERROR_FINGERPRINTS.contains(&"incorrect syntax near"));
         assert!(SQL_ERROR_FINGERPRINTS.contains(&"syntax error at or near"));
         assert!(SQL_ERROR_FINGERPRINTS.len() >= 20);
+    }
+
+    #[test]
+    fn lfi_signature_matches_passwd_and_winini_only() {
+        assert_eq!(
+            lfi_signature("root:x:0:0:root:/root:/bin/bash\n"),
+            Some("root:x:0:0:")
+        );
+        assert!(lfi_signature("; for 16-bit app support\n[fonts]\n").is_some());
+        assert_eq!(lfi_signature("a totally normal html page"), None);
+        // The probe lowercases the body first, so an upper-case passwd still hits.
+        assert!(lfi_signature(&"ROOT:X:0:0:".to_lowercase()).is_some());
     }
 }

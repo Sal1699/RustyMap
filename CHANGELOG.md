@@ -4,6 +4,30 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.103.0] - 2026-11-12
+
+**`--owasp-scan` gains an LFI/path-traversal probe and a time-based blind-SQLi
+fallback** — closing the two gaps the v0.101.3 §9 wapiti comparison flagged.
+691/691 tests. Stays Alpha (no JS rendering).
+
+### Added
+- **A03 LFI / path-traversal probe (`--owasp-checks lfi`, on by default).** Per
+  param it sends `../…/etc/passwd` and Windows `win.ini` traversal variants
+  (plain, `....//`, URL-encoded, back-slash) and matches only unmistakable file
+  signatures (`root:x:0:0:`, win.ini `[extensions]` / `; for 16-bit app support`),
+  so it is low-FP. Covers DVWA's File-Inclusion page, which the old probe set
+  missed vs wapiti. (`owasp_probes.rs`, `main.rs`, `cli.rs`, `guide.rs`.)
+- **Blind, time-based SQLi fallback in the `sqli` check.** When no error-based
+  fingerprint surfaces, the probe tries DB-`sleep` payloads (MySQL `SLEEP`,
+  PostgreSQL `pg_sleep`, MSSQL `WAITFOR DELAY`) and flags the param when the
+  response is delayed well past a per-param baseline — catching DVWA's blind-SQLi
+  page. Reuses the CMDi time-probe's baseline logic. (`owasp_probes.rs`.)
+
+### Note
+- `--owasp-scan` **stays Alpha** (no JavaScript rendering). These additions bring
+  it level with wapiti's coverage on DVWA; next (still open from §9): the crawler
+  seed/scope refinements N7/N8 and file-upload XSS probing.
+
 ## [0.102.3] - 2026-11-11
 
 **`--ssh-audit` now covers SSH on a non-standard port, not just :22** (bug N6 —
