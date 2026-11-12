@@ -408,14 +408,24 @@ fn decode_probe_payload(s: &str) -> Vec<u8> {
 }
 
 /// Extract a `q<delim>…<delim>` payload from the tail of a Probe line.
+///
+/// Delimiters in `nmap-service-probes` are ASCII (`|`, `/`, …), but a malformed
+/// or fuzzed line can put a multi-byte char in the delimiter slot; indexing
+/// `&s[2..]` by raw byte then would split a UTF-8 char and panic. We walk by
+/// chars so any input is handled safely (the panic-safety fuzz test covers it).
 fn parse_q_string(s: &str) -> Vec<u8> {
     let s = s.trim();
-    let bytes = s.as_bytes();
-    if bytes.len() < 2 || bytes[0] != b'q' {
+    let mut chars = s.char_indices();
+    // First char must be 'q'.
+    if !matches!(chars.next(), Some((_, 'q'))) {
         return Vec::new();
     }
-    let delim = bytes[1] as char;
-    let after = &s[2..];
+    // Second char is the delimiter; the payload starts right after it.
+    let (delim_idx, delim) = match chars.next() {
+        Some(x) => x,
+        None => return Vec::new(),
+    };
+    let after = &s[delim_idx + delim.len_utf8()..];
     match after.find(delim) {
         Some(end) => decode_probe_payload(&after[..end]),
         None => Vec::new(),
@@ -760,6 +770,48 @@ match invalid mzfoozinvalid p/$1/
     fn case_insensitive_flag_works() {
         let m = parse_match_line(r#"http m|server: nginx|i"#).unwrap();
         assert!(m.regex.is_match("HTTP/1.1 200 OK\r\nSERVER: NGINX\r\n"));
+    }
+
+    #[test]
+    fn parsers_never_panic_on_random_input() {
+        // Review #26: throw random (incl. multi-byte) and structured-but-junk
+        // input at every nmap-db parser and assert none panics. This is what
+        // caught the `parse_q_string` byte-slice panic on a multi-byte delimiter.
+        use rand::rngs::StdRng;
+        use rand::{Rng, SeedableRng};
+        let mut rng = StdRng::seed_from_u64(0xC0FFEE);
+        for _ in 0..4000 {
+            let len = rng.gen_range(0..80);
+            let bytes: Vec<u8> = (0..len).map(|_| rng.gen::<u8>()).collect();
+            let s = String::from_utf8_lossy(&bytes);
+            let _ = decode_probe_payload(&s);
+            let _ = parse_match_line(&s);
+            let _ = parse_q_string(&s);
+            let _ = parse_port_list(&s);
+            let _ = parse_service_probes(&s);
+            let _ = parse_probe_defs(&s);
+        }
+        // Structured-but-malformed probe blocks to drive the line dispatch deeper.
+        for _ in 0..1000 {
+            let mut body = String::new();
+            for _ in 0..rng.gen_range(0..10) {
+                body.push_str(match rng.gen_range(0..7) {
+                    0 => "match ",
+                    1 => "softmatch ",
+                    2 => "Probe TCP X q",
+                    3 => "ports ",
+                    4 => "m|",
+                    5 => "p/$1/ v/$2/",
+                    _ => "rarity ",
+                });
+                let junk: String =
+                    (0..rng.gen_range(0..14)).map(|_| rng.gen_range(0x20u8..=0x7e) as char).collect();
+                body.push_str(&junk);
+                body.push('\n');
+            }
+            let _ = parse_service_probes(&body);
+            let _ = parse_probe_defs(&body);
+        }
     }
 
     #[test]

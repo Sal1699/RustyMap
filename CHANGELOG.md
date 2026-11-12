@@ -4,6 +4,41 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.107.1] - 2026-11-12
+
+**Test hardening (review #26)** — update 3 of 3 ("falli tutti dal engine
+hot-path ai minori ai refactor"). 708 unit tests + 4 new CLI integration tests.
+
+### Added
+- **End-to-end CLI integration tests (`tests/cli.rs`).** They spawn the built
+  binary and check unprivileged, offline paths (`--version`, `--help`, an
+  `--sL -n` list scan of TEST-NET-1, and that an unknown flag exits non-zero) —
+  the first black-box coverage of the actual binary, runnable anywhere.
+- **Parser panic-safety ("fuzz") test for the nmap-db parsers.** Throws 5000
+  rounds of random (incl. multi-byte) and structured-but-malformed input at
+  `decode_probe_payload`, `parse_match_line`, `parse_q_string`,
+  `parse_port_list`, `parse_service_probes` and `parse_probe_defs`, asserting
+  none panics.
+
+### Fixed
+- **`parse_q_string` no longer panics on a multi-byte delimiter** (found by the
+  new fuzz test). It sliced `&s[2..]` by raw byte, which splits a UTF-8 char
+  when a malformed `Probe` line puts a multi-byte char in the delimiter slot; it
+  now walks by `char_indices`. (`nmap_db.rs`.)
+
+### Note
+- This closes the actionable items of the 26-point code review. The five
+  remaining items are large architecture refactors — `run()` → subcommands
+  (#17), `Cli` `#[command(flatten)]` split (#18, ~557 field-access sites),
+  a threaded `ScanContext` to replace the global statics (#19), a
+  `core`/`cli` workspace split (#20), and Cargo feature gating (#21). They are
+  internal-only (no user-facing behaviour change), carry real regression risk on
+  the nmap-compat CLI and the scan engine, and can't be validated by unit tests
+  alone, so they are intentionally deferred to dedicated, individually-validated
+  changes rather than batched here. #11 (fast-engine-as-default) stays rejected
+  per standing decision; #14 (nmap-os-db matcher) and #23 (CI, billing-blocked)
+  were already addressed/out of scope.
+
 ## [0.107.0] - 2026-11-12
 
 **Minor-improvements batch from the code review** (items 8 / 9 / 10 / 15 / 16 /
