@@ -99,7 +99,7 @@ const REGISTRY: &[Feature] = &[
     Feature { key: "--brute-protocol rdp", tier: Tier::Alpha,
         note: "RDP CredSSP best-effort (v0.65): pubKeyAuth NOT implemented (would need RC4 of TLS SPKI under NTLM session key). Negative results (specific NTSTATUS error codes) are reliable; positive results are SUGGESTIVE, not authoritative. Validate against a real Windows RDP server before reporting findings." },
     Feature { key: "--ipa-scan", tier: Tier::Alpha,
-        note: "iOS IPA static analysis via plist. Only Info.plist inspected; mach-O entitlements / embedded provisioning profiles not parsed." },
+        note: "iOS IPA static analysis. v0.104.0 added a Mach-O header parser (arch / PIE / FairPlay encryption / code-signature / __RESTRICT) and entitlements from embedded.mobileprovision (get-task-allow, aps-environment, capabilities), on top of the Info.plist/ATS/secrets sweep. Awaiting a Kali re-test on a real IPA (the earlier lab test used a plist-only synthetic IPA) before promotion." },
     Feature { key: "--threat-intel-misp", tier: Tier::Alpha,
         note: "MISP IoC pull + match (`--threat-intel-misp URL --misp-api-key KEY`, flag hits with `--threat-intel-match`). Pull-only, no de-duplication across syncs; rate-limit handling minimal." },
     Feature { key: "--osdb-submit", tier: Tier::Alpha,

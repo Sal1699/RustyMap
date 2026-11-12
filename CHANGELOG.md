@@ -4,6 +4,30 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.104.0] - 2026-11-12
+
+**`--ipa-scan` now parses the Mach-O binary and the provisioning-profile
+entitlements** — the second "falli tutti" item, from the v0.101.3 §16 Gruppo-3
+plan. 696/696 tests. Stays Alpha pending a Kali re-test on a real IPA.
+
+### Added
+- **Mach-O header analysis of the main executable.** A hand-rolled parser (no new
+  dependency) reads the magic (thin/fat, 32/64-bit), architecture, and the
+  security flags: **PIE** (ASLR), FairPlay **encryption** (`LC_ENCRYPTION_INFO`
+  cryptid), **code-signature** presence (`LC_CODE_SIGNATURE`) and an `__RESTRICT`
+  anti-debug segment. Fat/universal binaries are followed to their first slice.
+- **Entitlements from `embedded.mobileprovision`.** The cleartext plist is sliced
+  out of the signed CMS blob and the security-relevant keys are flagged:
+  `get-task-allow` (debuggable), `aps-environment`, and notable capabilities
+  (keychain-access-groups, app-groups, associated-domains, VPN/Hotspot, data
+  protection). (`ipa_scan.rs`.)
+
+### Note
+- `--ipa-scan` **stays Alpha** until validated on a real IPA (the lab's earlier
+  test used a synthetic plist-only IPA with no Mach-O). Run `--ipa-scan app.ipa
+  --experimental-confirm` on an app with known issues vs MobSF; if the Mach-O flags
+  + entitlements match, it promotes.
+
 ## [0.103.0] - 2026-11-12
 
 **`--owasp-scan` gains an LFI/path-traversal probe and a time-based blind-SQLi
