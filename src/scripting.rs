@@ -814,6 +814,12 @@ fn build_engine() -> Engine {
     // The default expression depth (64/32) trips on our larger built-ins
     // (cookie-flags-audit, etc.) when string interpolation nests deeply.
     engine.set_max_expr_depths(128, 64);
+    // Resource guards so a buggy or hostile --script can't wedge the scan: the
+    // operation counter resets per eval, so a runaway loop aborts after ~5M ops
+    // instead of spinning forever; string/array sizes are bounded too (review #4).
+    engine.set_max_operations(5_000_000);
+    engine.set_max_string_size(1 << 20); // 1 MiB
+    engine.set_max_array_size(100_000);
 
     // tcp_send(host, port, payload_string, timeout_ms) -> reply_string
     // Truncates the reply to 8 KiB. Returns "" on any failure.

@@ -4,6 +4,36 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.106.1] - 2026-11-12
+
+**Security hardening from the code review** (items 4 / 5 / 6 / 7): Rhai execution
+limits, HTML-report XSS escaping, fail-closed self-update, and a Web-UI
+DNS-rebinding guard. 703/703 tests.
+
+### Security
+- **`--script` Rhai engine now has resource limits (review #4).** A buggy or
+  hostile script could spin forever or exhaust memory. The engine now caps
+  operations (5M, reset per eval — so a runaway loop aborts), string size (1 MiB)
+  and array size (100k). (`scripting.rs`.)
+- **Custom HTML report escapes interpolated values (review #5).** Tera only
+  autoescapes templates whose name ends in `.html`; the custom template was
+  registered as `custom`, so attacker-controlled host banners landed in the report
+  unescaped (stored XSS). It is now registered as `custom.html`. (`report.rs`.)
+- **Self-update is fail-closed on a missing checksum (review #6).** If
+  `SHA256SUMS.txt` was absent the updater installed anyway; it now aborts unless
+  the download's SHA-256 is listed and matches. (`updater.rs`.)
+- **Web UI rejects cross-origin Host headers (review #7).** For a loopback bind
+  (the default) the server now 403s any request whose `Host` isn't `127.0.0.1` /
+  `localhost` / `[::1]` on the bind port, closing a DNS-rebinding path to the scan
+  history. (`webui.rs`.)
+
+### Note
+- The rest of the 26-item review is triaged but intentionally NOT in this release:
+  large refactors (run()/Cli split, workspace, feature gating, subcommands),
+  engine changes that need Kali validation (SYN probe correlation, global rate
+  limit, adaptive RTT/timeouts, IPv6 raw), and items that conflict with a standing
+  decision (#11 fast-engine-as-default) or are already done (#14 nmap-os-db matcher).
+
 ## [0.106.0] - 2026-11-12
 
 **`--brute-protocol rdp` now computes the CredSSP pubKeyAuth channel binding** —

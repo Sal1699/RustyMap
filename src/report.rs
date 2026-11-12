@@ -232,7 +232,10 @@ pub fn write_custom(
     let tpl = fs::read_to_string(template_path)
         .with_context(|| format!("failed to read template {}", template_path))?;
     let ctx = build_ctx(hosts, scan_type, started_at, elapsed_secs, diffs);
-    let out = render(&tpl, &ctx, "custom")?;
+    // Name the template `*.html` so Tera autoescapes interpolated values —
+    // host banners are attacker-controlled and would otherwise be stored XSS
+    // in the rendered report (review #5).
+    let out = render(&tpl, &ctx, "custom.html")?;
     crate::file_out::write(out_path, out.as_bytes())?;
     Ok(())
 }

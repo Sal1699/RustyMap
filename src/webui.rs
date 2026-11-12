@@ -5,10 +5,52 @@ use tiny_http::{Header, Response, Server};
 
 const INDEX_HTML: &str = include_str!("../web/index.html");
 
+/// True if a request's `Host` header is our own loopback bind (DNS-rebinding
+/// guard, review #7).
+fn host_is_loopback_self(host: &str, port: &str) -> bool {
+    let h = host.trim().to_ascii_lowercase();
+    h == format!("127.0.0.1:{}", port)
+        || h == format!("localhost:{}", port)
+        || h == format!("[::1]:{}", port)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::host_is_loopback_self;
+    #[test]
+    fn host_guard_allows_only_loopback_self() {
+        assert!(host_is_loopback_self("127.0.0.1:8088", "8088"));
+        assert!(host_is_loopback_self("localhost:8088", "8088"));
+        assert!(host_is_loopback_self("LOCALHOST:8088", "8088"));
+        assert!(!host_is_loopback_self("evil.example.com:8088", "8088"));
+        assert!(!host_is_loopback_self("127.0.0.1:9999", "8088")); // wrong port
+    }
+}
+
 pub fn serve(addr: &str, db_path: &str) -> Result<()> {
     let server = Server::http(addr).map_err(|e| anyhow::anyhow!("bind: {}", e))?;
     println!("RustyMap web UI listening on http://{}/", addr);
+    // For a loopback bind (the default) enforce the Host header: a malicious web
+    // page can point a DNS name at 127.0.0.1 and read the scan history via DNS
+    // rebinding otherwise (review #7).
+    let guard_host =
+        addr.starts_with("127.") || addr.starts_with("localhost") || addr.starts_with("[::1]");
+    let port = addr.rsplit(':').next().unwrap_or("").to_string();
     for req in server.incoming_requests() {
+        if guard_host {
+            let ok = req
+                .headers()
+                .iter()
+                .find(|h| h.field.equiv("Host"))
+                .map(|h| host_is_loopback_self(h.value.as_str(), &port))
+                .unwrap_or(false);
+            if !ok {
+                let resp = Response::from_data(b"forbidden: host not allowed".to_vec())
+                    .with_status_code(403);
+                let _ = req.respond(resp);
+                continue;
+            }
+        }
         let url = req.url().to_string();
         let (body, content_type, status): (Vec<u8>, &str, u16) = match url.as_str() {
             "/" | "/index.html" => (INDEX_HTML.as_bytes().to_vec(), "text/html; charset=utf-8", 200),

@@ -173,22 +173,26 @@ fn download(client: &reqwest::blocking::Client, asset: &Asset, dst: &Path) -> Re
     Ok(())
 }
 
-/// Verify against SHA256SUMS.txt published in the same release.
-/// Best-effort: if the checksum file is missing or unparseable, log
-/// and proceed (binary is downloaded over HTTPS anyway).
+/// Verify the downloaded archive against SHA256SUMS.txt published in the same
+/// release. Fail-closed (review #6): a missing/unparseable checksum file, an
+/// unlisted asset, or a hash mismatch all return Err so the update aborts
+/// rather than installing an unverified binary.
 fn verify_checksum(
     client: &reqwest::blocking::Client,
     release: &Release,
     asset: &Asset,
     archive_path: &Path,
-) -> Result<bool> {
+) -> Result<()> {
     let sums_url = release
         .assets
         .iter()
         .find(|a| a.name == "SHA256SUMS.txt")
         .map(|a| a.browser_download_url.clone());
     let Some(url) = sums_url else {
-        return Ok(false); // not present, skip
+        return Err(anyhow!(
+            "no SHA256SUMS.txt published in this release — refusing to install an \
+             unverified binary (fail-closed); install manually from the release page if intended"
+        ));
     };
     let body = client.get(&url).send()?.text()?;
     let want = body
@@ -223,7 +227,7 @@ fn verify_checksum(
             got
         ));
     }
-    Ok(true)
+    Ok(())
 }
 
 /// Extract the rustymap binary from the downloaded archive into
@@ -466,14 +470,11 @@ pub fn update() -> Result<()> {
     })?;
 
     eprintln!("[5/7] verifying SHA256 …");
-    match verify_checksum(&client, &release, asset, &archive_path) {
-        Ok(true) => eprintln!("       ✓ checksum match"),
-        Ok(false) => eprintln!("       (no SHA256SUMS.txt published, skipping)"),
-        Err(e) => {
-            let _ = std::fs::remove_file(&archive_path);
-            return Err(e);
-        }
+    if let Err(e) = verify_checksum(&client, &release, asset, &archive_path) {
+        let _ = std::fs::remove_file(&archive_path);
+        return Err(e);
     }
+    eprintln!("       ✓ checksum verified");
 
     eprintln!("[6/7] extracting binary …");
     let new_bin = extract(&archive_path, &temp_dir).inspect_err(|_e| {
