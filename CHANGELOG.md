@@ -4,6 +4,41 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.106.2] - 2026-11-12
+
+**Engine hot-path hardening from the code review** (items 1 / 2 / 3 / 12 / 13) —
+update 1 of the "falli tutti dal engine hot-path ai minori ai refactor" batch.
+706/706 tests (+3). All five touch the raw scan path, so they need a Kali
+re-validation against real targets; the logic is unit-tested where it can be.
+
+### Changed
+- **SYN/stealth reply correlation now verifies the local port and the ack
+  (review #1).** The raw receiver matched a reply to a probe by source
+  `(ip, port)` only, so a packet that happened to share that tuple but was
+  addressed to a different local port — cross-talk from another socket, or an
+  injected/stray packet — could be mis-reported as `open`/`closed`. The receiver
+  now drops any reply whose TCP **destination** ≠ the port we sent from, and a
+  SYN-ACK whose ack ≠ our ISN+1 (layer-4 SYN probes, where the ISN is known) —
+  the same correlation the OS-fingerprint probe suite (`tcp_probe_suite` /
+  `tcp_fp`) already applied. (`raw_scan.rs`.)
+- **`--max-rate` is now a true global cap (review #2).** It was applied as a
+  per-host pacer, so N hosts in flight sent up to `N × --max-rate` aggregate. A
+  single `GlobalRateLimiter` on the shared scanner now paces every concurrent
+  host against one ceiling. (`rate.rs`, `raw_scan.rs`, `main.rs`.)
+- **Raw scans report a real per-port RTT (review #3).** `PortResult.rtt` was
+  hardcoded to 0 on the raw path (the latency column / host-latency readout
+  showed nothing); both the per-probe and fast engines now carry the measured
+  round-trip. (`raw_scan.rs`.)
+- **Adaptive per-probe timeout gained the Jacobson/Karels variance term (review
+  #12).** It now waits `max(10×srtt, srtt + 4·rttvar)`, clamped to
+  `[floor, --timeout]`. Taking the max means the variance term only ever *adds*
+  headroom over the old flat-10× behaviour — on a jittery link a late-but-real
+  reply is less likely to be dropped as `filtered`, and it can never tighten the
+  window into a new false negative. (`rate.rs`, `raw_scan.rs`, `scanner.rs`.)
+- **Raw IPv6 targets now say so instead of silently reporting "down" (review
+  #13).** The pnet raw TCP channel is IPv4-only here; a one-line warning up front
+  points the user at `--sT` (connect scan) for IPv6. (`main.rs`.)
+
 ## [0.106.1] - 2026-11-12
 
 **Security hardening from the code review** (items 4 / 5 / 6 / 7): Rhai execution

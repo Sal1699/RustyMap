@@ -2666,7 +2666,15 @@ async fn run(mut args: Cli) -> Result<()> {
                 eprintln!("[trace-raw] enabled — every tx/rx packet will be logged to stderr");
             }
             let any_v6 = targets.iter().any(|t| t.ip.is_ipv6());
-            let scanner = Arc::new(RawTcpScanner::new(evasion_cfg)?);
+            // Review #13: be explicit instead of silently reporting IPv6 hosts
+            // "down" — the raw pnet TCP channel is IPv4-only here.
+            if any_v6 {
+                eprintln!(
+                    "[!] raw TCP scans (-sS/-sF/-sN/-sX/-sA/-sW/-sM) do not support IPv6 \
+                     targets — those hosts will be reported down. Use --sT (connect scan) for IPv6."
+                );
+            }
+            let scanner = Arc::new(RawTcpScanner::new(evasion_cfg, args.max_rate)?);
             // Fast engine is OPT-IN (per-probe is the default); --fast-engine
             // selects it, --legacy-engine forces the per-probe path and wins
             // if both are given (v0.95.1 re-added it for forward-compat — it
@@ -2675,7 +2683,7 @@ async fn run(mut args: Cli) -> Result<()> {
             if use_fast {
                 eprintln!("[fast-engine] opt-in raw engine active (burst-send + async collect, cwnd)");
             }
-            let result = run_raw_tcp(targets, port_list.clone(), kind, scanner, timeout_dur, parallel, use_fast, args.min_rate, args.max_rate, std::time::Duration::from_secs(args.host_timeout_secs)).await;
+            let result = run_raw_tcp(targets, port_list.clone(), kind, scanner, timeout_dur, parallel, use_fast, args.min_rate, std::time::Duration::from_secs(args.host_timeout_secs)).await;
             // Post-scan sanity check: if we sent packets but rx_count is 0,
             // the kernel (or a firewall) is silently swallowing responses
             // before they reach our raw socket. IPv6 conntrack drops the
@@ -4067,9 +4075,10 @@ async fn run_raw_tcp(
     parallel: usize,
     fast: bool,
     min_rate: u32,
-    max_rate: u32,
     host_timeout: std::time::Duration,
 ) -> Vec<HostResult> {
+    // --max-rate is enforced globally by scanner.global_rate (review #2), set
+    // when the shared RawTcpScanner was built, so it is no longer threaded here.
     // Scan hosts with BOUNDED CONCURRENCY instead of one-at-a-time (lab v0.99
     // #8/#9: a /24 raw sweep was dominated by per-host wall time because the
     // raw path ran hosts sequentially, unlike the connect path). The shared
@@ -4091,7 +4100,7 @@ async fn run_raw_tcp(
                     if fast {
                         // Fase 30 engine + Fase 31 congestion window.
                         raw_scan::run_raw_tcp_fast(
-                            t, ports, kind, scanner_arc, timeout_dur, parallel, min_rate, max_rate,
+                            t, ports, kind, scanner_arc, timeout_dur, parallel, min_rate,
                             host_timeout,
                         )
                     } else {

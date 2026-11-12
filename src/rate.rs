@@ -21,27 +21,44 @@ pub struct AdaptiveLimiter {
     /// `adjust()`, unlike `total_rtt_ms`). Drives `adaptive_timeout` so a
     /// filtered port on a fast LAN stops costing the full `--timeout`.
     ewma_rtt_us: AtomicU64,
+    /// Smoothed mean RTT deviation (µs), Jacobson/Karels `rttvar`; feeds the
+    /// `srtt + 4·rttvar` term of `adaptive_timeout` (review #12).
+    ewma_rttvar_us: AtomicU64,
     rtt_samples: AtomicU64,
     verbose: bool,
 }
 
 /// How much headroom over the mean RTT to allow before calling a probe lost.
 /// nmap uses `srtt + 4·rttvar`; a flat 10× mean is a stable, slightly
-/// conservative proxy that still collapses a 1500 ms LAN wait to the floor.
+/// conservative floor we keep as a lower bound (see `adaptive_timeout`).
 pub const RTT_TIMEOUT_MULT: u32 = 10;
 
-/// nmap-style adaptive per-probe timeout. Until we have observed real RTTs
-/// the full `base` (the user's `--timeout`) is used; once we have a mean,
-/// the wait shrinks toward `RTT_TIMEOUT_MULT × rtt`, clamped to
-/// `[floor, base]`. On a LAN (RTT < 1 ms) this collapses the dominant cost
-/// of small SYN/connect scans — a filtered port waited the full 1.5 s × retries
-/// before — while a slow WAN host (high RTT) keeps a long timeout because the
-/// product rises with the measured RTT. Self-scaling, never below `floor`.
-pub fn adaptive_timeout(base: Duration, mean_rtt: Option<Duration>, floor: Duration) -> Duration {
+/// nmap-style adaptive per-probe timeout (review #12). Until we have observed
+/// real RTTs the full `base` (the user's `--timeout`) is used; once we have a
+/// smoothed RTT the wait shrinks toward the larger of:
+///   * `RTT_TIMEOUT_MULT × srtt` — the stable, slightly conservative proxy that
+///     collapses a 1500 ms LAN wait to the floor, and
+///   * `srtt + 4·rttvar` — Jacobson/Karels (RFC 6298): on a *jittery* link the
+///     variance term widens the window so a late-but-real reply isn't dropped
+///     as filtered.
+/// Taking the **max** means the RFC term only ever *adds* headroom over the old
+/// flat-10× behaviour — it can never tighten the window into a new
+/// false-`filtered`, so it's safe on the hot path. Clamped to `[floor, base]`;
+/// `rtt_var = None` reproduces the pre-#12 flat-10× result exactly.
+pub fn adaptive_timeout(
+    base: Duration,
+    mean_rtt: Option<Duration>,
+    rtt_var: Option<Duration>,
+    floor: Duration,
+) -> Duration {
     match mean_rtt {
-        Some(rtt) if !rtt.is_zero() => rtt
-            .saturating_mul(RTT_TIMEOUT_MULT)
-            .clamp(floor.min(base), base),
+        Some(rtt) if !rtt.is_zero() => {
+            let flat = rtt.saturating_mul(RTT_TIMEOUT_MULT);
+            let rfc = rtt.saturating_add(
+                rtt_var.unwrap_or(Duration::ZERO).saturating_mul(4),
+            );
+            flat.max(rfc).clamp(floor.min(base), base)
+        }
         _ => base,
     }
 }
@@ -65,6 +82,7 @@ impl AdaptiveLimiter {
             timeouts: AtomicU64::new(0),
             total_rtt_ms: AtomicU64::new(0),
             ewma_rtt_us: AtomicU64::new(0),
+            ewma_rttvar_us: AtomicU64::new(0),
             rtt_samples: AtomicU64::new(0),
             verbose,
         })
@@ -85,6 +103,16 @@ impl AdaptiveLimiter {
         }
     }
 
+    /// Smoothed RTT variance (`rttvar`), once a few replies have been seen;
+    /// `None` while warming up. Pairs with [`mean_rtt`](Self::mean_rtt) to feed
+    /// the `srtt + 4·rttvar` term of [`adaptive_timeout`] (review #12).
+    pub fn rtt_var(&self) -> Option<Duration> {
+        if self.rtt_samples.load(Ordering::Relaxed) < 3 {
+            return None;
+        }
+        Some(Duration::from_micros(self.ewma_rttvar_us.load(Ordering::Relaxed)))
+    }
+
     pub fn semaphore(&self) -> Arc<Semaphore> {
         Arc::clone(&self.sem)
     }
@@ -102,14 +130,19 @@ impl AdaptiveLimiter {
             self.total_rtt_ms.fetch_add(rtt.as_millis() as u64, Ordering::Relaxed);
             // Persistent RTT EWMA (α=0.25) in microseconds, surviving
             // `adjust()`. A racy load/store is fine for a timing heuristic.
+            // Alongside it we track `rttvar` (mean deviation, β=0.25) so
+            // `adaptive_timeout` can widen the window on a jittery link (#12).
             let sample = rtt.as_micros().min(u64::MAX as u128) as u64;
             let prev = self.ewma_rtt_us.load(Ordering::Relaxed);
-            let next = if prev == 0 {
-                sample
+            let (next_srtt, next_var) = if prev == 0 {
+                (sample, sample / 2) // RFC 6298 initial rttvar = sample/2
             } else {
-                (prev * 3 + sample) / 4
+                let err = prev.abs_diff(sample); // deviation from current srtt
+                let prev_var = self.ewma_rttvar_us.load(Ordering::Relaxed);
+                ((prev * 3 + sample) / 4, (prev_var * 3 + err) / 4)
             };
-            self.ewma_rtt_us.store(next, Ordering::Relaxed);
+            self.ewma_rtt_us.store(next_srtt, Ordering::Relaxed);
+            self.ewma_rttvar_us.store(next_var, Ordering::Relaxed);
             self.rtt_samples.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -180,8 +213,9 @@ impl AdaptiveLimiter {
 }
 
 /// Minimum wall-clock span that `count` packets may occupy at `max_pps`
-/// packets/second (`0` = unlimited → zero). Pure helper behind [`RatePacer`],
-/// split out so the pacing maths is unit-testable without a clock.
+/// packets/second (`0` = unlimited → zero). Pure helper behind
+/// [`GlobalRateLimiter`], split out so the pacing maths is unit-testable
+/// without a clock.
 pub fn min_send_span(max_pps: u32, count: usize) -> Duration {
     if max_pps == 0 || count == 0 {
         return Duration::ZERO;
@@ -190,35 +224,50 @@ pub fn min_send_span(max_pps: u32, count: usize) -> Duration {
     per.saturating_mul(count as u32)
 }
 
-/// A send-rate ceiling honouring `--max-rate` (packets/second). Single-threaded
-/// (one per host scan in the raw fast engine), so it needs no locking: it
-/// tracks the earliest instant the next packet may leave and sleeps when the
-/// caller is ahead of schedule. `max_pps == 0` disables it (no-op).
-pub struct RatePacer {
+/// Process-global send-rate ceiling honouring `--max-rate` (packets/second),
+/// shared by **all** concurrent host scans (review #2). The old per-host
+/// `RatePacer` was built one-per-host, so with N hosts in flight the true
+/// aggregate rate was up to `N × --max-rate`; a single shared limiter behind a
+/// mutex gives a real global cap. It reserves each packet's slot by advancing a
+/// shared "earliest next send" instant under the lock, then sleeps (lock
+/// released) until that slot — so concurrent senders queue slots back-to-back
+/// instead of each waiting out the other's sleep. `max_pps == 0` disables it
+/// (constructor returns `None`, so the hot path skips the call entirely).
+pub struct GlobalRateLimiter {
     max_pps: u32,
-    next_at: Option<std::time::Instant>,
+    next_at: std::sync::Mutex<std::time::Instant>,
 }
 
-impl RatePacer {
-    pub fn new(max_pps: u32) -> Self {
-        Self { max_pps, next_at: None }
+impl GlobalRateLimiter {
+    pub fn new(max_pps: u32) -> Option<Arc<Self>> {
+        if max_pps == 0 {
+            return None;
+        }
+        Some(Arc::new(Self {
+            max_pps,
+            next_at: std::sync::Mutex::new(std::time::Instant::now()),
+        }))
     }
 
-    /// Block (sleep) as needed so that emitting `count` packets now does not
-    /// exceed the ceiling, then reserve their slot. No-op when unlimited.
-    pub fn pace(&mut self, count: usize) {
-        if self.max_pps == 0 || count == 0 {
+    /// Reserve `count` packet slots globally and block until the first is due.
+    /// The reservation (advancing the shared instant) happens under the lock;
+    /// the sleep happens after the lock is dropped.
+    pub fn acquire(&self, count: usize) {
+        if count == 0 {
             return;
         }
+        let span = min_send_span(self.max_pps, count);
         let now = std::time::Instant::now();
-        let start = match self.next_at {
-            Some(t) if t > now => {
-                std::thread::sleep(t - now);
-                t
-            }
-            _ => now,
+        let start = {
+            let mut next = self.next_at.lock().unwrap();
+            let start = if *next > now { *next } else { now };
+            *next = start + span;
+            start
         };
-        self.next_at = Some(start + min_send_span(self.max_pps, count));
+        let wait = start.saturating_duration_since(now);
+        if !wait.is_zero() {
+            std::thread::sleep(wait);
+        }
     }
 }
 
@@ -310,7 +359,7 @@ mod tests {
     #[test]
     fn adaptive_timeout_uses_base_without_samples() {
         let base = Duration::from_millis(1500);
-        assert_eq!(adaptive_timeout(base, None, timeout_floor(base)), base);
+        assert_eq!(adaptive_timeout(base, None, None, timeout_floor(base)), base);
     }
 
     #[test]
@@ -318,7 +367,7 @@ mod tests {
         let base = Duration::from_millis(1500);
         let floor = timeout_floor(base); // 150ms
         // 0.3ms LAN RTT → 10× = 3ms, clamped up to the 150ms floor (not 1500).
-        let eff = adaptive_timeout(base, Some(Duration::from_micros(300)), floor);
+        let eff = adaptive_timeout(base, Some(Duration::from_micros(300)), None, floor);
         assert_eq!(eff, floor);
         assert!(eff < base);
     }
@@ -328,7 +377,7 @@ mod tests {
         let base = Duration::from_millis(1500);
         let floor = timeout_floor(base);
         // 80ms WAN RTT → 10× = 800ms, between floor and base.
-        let eff = adaptive_timeout(base, Some(Duration::from_millis(80)), floor);
+        let eff = adaptive_timeout(base, Some(Duration::from_millis(80)), None, floor);
         assert_eq!(eff, Duration::from_millis(800));
     }
 
@@ -337,8 +386,49 @@ mod tests {
         let base = Duration::from_millis(1500);
         let floor = timeout_floor(base);
         // 500ms RTT → 10× = 5s, capped at base.
-        let eff = adaptive_timeout(base, Some(Duration::from_millis(500)), floor);
+        let eff = adaptive_timeout(base, Some(Duration::from_millis(500)), None, floor);
         assert_eq!(eff, base);
+    }
+
+    #[test]
+    fn adaptive_timeout_rttvar_only_adds_headroom() {
+        // #12: the `srtt + 4·rttvar` term must only ever *widen* the window.
+        let base = Duration::from_millis(1500);
+        let floor = timeout_floor(base);
+        let srtt = Duration::from_millis(50); // 10× = 500ms (the flat term)
+        // Low jitter: 4·rttvar (4×2ms=8ms) < 10×srtt → flat term wins, unchanged.
+        let calm = adaptive_timeout(base, Some(srtt), Some(Duration::from_millis(2)), floor);
+        assert_eq!(calm, Duration::from_millis(500));
+        // High jitter: 4·rttvar (4×300ms=1200ms)+srtt=1250ms > 500ms flat → the
+        // RFC term widens the window (fewer late replies dropped as filtered).
+        let jittery =
+            adaptive_timeout(base, Some(srtt), Some(Duration::from_millis(300)), floor);
+        assert_eq!(jittery, Duration::from_millis(1250));
+        assert!(jittery > calm, "rttvar must only add headroom, never remove it");
+    }
+
+    #[test]
+    fn global_rate_limiter_off_when_zero() {
+        assert!(GlobalRateLimiter::new(0).is_none());
+        assert!(GlobalRateLimiter::new(1000).is_some());
+    }
+
+    #[test]
+    fn global_rate_limiter_paces_aggregate() {
+        // #2: 2000 pps → 0.5ms/packet. Reserving 20 slots must take at least a
+        // few ms regardless of how the calls are grouped (first slot is free).
+        // Generous lower bound so coarse OS sleep granularity can't flake it.
+        let g = GlobalRateLimiter::new(2000).unwrap();
+        g.acquire(0); // no-op must not panic or advance
+        let t0 = std::time::Instant::now();
+        for _ in 0..20 {
+            g.acquire(1);
+        }
+        assert!(
+            t0.elapsed() >= Duration::from_millis(5),
+            "expected global pacing, took {:?}",
+            t0.elapsed()
+        );
     }
 
     #[test]

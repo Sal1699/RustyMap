@@ -82,8 +82,25 @@ enum Response {
     Other,
 }
 
+/// A probe awaiting its reply. The pending map is keyed by
+/// `(remote_ip, remote_port)`; these extra fields let the receiver *correlate*
+/// a reply to the exact probe (review #1) rather than trusting the source
+/// ip+port alone — the same check the OS-fingerprint probe suite already does:
+///   * `exp_src_port` — the local port we sent from. A genuine reply is
+///     addressed back to it, so a packet whose TCP **destination** ≠ this is
+///     cross-talk (another local socket, an injected/stray packet) and is
+///     dropped instead of being mis-attributed to this port.
+///   * `exp_ack` — for a layer-4 SYN probe we know our ISN, so a real SYN-ACK
+///     must acknowledge `seq+1` (RFC 793). `None` for decoy/layer-3 or non-SYN
+///     probes, where we don't emit/observe a known ISN → skip the ack check.
+struct Pending {
+    sender: mpsc::Sender<Response>,
+    exp_src_port: u16,
+    exp_ack: Option<u32>,
+}
+
 // Key: (remote_ip, remote_port) — works with both random and fixed source ports.
-type PendingMap = Arc<Mutex<HashMap<(Ipv4Addr, u16), mpsc::Sender<Response>>>>;
+type PendingMap = Arc<Mutex<HashMap<(Ipv4Addr, u16), Pending>>>;
 
 pub struct RawTcpScanner {
     tx4: Arc<Mutex<TransportSender>>,
@@ -95,7 +112,14 @@ pub struct RawTcpScanner {
     /// per-probe timeout so a filtered port on a fast LAN stops costing the
     /// full `--timeout` (the SYN slow-ramp fix).
     ewma_rtt_us: std::sync::atomic::AtomicU64,
+    /// Smoothed RTT deviation (µs), Jacobson/Karels `rttvar`, feeding the
+    /// `srtt + 4·rttvar` term of the adaptive per-probe timeout (review #12).
+    ewma_rttvar_us: std::sync::atomic::AtomicU64,
     rtt_samples: std::sync::atomic::AtomicU64,
+    /// Process-global `--max-rate` pacer (review #2). Built once and shared via
+    /// the `Arc<RawTcpScanner>` across every concurrent host, so the aggregate
+    /// send rate is a true global cap instead of per-host. `None` = unlimited.
+    global_rate: Option<Arc<crate::rate::GlobalRateLimiter>>,
     /// Count of inbound ICMP destination-unreachable (type 3: admin-prohibited
     /// / frag-needed / port-unreach) packets — a rate-limit signal for the
     /// fast engine's congestion window (Fase 31 follow-up). Fed by a single
@@ -105,7 +129,7 @@ pub struct RawTcpScanner {
 }
 
 impl RawTcpScanner {
-    pub fn new(evasion: EvasionConfig) -> Result<Self> {
+    pub fn new(evasion: EvasionConfig, max_rate: u32) -> Result<Self> {
         let (tx4, rx) = transport_channel(4096, Layer4(Ipv4(IpNextHeaderProtocols::Tcp)))
             .map_err(|e| {
                 anyhow!(
@@ -152,7 +176,9 @@ impl RawTcpScanner {
             evasion,
             _rx_thread: rx_thread,
             ewma_rtt_us: std::sync::atomic::AtomicU64::new(0),
+            ewma_rttvar_us: std::sync::atomic::AtomicU64::new(0),
             rtt_samples: std::sync::atomic::AtomicU64::new(0),
+            global_rate: crate::rate::GlobalRateLimiter::new(max_rate),
             icmp_unreach,
         })
     }
@@ -174,11 +200,30 @@ impl RawTcpScanner {
         (us != 0).then(|| Duration::from_micros(us))
     }
 
+    /// Smoothed RTT variance (`rttvar`), once a few replies have arrived; pairs
+    /// with `mean_rtt` to feed `adaptive_timeout`'s `srtt + 4·rttvar` (review
+    /// #12). `None` while warming up.
+    fn rtt_var(&self) -> Option<Duration> {
+        if self.rtt_samples.load(Ordering::Relaxed) < 3 {
+            return None;
+        }
+        Some(Duration::from_micros(self.ewma_rttvar_us.load(Ordering::Relaxed)))
+    }
+
     fn record_rtt(&self, rtt: Duration) {
         let sample = rtt.as_micros().min(u64::MAX as u128) as u64;
         let prev = self.ewma_rtt_us.load(Ordering::Relaxed);
-        let next = if prev == 0 { sample } else { (prev * 3 + sample) / 4 };
-        self.ewma_rtt_us.store(next, Ordering::Relaxed);
+        // srtt EWMA (α=0.25) + rttvar EWMA (β=0.25) in one pass. The deviation
+        // is measured against the *current* srtt before it is updated (RFC 6298).
+        let (next_srtt, next_var) = if prev == 0 {
+            (sample, sample / 2) // RFC 6298 initial rttvar = sample/2
+        } else {
+            let err = prev.abs_diff(sample);
+            let prev_var = self.ewma_rttvar_us.load(Ordering::Relaxed);
+            ((prev * 3 + sample) / 4, (prev_var * 3 + err) / 4)
+        };
+        self.ewma_rtt_us.store(next_srtt, Ordering::Relaxed);
+        self.ewma_rttvar_us.store(next_var, Ordering::Relaxed);
         self.rtt_samples.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -189,7 +234,7 @@ impl RawTcpScanner {
         dst_port: u16,
         kind: RawTcpKind,
         timeout: Duration,
-    ) -> PortState {
+    ) -> (PortState, Option<Duration>) {
         // Timing evasion (technique 15): jitter between probes
         evasion::jitter_sleep(&self.evasion.jitter);
 
@@ -205,13 +250,25 @@ impl RawTcpScanner {
             .source_port
             .unwrap_or_else(|| rng.gen_range(40000..60000));
         let flags = ev.effective_flags(kind.flags());
+        // Our ISN for the layer-4 path, and the basis for the SYN-ACK ack
+        // correlation (review #1). Decoy/layer-3 sends pick their own ISN
+        // internally, so there we can't predict the ack → exp_ack stays None.
+        let seq: u32 = rng.gen();
+        let exp_ack = (!ev.needs_layer3() && matches!(kind, RawTcpKind::Syn))
+            .then_some(seq.wrapping_add(1));
 
         let (sender, receiver) = mpsc::channel::<Response>();
         {
-            self.pending
-                .lock()
-                .unwrap()
-                .insert((dst_ip, dst_port), sender);
+            self.pending.lock().unwrap().insert(
+                (dst_ip, dst_port),
+                Pending { sender, exp_src_port: src_port, exp_ack },
+            );
+        }
+
+        // Global --max-rate pacing (review #2): block before the packet leaves
+        // so the ceiling is enforced across every concurrent host scanner.
+        if let Some(g) = &self.global_rate {
+            g.acquire(1);
         }
 
         let send_ok = if ev.needs_layer3() {
@@ -237,7 +294,7 @@ impl RawTcpScanner {
                 dst_ip,
                 dst_port,
                 flags,
-                rng.gen(),
+                seq,
                 src_port,
                 &ev,
             );
@@ -253,8 +310,8 @@ impl RawTcpScanner {
             );
         }
 
-        let state = if !send_ok {
-            PortState::Filtered
+        let (state, rtt) = if !send_ok {
+            (PortState::Filtered, None)
         } else {
             // Shrink the recv wait toward the observed RTT once we have a few
             // samples; early probes keep the full `timeout`. This is what
@@ -263,14 +320,21 @@ impl RawTcpScanner {
             let eff = crate::rate::adaptive_timeout(
                 timeout,
                 self.mean_rtt(),
+                self.rtt_var(),
                 crate::rate::timeout_floor(timeout),
             );
             let t0 = Instant::now();
             let recvd = receiver.recv_timeout(eff);
-            if recvd.is_ok() {
-                self.record_rtt(t0.elapsed());
-            }
-            match recvd {
+            // Real measured RTT for this probe (review #3) — fed to the EWMA and
+            // returned so the caller reports it instead of a hardcoded 0.
+            let rtt = if recvd.is_ok() {
+                let e = t0.elapsed();
+                self.record_rtt(e);
+                Some(e)
+            } else {
+                None
+            };
+            let st = match recvd {
                 Ok(Response::SynAck) => PortState::Open,
                 Ok(Response::Rst { window }) => match kind {
                     RawTcpKind::Syn => PortState::Closed,
@@ -293,14 +357,15 @@ impl RawTcpScanner {
                     RawTcpKind::Window => PortState::Filtered,
                     RawTcpKind::Maimon => PortState::OpenFiltered,
                 },
-            }
+            };
+            (st, rtt)
         };
 
         self.pending
             .lock()
             .unwrap()
             .remove(&(dst_ip, dst_port));
-        state
+        (state, rtt)
     }
 
     /// Send a probe WITHOUT waiting for the reply, returning the channel the
@@ -326,13 +391,20 @@ impl RawTcpScanner {
             .source_port
             .unwrap_or_else(|| rng.gen_range(40000..60000));
         let flags = ev.effective_flags(kind.flags());
+        let seq: u32 = rng.gen();
+        let exp_ack = (!ev.needs_layer3() && matches!(kind, RawTcpKind::Syn))
+            .then_some(seq.wrapping_add(1));
 
         let (sender, receiver) = mpsc::channel::<Response>();
         {
-            self.pending
-                .lock()
-                .unwrap()
-                .insert((dst_ip, dst_port), sender);
+            self.pending.lock().unwrap().insert(
+                (dst_ip, dst_port),
+                Pending { sender, exp_src_port: src_port, exp_ack },
+            );
+        }
+
+        if let Some(g) = &self.global_rate {
+            g.acquire(1);
         }
 
         let send_ok = if ev.needs_layer3() {
@@ -343,7 +415,7 @@ impl RawTcpScanner {
                 false
             }
         } else {
-            let tcp = evasion::build_tcp_segment(src_ip, dst_ip, dst_port, flags, rng.gen(), src_port, &ev);
+            let tcp = evasion::build_tcp_segment(src_ip, dst_ip, dst_port, flags, seq, src_port, &ev);
             let mut tx = self.tx4.lock().unwrap();
             let pkt = TcpPacket::new(&tcp).unwrap();
             tx.send_to(pkt, IpAddr::V4(dst_ip)).is_ok()
@@ -397,11 +469,22 @@ impl RawTcpScanner {
         for &p in ports {
             let src_port: u16 = ev.source_port.unwrap_or_else(|| rng.gen_range(40000..60000));
             let flags = ev.effective_flags(kind.flags());
-            let seg = evasion::build_tcp_segment(src_ip, dst_ip, p, flags, rng.gen(), src_port, &ev);
+            let seq: u32 = rng.gen();
+            // batch_eligible() guarantees passive evasion → always layer-4, so a
+            // SYN probe's ISN is known and the ack can be correlated (review #1).
+            let exp_ack = matches!(kind, RawTcpKind::Syn).then_some(seq.wrapping_add(1));
+            let seg = evasion::build_tcp_segment(src_ip, dst_ip, p, flags, seq, src_port, &ev);
             let (sender, receiver) = mpsc::channel::<Response>();
-            self.pending.lock().unwrap().insert((dst_ip, p), sender);
+            self.pending.lock().unwrap().insert(
+                (dst_ip, p),
+                Pending { sender, exp_src_port: src_port, exp_ack },
+            );
             segs.push(seg);
             pairs.push((p, receiver));
+        }
+        // Global --max-rate pacing for the whole burst at once (review #2).
+        if let Some(g) = &self.global_rate {
+            g.acquire(segs.len());
         }
         let sent = batch.send_batch(dst_ip, &segs);
         if TRACE_ENABLED.load(Ordering::Relaxed) {
@@ -591,7 +674,26 @@ fn receiver_loop(mut rx: TransportReceiver, pending: PendingMap) {
 
         let sender_opt = {
             let pend = pending.lock().unwrap();
-            pend.get(&(remote_ip, remote_port)).cloned()
+            pend.get(&(remote_ip, remote_port)).and_then(|p| {
+                // Correlate to the exact probe (review #1): the reply must be
+                // addressed back to the local port we sent from, and a genuine
+                // SYN-ACK must acknowledge our ISN+1. A packet that matches the
+                // (ip, port) key but fails either check is cross-talk from
+                // another local socket or an injected/stray packet, and is
+                // dropped rather than mis-reported as open/closed. This is the
+                // same check tcp_probe_suite / tcp_fp already apply.
+                if packet.get_destination() != p.exp_src_port {
+                    return None;
+                }
+                if matches!(kind, Response::SynAck) {
+                    if let Some(exp) = p.exp_ack {
+                        if packet.get_acknowledgement() != exp {
+                            return None;
+                        }
+                    }
+                }
+                Some(p.sender.clone())
+            })
         };
         if let Some(s) = sender_opt {
             let _ = s.send(kind);
@@ -685,19 +787,23 @@ pub fn run_raw_tcp_scan(
                 // filtered; a definitive reply (SYN-ACK / RST → Open / Closed
                 // / Unfiltered) is terminal and never retried. The connect
                 // path already does this (scanner.rs); the raw path did not.
-                let mut st = s_scanner.probe(src, dst, p, kind, timeout);
+                let (mut st, mut rtt) = s_scanner.probe(src, dst, p, kind, timeout);
                 let mut attempt = 0u8;
                 while matches!(st, PortState::Filtered | PortState::OpenFiltered)
                     && attempt < max_retries
                 {
                     attempt += 1;
-                    st = s_scanner.probe(src, dst, p, kind, timeout);
+                    let (s2, r2) = s_scanner.probe(src, dst, p, kind, timeout);
+                    st = s2;
+                    rtt = r2;
                 }
                 crate::scan_stats::global().record_result(st);
                 results.push(PortResult {
                     port: p,
                     state: st,
-                    rtt: Duration::from_millis(0),
+                    // Real per-probe RTT (review #3); 0 when the port never
+                    // replied (filtered/no-response), as before.
+                    rtt: rtt.unwrap_or(Duration::ZERO),
                     service: None,
                 });
             }
@@ -765,7 +871,6 @@ pub fn run_raw_tcp_fast(
     timeout: Duration,
     max_window: usize,
     min_rate: u32,
-    max_rate: u32,
     host_timeout: Duration,
 ) -> HostResult {
     let start = Instant::now();
@@ -794,6 +899,9 @@ pub fn run_raw_tcp_fast(
     // Definitive states only (Open/Closed/Unfiltered); "Other" and no-reply are
     // left out so they get retransmitted, then mapped at finalize.
     let mut state: HashMap<u16, PortState> = HashMap::new();
+    // Per-port measured RTT (review #3): the wave-relative time its reply was
+    // collected, so finalize reports a real latency instead of a hardcoded 0.
+    let mut rtts: HashMap<u16, Duration> = HashMap::new();
     let mut todo: Vec<u16> = ports.iter().copied().collect();
 
     // Fase 31 congestion control: bound how many probes are in flight at once
@@ -801,9 +909,11 @@ pub fn run_raw_tcp_fast(
     // full-65535 burst used to outrun the single receiver / trip host RST
     // rate-limiting, dropping replies and spiking variance (v0.88.3 lab run).
     // The window ramps in slow-start, backs off when a *responding* host starts
-    // dropping (so lost opens are recovered on the next gentler wave), and a
-    // `--max-rate` pacer caps packets/sec. `--max-parallel` caps the window,
-    // `--min-rate` raises its floor.
+    // dropping (so lost opens are recovered on the next gentler wave).
+    // `--max-parallel` caps the window, `--min-rate` raises its floor. The
+    // `--max-rate` packets/sec ceiling is now enforced *globally* by
+    // `scanner.global_rate` inside the send path (review #2), not by a per-host
+    // pacer here — so concurrent hosts share one aggregate cap.
     let cw_max = max_window.max(1);
     let cw_min = if min_rate > 0 {
         ((min_rate as usize) / 100).clamp(16.min(cw_max), cw_max)
@@ -812,7 +922,6 @@ pub fn run_raw_tcp_fast(
     };
     let cw_init = (cw_max / 8).clamp(cw_min, cw_max);
     let mut cwnd = crate::rate::CongestionWindow::new(cw_init, cw_min, cw_max);
-    let mut pacer = crate::rate::RatePacer::new(max_rate);
     // Silence-shrink (lab v0.95.0 B1): give the host a full `--timeout` on the
     // first wave to learn its RTT, but once it has answered *nothing* we stop
     // burning the full timeout on every subsequent wave — a filtered port stays
@@ -853,8 +962,8 @@ pub fn run_raw_tcp_fast(
             let wave = &round_ports[idx..end];
             idx = end;
 
-            // Honour --max-rate before putting this wave on the wire.
-            pacer.pace(wave.len());
+            // --max-rate is paced globally inside the send path now (review #2),
+            // so there is no per-host wave pacer here.
 
             // ── burst the wave without waiting ──
             let burst_start = Instant::now();
@@ -887,8 +996,8 @@ pub fn run_raw_tcp_fast(
             // firewalled wave from burning the full `--timeout`.
             let floor = crate::rate::timeout_floor(timeout);
             let eff = if host_replied {
-                // Host answers → shrink toward ~10×RTT as usual.
-                crate::rate::adaptive_timeout(timeout, scanner.mean_rtt(), floor)
+                // Host answers → shrink toward ~10×RTT (+ rttvar headroom, #12).
+                crate::rate::adaptive_timeout(timeout, scanner.mean_rtt(), scanner.rtt_var(), floor)
             } else if waves_done == 0 {
                 // First wave: full timeout, a fair chance to reveal the RTT.
                 timeout
@@ -908,15 +1017,18 @@ pub fn run_raw_tcp_fast(
                         Ok(resp) => {
                             scanner.clear_pending(dst, p);
                             replies += 1;
+                            let elapsed = burst_start.elapsed();
                             // First reply ≈ host RTT for the wave → feed the EWMA.
                             if !rtt_recorded {
-                                scanner.record_rtt(burst_start.elapsed());
+                                scanner.record_rtt(elapsed);
                                 rtt_recorded = true;
                             }
                             let st = response_to_state(resp, kind);
                             // Only SYN-ACK / RST are terminal; "Other" → retransmit.
                             if matches!(st, PortState::Open | PortState::Closed | PortState::Unfiltered) {
                                 state.insert(p, st);
+                                // Per-port RTT for the reported latency (#3).
+                                rtts.insert(p, elapsed);
                             }
                         }
                         Err(mpsc::TryRecvError::Empty) => still.push((p, rx)),
@@ -964,7 +1076,8 @@ pub fn run_raw_tcp_fast(
         .map(|&p| {
             let st = state.get(&p).copied().unwrap_or_else(|| no_reply_state(kind));
             crate::scan_stats::global().record_result(st);
-            PortResult { port: p, state: st, rtt: Duration::from_millis(0), service: None }
+            let rtt = rtts.get(&p).copied().unwrap_or(Duration::ZERO);
+            PortResult { port: p, state: st, rtt, service: None }
         })
         .collect();
     all.sort_by_key(|p| p.port);

@@ -142,8 +142,12 @@ pub async fn tcp_connect_scan(
                 let (mut state, mut timed_out);
                 // Shrink the wait toward the observed RTT once the limiter has
                 // samples; the full `timeout_dur` is still used while warming up.
-                let eff_timeout =
-                    crate::rate::adaptive_timeout(timeout_dur, lim_task.mean_rtt(), timeout_floor);
+                let eff_timeout = crate::rate::adaptive_timeout(
+                    timeout_dur,
+                    lim_task.mean_rtt(),
+                    lim_task.rtt_var(),
+                    timeout_floor,
+                );
                 loop {
                     let res = dial(addr, eff_timeout).await;
                     let (s, to) = match res {
