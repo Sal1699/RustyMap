@@ -4,6 +4,33 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.106.0] - 2026-11-12
+
+**`--brute-protocol rdp` now computes the CredSSP pubKeyAuth channel binding** —
+the fourth and last "falli tutti" item (v0.101.3 §16). 702/702 tests. **Best-effort
+and UNVALIDATED against real Windows** — stays Alpha pending a Windows RDP host.
+
+### Added
+- **CredSSP v5+ pubKeyAuth (channel binding) for the RDP brute.** The adapter
+  already did X.224 PROTOCOL_HYBRID, the TLS handshake, and NTLM
+  NEGOTIATE/CHALLENGE/AUTHENTICATE over CredSSP TSRequests; the one gap was
+  pubKeyAuth. It now extracts the server's SubjectPublicKeyInfo from the TLS peer
+  cert, derives the NTLM session key (HMAC-MD5 over the NTProofStr) and the client
+  sign/seal keys, SHA-256-hashes `magic || clientNonce || SPKI`, seals it under the
+  session key (hand-rolled RC4 — no new dependency) and sends it as pubKeyAuth [3]
+  + clientNonce [5]. A server pubKeyAuth in the reply (no errorCode) now makes a
+  positive **authoritative**, not just suggestive. `RUSTYMAP_RDP_DEBUG=1` traces
+  the SPKI, session key and reply. The crypto primitives (RC4 vs RFC 6229, session
+  key, binding hash, seal) are unit-tested. (`brute_rdp.rs`.)
+
+### Note
+- **The end-to-end CredSSP binding is UNVALIDATED against a real Windows RDP
+  host** — the lab has none (xrdp doesn't speak CredSSP; B6 was inconclusive). The
+  version / flag / SPKI-form / seal-ordering choices follow MS-CSSP but need a
+  Windows target to confirm; expect a debug-trace iteration like the SMB/mssql
+  sagas. `rdp` **stays Alpha** until a Windows host validates it. Negatives
+  (NTSTATUS error codes) remain reliable.
+
 ## [0.105.0] - 2026-11-12
 
 **`--os-fp-v6` classifier expanded to more OS families and eras** — the third

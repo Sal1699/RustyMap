@@ -16,37 +16,42 @@
 //!      public-key SubjectPublicKeyInfo, encrypted with the NTLM
 //!      session key).
 //!
-//! ## Honest limitation: `pubKeyAuth`
+//! ## `pubKeyAuth` (v0.106.0 — best-effort, UNVALIDATED)
 //!
-//! Step 4's `pubKeyAuth` requires:
-//!   - Extracting the server's SPKI from the rustls peer cert.
-//!   - Computing the NTLM session key (HMAC-MD5 over an exchanged
-//!     key — needs the AUTHENTICATE message body).
-//!   - RC4 encrypting the SPKI under the session key.
+//! Step 4 now computes the CredSSP v5+ channel binding: it extracts the
+//! server's SubjectPublicKeyInfo from the rustls peer cert, derives the NTLM
+//! session key (HMAC-MD5 over the NTProofStr) plus the client signing/sealing
+//! keys, SHA-256-hashes `magic || clientNonce || SPKI`, and seals that under the
+//! session key (hand-rolled RC4). `pubKeyAuth` [3] + `clientNonce` [5] go in the
+//! AUTHENTICATE TSRequest.
 //!
-//! That last RC4 step needs the `rc4` crate plus careful key-state
-//! sequencing. This release **omits the encryption** and sends a
-//! zero-byte `pubKeyAuth`. The server's reply still distinguishes:
+//! Verdict:
+//!   - server returns a `pubKeyAuth` [3] with no errorCode → CredSSP completed,
+//!     so the credentials are good AND the channel verified → **authoritative HIT**.
+//!   - `LOGON_FAILURE` / `ACCESS_DENIED` / … errorCode → fail.
+//!   - no errorCode but no server `pubKeyAuth` → suggestive, not certain.
 //!
-//!   - `NTSTATUS_LOGON_FAILURE` (0xC000006D) → wrong credentials.
-//!   - `NTSTATUS_ACCESS_DENIED` (0xC0000022) → likely wrong but
-//!     could also be pubKeyAuth mismatch.
-//!   - Anything else / proceeds → credentials probably good.
-//!
-//! So a "negative" result is reliable; a "positive" is suggestive
-//! but not 100% authoritative. Operators chasing certainty should
-//! cross-check with another tool — this caveat is in the printed
-//! report.
+//! **This crypto is UNVALIDATED against a real Windows RDP host** (the lab has
+//! none; xrdp doesn't speak CredSSP). The primitives are unit-tested, but the
+//! end-to-end binding — version/flag choices, SPKI form, seal ordering — needs a
+//! Windows target to confirm. `RUSTYMAP_RDP_DEBUG=1` traces every step for that
+//! iteration. rdp stays Alpha until a Windows host validates it.
 
 use crate::brute::{BruteAdapter, BruteConfig};
-use crate::brute_smb::{compute_ntlmv2, locate_challenge};
+use crate::brute_smb::{compute_ntlmv2, locate_challenge, ntlmv2_hash};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use hmac::{Hmac, Mac};
+use md5::Md5;
+use rand::RngCore;
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_rustls::TlsConnector;
+
+type HmacMd5 = Hmac<Md5>;
 
 pub struct RdpAdapter {
     pub domain: String,
@@ -62,6 +67,7 @@ impl Default for RdpAdapter {
 impl BruteAdapter for RdpAdapter {
     fn protocol(&self) -> &'static str { "rdp" }
     async fn try_one(&self, cfg: &BruteConfig, user: &str, pass: &str) -> Result<bool> {
+        let debug = std::env::var_os("RUSTYMAP_RDP_DEBUG").is_some();
         // 1) X.224 CR / CC negotiating CredSSP
         let mut tcp = timeout(cfg.timeout, TcpStream::connect(cfg.target)).await??;
         let req = build_x224_cr_credssp();
@@ -84,28 +90,56 @@ impl BruteAdapter for RdpAdapter {
         let chal = locate_challenge(&resp1)
             .ok_or_else(|| anyhow!("no NTLM CHALLENGE inside CredSSP TSRequest"))?;
 
-        // 4) Build AUTHENTICATE
+        // 4) Build AUTHENTICATE + CredSSP pubKeyAuth (channel binding).
         let nt_response = compute_ntlmv2(user, &self.domain, pass, &chal.server_challenge, &chal.target_info);
         let auth = ntlm_authenticate(user, &self.domain, &nt_response);
-        // We deliberately omit pubKeyAuth (see module docs) — best-effort.
-        let tsreq2 = build_tsrequest_with_nego_tokens(&auth);
+
+        // pubKeyAuth binds the credentials to this TLS channel (MS-CSSP v5+):
+        // seal SHA256(magic || clientNonce || serverSPKI) under the NTLM session
+        // key. Best-effort / UNVALIDATED against real Windows — see module docs.
+        let session_key = ntlm_session_base_key(user, &self.domain, pass, &nt_response);
+        let (sign_key, seal_key) = seal_sign_keys(&session_key);
+        let mut nonce = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut nonce);
+        let spki = peer_spki(&tls).unwrap_or_default();
+        let binding = credssp_binding_hash(&nonce, &spki);
+        let pub_key_auth = ntlm_seal(&sign_key, &seal_key, 0, &binding);
+        if debug {
+            eprintln!(
+                "[rdp] spki {}B session-key {} pubKeyAuth {}B",
+                spki.len(),
+                hex16(&session_key),
+                pub_key_auth.len()
+            );
+        }
+        let tsreq2 = build_tsrequest_auth(&auth, &pub_key_auth, &nonce);
         timeout(cfg.timeout, tokio::io::AsyncWriteExt::write_all(&mut tls, &tsreq2)).await??;
 
-        // Read final TSRequest — server replies with errorCode field on bad creds
+        // Read the final TSRequest. A server pubKeyAuth [3] in the reply means
+        // CredSSP completed (creds good AND the channel bound) → authoritative
+        // HIT. Otherwise fall back to the NTSTATUS errorCode.
         let resp2 = read_tsrequest(&mut tls, cfg.timeout).await?;
-        // Without proper pubKeyAuth, any "non-error" reply means the
-        // server is still proceeding — we treat that as probable success.
         let err = extract_tsrequest_error_code(&resp2);
+        if debug {
+            eprintln!(
+                "[rdp] auth resp {}B errorCode {:?} pubKeyAuth-in-reply {}",
+                resp2.len(),
+                err.map(|e| format!("{:#010x}", e)),
+                tsrequest_has_tag(&resp2, 0xa3)
+            );
+        }
+        if err.is_none() && tsrequest_has_tag(&resp2, 0xa3) {
+            return Ok(true);
+        }
         match err {
             Some(0xC0000064)  // STATUS_NO_SUCH_USER
             | Some(0xC000006D) // LOGON_FAILURE
             | Some(0xC000006A) // WRONG_PASSWORD
             | Some(0xC0000071) // PASSWORD_EXPIRED
             | Some(0xC0000234) // ACCOUNT_LOCKED_OUT
+            | Some(0xC0000022) // ACCESS_DENIED (may be a pubKeyAuth mismatch)
                 => Ok(false),
-            // ACCESS_DENIED can be pubKeyAuth-related; treat as failure for safety.
-            Some(0xC0000022) => Ok(false),
-            // No error code reported / unexpected status → probable success.
+            // No error code and no server pubKeyAuth → suggestive, not certain.
             _ => Ok(true),
         }
     }
@@ -213,7 +247,7 @@ fn ntlm_negotiate() -> Vec<u8> {
     vec![
         b'N', b'T', b'L', b'M', b'S', b'S', b'P', 0,
         0x01, 0x00, 0x00, 0x00,
-        0x07, 0x82, 0x08, 0xa2,
+        0x37, 0x82, 0x08, 0xa2, // flags 0xa2088237 (adds NEGOTIATE_SIGN|SEAL)
         0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0,
         0x0a, 0x00, 0x00, 0x00, 0xa1, 0x4a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f,
@@ -261,7 +295,7 @@ fn ntlm_authenticate(user: &str, domain: &str, nt_response: &[u8]) -> Vec<u8> {
     buf(&mut ntlmssp, user_len_u16, user_off);
     buf(&mut ntlmssp, ws_len, ws_off);
     buf(&mut ntlmssp, sk_len, sk_off);
-    ntlmssp.extend_from_slice(&0xa2888205u32.to_le_bytes());
+    ntlmssp.extend_from_slice(&0xa2888235u32.to_le_bytes()); // adds NEGOTIATE_SIGN|SEAL
     ntlmssp.extend_from_slice(&[0x0a, 0x00, 0x00, 0x00, 0xa1, 0x4a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f]);
     ntlmssp.extend_from_slice(&payload);
     ntlmssp
@@ -274,23 +308,25 @@ fn ntlm_authenticate(user: &str, domain: &str, nt_response: &[u8]) -> Vec<u8> {
 /// OCTET STRING OPTIONAL, errorCode [4] INTEGER OPTIONAL }`
 ///
 /// We send just `{ version = 6, negoTokens = [{ NegoToken = NTLM }] }`.
-pub fn build_tsrequest_with_nego_tokens(ntlm_msg: &[u8]) -> Vec<u8> {
-    fn ber(tag: u8, body: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(body.len() + 4);
-        out.push(tag);
-        if body.len() < 128 {
-            out.push(body.len() as u8);
-        } else if body.len() < 256 {
-            out.push(0x81);
-            out.push(body.len() as u8);
-        } else {
-            out.push(0x82);
-            out.push((body.len() >> 8) as u8);
-            out.push(body.len() as u8);
-        }
-        out.extend_from_slice(body);
-        out
+/// BER TLV with a definite short/long length (enough for CredSSP's sizes).
+fn ber(tag: u8, body: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(body.len() + 4);
+    out.push(tag);
+    if body.len() < 128 {
+        out.push(body.len() as u8);
+    } else if body.len() < 256 {
+        out.push(0x81);
+        out.push(body.len() as u8);
+    } else {
+        out.push(0x82);
+        out.push((body.len() >> 8) as u8);
+        out.push(body.len() as u8);
     }
+    out.extend_from_slice(body);
+    out
+}
+
+pub fn build_tsrequest_with_nego_tokens(ntlm_msg: &[u8]) -> Vec<u8> {
     // NegoToken: SEQUENCE { token [0] OCTET STRING }
     let token = ber(0xa0, &ber(0x04, ntlm_msg));
     let nego_token = ber(0x30, &token);
@@ -389,6 +425,179 @@ pub fn extract_tsrequest_error_code(req: &[u8]) -> Option<u32> {
     None
 }
 
+// ── CredSSP pubKeyAuth crypto (MS-CSSP v5+) ──
+//
+// Best-effort and UNVALIDATED against a real Windows RDP host (the lab has
+// none — xrdp doesn't speak CredSSP). The primitives below are unit-tested;
+// the end-to-end binding needs a Windows target to confirm, and
+// RUSTYMAP_RDP_DEBUG traces every step for that iteration (the SMB/mssql lesson).
+
+const CLIENT_SIGN_MAGIC: &[u8] = b"session key to client-to-server signing key magic constant\0";
+const CLIENT_SEAL_MAGIC: &[u8] = b"session key to client-to-server sealing key magic constant\0";
+const CREDSSP_CLIENT_MAGIC: &[u8] = b"CredSSP Client-To-Server Binding Hash\0";
+
+/// RC4 stream cipher (hand-rolled — no `rc4` dependency). Stateful so a message
+/// and its checksum seal with one continuous keystream.
+struct Rc4 {
+    s: [u8; 256],
+    i: u8,
+    j: u8,
+}
+impl Rc4 {
+    fn new(key: &[u8]) -> Self {
+        let mut s = [0u8; 256];
+        for (i, b) in s.iter_mut().enumerate() {
+            *b = i as u8;
+        }
+        let mut j = 0u8;
+        for i in 0..256 {
+            j = j.wrapping_add(s[i]).wrapping_add(key[i % key.len()]);
+            s.swap(i, j as usize);
+        }
+        Rc4 { s, i: 0, j: 0 }
+    }
+    fn apply(&mut self, data: &[u8]) -> Vec<u8> {
+        data.iter()
+            .map(|&b| {
+                self.i = self.i.wrapping_add(1);
+                self.j = self.j.wrapping_add(self.s[self.i as usize]);
+                self.s.swap(self.i as usize, self.j as usize);
+                let k = self.s
+                    [(self.s[self.i as usize].wrapping_add(self.s[self.j as usize])) as usize];
+                b ^ k
+            })
+            .collect()
+    }
+}
+
+fn hmac_md5(key: &[u8], data: &[u8]) -> [u8; 16] {
+    let mut m = <HmacMd5 as Mac>::new_from_slice(key).expect("hmac key");
+    m.update(data);
+    let mut r = [0u8; 16];
+    r.copy_from_slice(&m.finalize().into_bytes());
+    r
+}
+
+fn md5_digest(parts: &[&[u8]]) -> [u8; 16] {
+    let mut h = Md5::new();
+    for p in parts {
+        h.update(p);
+    }
+    let mut r = [0u8; 16];
+    r.copy_from_slice(&h.finalize());
+    r
+}
+
+/// NTLMv2 session base key = HMAC-MD5(ResponseKeyNT, NTProofStr). With no key
+/// exchange (our AUTHENTICATE sets none) this is also the exported session key.
+fn ntlm_session_base_key(user: &str, domain: &str, pass: &str, nt_response: &[u8]) -> [u8; 16] {
+    let v2 = ntlmv2_hash(user, domain, pass);
+    hmac_md5(&v2, &nt_response[..16.min(nt_response.len())])
+}
+
+/// Client-to-server signing + sealing keys (NTLM2 extended session security).
+fn seal_sign_keys(session_key: &[u8; 16]) -> ([u8; 16], [u8; 16]) {
+    (
+        md5_digest(&[session_key, CLIENT_SIGN_MAGIC]),
+        md5_digest(&[session_key, CLIENT_SEAL_MAGIC]),
+    )
+}
+
+/// CredSSP v5+ client-to-server public-key binding hash.
+fn credssp_binding_hash(nonce: &[u8; 32], pubkey: &[u8]) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(CREDSSP_CLIENT_MAGIC);
+    h.update(nonce);
+    h.update(pubkey);
+    let mut r = [0u8; 32];
+    r.copy_from_slice(&h.finalize());
+    r
+}
+
+/// NTLM GSS_WrapEx of `plaintext`: a 16-byte signature then the RC4-sealed body.
+fn ntlm_seal(sign_key: &[u8; 16], seal_key: &[u8; 16], seq: u32, plaintext: &[u8]) -> Vec<u8> {
+    let mut rc4 = Rc4::new(seal_key);
+    let sealed = rc4.apply(plaintext);
+    let mut ck_in = seq.to_le_bytes().to_vec();
+    ck_in.extend_from_slice(plaintext);
+    let checksum = hmac_md5(sign_key, &ck_in);
+    let sealed_checksum = rc4.apply(&checksum[..8]);
+    let mut out = Vec::with_capacity(16 + sealed.len());
+    out.extend_from_slice(&1u32.to_le_bytes()); // version
+    out.extend_from_slice(&sealed_checksum); // 8
+    out.extend_from_slice(&seq.to_le_bytes()); // 4
+    out.extend_from_slice(&sealed);
+    out
+}
+
+/// The server's SubjectPublicKeyInfo DER from the TLS peer certificate.
+fn peer_spki(tls: &tokio_rustls::client::TlsStream<TcpStream>) -> Option<Vec<u8>> {
+    let (_, conn) = tls.get_ref();
+    let cert = conn.peer_certificates()?.first()?;
+    let (_, parsed) = x509_parser::parse_x509_certificate(cert.as_ref()).ok()?;
+    Some(parsed.public_key().raw.to_vec())
+}
+
+/// AUTHENTICATE TSRequest with negoTokens [1], pubKeyAuth [3], clientNonce [5].
+fn build_tsrequest_auth(ntlm_auth: &[u8], pub_key_auth: &[u8], client_nonce: &[u8]) -> Vec<u8> {
+    let nego_data = ber(0x30, &ber(0x30, &ber(0xa0, &ber(0x04, ntlm_auth))));
+    let version = ber(0xa0, &ber(0x02, &[6]));
+    let nego_tokens = ber(0xa1, &nego_data);
+    let pubkey = ber(0xa3, &ber(0x04, pub_key_auth)); // [3] OCTET STRING
+    let nonce = ber(0xa5, &ber(0x04, client_nonce)); // [5] OCTET STRING
+    let mut body = Vec::new();
+    body.extend_from_slice(&version);
+    body.extend_from_slice(&nego_tokens);
+    body.extend_from_slice(&pubkey);
+    body.extend_from_slice(&nonce);
+    ber(0x30, &body)
+}
+
+/// Whether a TSRequest carries a top-level field with the given context tag.
+fn tsrequest_has_tag(req: &[u8], want: u8) -> bool {
+    if req.is_empty() || req[0] != 0x30 {
+        return false;
+    }
+    let mut p = 1usize;
+    if req[p] & 0x80 != 0 {
+        p += 1 + (req[p] & 0x7f) as usize;
+    } else {
+        p += 1;
+    }
+    while p < req.len() {
+        let tag = req[p];
+        p += 1;
+        if p >= req.len() {
+            return false;
+        }
+        let len = if req[p] & 0x80 != 0 {
+            let n = (req[p] & 0x7f) as usize;
+            if p + 1 + n > req.len() {
+                return false;
+            }
+            let mut acc = 0usize;
+            for i in 0..n {
+                acc = (acc << 8) | req[p + 1 + i] as usize;
+            }
+            p += 1 + n;
+            acc
+        } else {
+            let v = req[p] as usize;
+            p += 1;
+            v
+        };
+        if tag == want {
+            return true;
+        }
+        p += len;
+    }
+    false
+}
+
+fn hex16(b: &[u8]) -> String {
+    b.iter().take(16).map(|x| format!("{:02x}", x)).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -455,5 +664,51 @@ mod tests {
         let mut pkt = vec![0x30u8, body.len() as u8];
         pkt.extend_from_slice(&body);
         assert_eq!(extract_tsrequest_error_code(&pkt), Some(0xC000006D));
+    }
+
+    #[test]
+    fn rc4_matches_rfc6229_vector() {
+        // RFC 6229, key = 0x0102030405 (40-bit); keystream at offset 0.
+        let mut rc4 = Rc4::new(&[0x01, 0x02, 0x03, 0x04, 0x05]);
+        let ks = rc4.apply(&[0u8; 16]);
+        let expect = [
+            0xb2, 0x39, 0x63, 0x05, 0xf0, 0x3d, 0xc0, 0x27, 0xcc, 0xc3, 0x52, 0x4a, 0x0a, 0x11,
+            0x18, 0xa8,
+        ];
+        assert_eq!(&ks[..], &expect[..]);
+    }
+
+    #[test]
+    fn credssp_binding_hash_is_deterministic_sha256() {
+        let nonce = [7u8; 32];
+        let a = credssp_binding_hash(&nonce, b"spki-der-bytes");
+        assert_eq!(a, credssp_binding_hash(&nonce, b"spki-der-bytes"));
+        assert_eq!(a.len(), 32);
+        assert_ne!(a, credssp_binding_hash(&nonce, b"other-spki"));
+    }
+
+    #[test]
+    fn ntlm_seal_has_signature_then_sealed_body() {
+        let out = ntlm_seal(&[1u8; 16], &[2u8; 16], 0, &[0xAAu8; 32]);
+        assert_eq!(out.len(), 16 + 32); // 16-byte signature + sealed hash
+        assert_eq!(&out[0..4], &1u32.to_le_bytes()); // version
+        assert_ne!(&out[16..], &[0xAAu8; 32][..]); // body is RC4-sealed, not plaintext
+    }
+
+    #[test]
+    fn session_base_key_derives_16_nonzero_bytes() {
+        let nt = compute_ntlmv2("admin", "", "Passw0rd!", &[9u8; 8], &[]);
+        let k = ntlm_session_base_key("admin", "", "Passw0rd!", &nt);
+        assert_eq!(k.len(), 16);
+        assert_ne!(k, [0u8; 16]);
+    }
+
+    #[test]
+    fn tsrequest_auth_carries_pubkeyauth_and_nonce_tags() {
+        let pkt = build_tsrequest_auth(&ntlm_negotiate(), &[0xAA; 48], &[0xBB; 32]);
+        assert_eq!(pkt[0], 0x30);
+        assert!(tsrequest_has_tag(&pkt, 0xa3)); // pubKeyAuth [3]
+        assert!(tsrequest_has_tag(&pkt, 0xa5)); // clientNonce [5]
+        assert!(tsrequest_has_tag(&pkt, 0xa1)); // negoTokens [1]
     }
 }
