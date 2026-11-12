@@ -4,6 +4,22 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.102.3] - 2026-11-11
+
+**`--ssh-audit` now covers SSH on a non-standard port, not just :22** (bug N6 —
+the last item from the v0.101.3 report). 690/690 tests.
+
+### Fixed
+- **`--ssh-audit` only probed port 22 (bug N6).** SSH on a non-standard port
+  (e.g. 2222) found open by the scan was never audited. The audit now runs when the
+  port is 22 **or** `-sV` identified the service as SSH (OpenSSH, Dropbear, … by
+  product or banner), so a moved SSH daemon is covered. Without `-sV` it falls back
+  to the standard port, as before. (`main.rs`.)
+
+### Note
+- This closes every actionable item from the v0.101.3 regression report
+  (0.B / N1 / N3 / N5 / 1.A / 5.D / N2 / N6). N4 was a Docker artefact, not a bug.
+
 ## [0.102.2] - 2026-11-11
 
 **`--osdb-submit` now runs a real scan so the pack carries the OS guess and

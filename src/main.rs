@@ -3205,14 +3205,14 @@ async fn run(mut args: Cli) -> Result<()> {
                     continue;
                 }
                 let host_port = format!("{}:{}", h.target.ip, p.port);
-                let standard_port = (want_ssh && p.port == 22)
+                let standard_port = (want_ssh && (p.port == 22 || service_is_ssh(&p.service)))
                     || (want_smb && (p.port == 445 || p.port == 139))
                     || (want_rdp && p.port == 3389)
                     || (want_smtp && (p.port == 25 || p.port == 465 || p.port == 587));
                 if standard_port {
                     audited_anything = true;
                 }
-                if want_ssh && p.port == 22 {
+                if want_ssh && (p.port == 22 || service_is_ssh(&p.service)) {
                     match ssh_audit::audit(h.target.ip, p.port, auth_dur).await {
                         Ok(a) => {
                             ssh_audit::print_report(&host_label, p.port, &a);
@@ -3920,6 +3920,20 @@ fn run_list_tags(args: &Cli) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// True when a detected service looks like SSH, so `--ssh-audit` can cover SSH
+/// on a non-standard port (e.g. 2222), not just :22 (lab bug N6). Needs `-sV`
+/// to have identified the service; without it we fall back to the standard port.
+fn service_is_ssh(svc: &Option<service_probe::ServiceInfo>) -> bool {
+    let Some(s) = svc else { return false };
+    let hay = format!(
+        "{} {}",
+        s.product.as_deref().unwrap_or(""),
+        s.banner.as_deref().unwrap_or("")
+    )
+    .to_ascii_lowercase();
+    hay.contains("ssh")
 }
 
 async fn probe_services(
