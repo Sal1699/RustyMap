@@ -2693,7 +2693,7 @@ async fn run(mut args: Cli) -> Result<()> {
             if use_fast {
                 eprintln!("[fast-engine] opt-in raw engine active (burst-send + async collect, cwnd)");
             }
-            let result = run_raw_tcp(targets, port_list.clone(), kind, scanner, timeout_dur, parallel, use_fast, args.min_rate, std::time::Duration::from_secs(args.host_timeout_secs)).await;
+            let result = run_raw_tcp(targets, port_list.clone(), kind, scanner, timeout_dur, parallel, use_fast, args.min_rate, std::time::Duration::from_secs(args.host_timeout_secs), show_closed).await;
             // Post-scan sanity check: if we sent packets but rx_count is 0,
             // the kernel (or a firewall) is silently swallowing responses
             // before they reach our raw socket. IPv6 conntrack drops the
@@ -4114,6 +4114,7 @@ async fn run_raw_tcp(
     fast: bool,
     min_rate: u32,
     host_timeout: std::time::Duration,
+    show_closed: bool,
 ) -> Vec<HostResult> {
     // --max-rate is enforced globally by scanner.global_rate (review #2), set
     // when the shared RawTcpScanner was built, so it is no longer threaded here.
@@ -4139,11 +4140,12 @@ async fn run_raw_tcp(
                         // Fase 30 engine + Fase 31 congestion window.
                         raw_scan::run_raw_tcp_fast(
                             t, ports, kind, scanner_arc, timeout_dur, parallel, min_rate,
-                            host_timeout,
+                            host_timeout, show_closed,
                         )
                     } else {
                         raw_scan::run_raw_tcp_scan(
                             t, ports, kind, scanner_arc, timeout_dur, parallel, host_timeout,
+                            show_closed,
                         )
                     }
                 })

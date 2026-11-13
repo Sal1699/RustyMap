@@ -266,6 +266,13 @@ fn extract_forms(body: &str, base: &Url) -> Vec<Endpoint> {
                 _ => {}
             }
         }
+        // A form action of "#", "#anchor" or "" resolves (via base.join) to the
+        // page URL *with a fragment*. Fragments are never sent to the server, so
+        // the query the probes later append would be swallowed by the fragment
+        // and never reach the app (lab bug N11 — blind-SQLi/timing probes
+        // silently missed every form with action="#"). Drop it so the endpoint
+        // targets the server, submitting back to the page like a browser does.
+        action.set_fragment(None);
         let params: Vec<String> = input_re
             .captures_iter(inner)
             .map(|m| m[2].to_string())
@@ -320,6 +327,19 @@ mod tests {
         assert_eq!(forms[0].method, "POST");
         assert_eq!(forms[0].url, "https://x.test/auth");
         assert_eq!(forms[0].params, vec!["u", "p"]);
+    }
+
+    #[test]
+    fn extract_forms_action_hash_drops_fragment() {
+        // Bug N11: action="#" must resolve to the page URL WITHOUT a fragment,
+        // else probe query params land in the fragment and never hit the server.
+        let base = Url::parse("https://x.test/vulnerabilities/sqli/").unwrap();
+        let html = r##"<form action="#" method="GET"><input name="id"><input name="Submit"></form>"##;
+        let forms = extract_forms(html, &base);
+        assert_eq!(forms.len(), 1);
+        assert_eq!(forms[0].url, "https://x.test/vulnerabilities/sqli/");
+        assert!(!forms[0].url.contains('#'), "fragment must be stripped: {}", forms[0].url);
+        assert_eq!(forms[0].params, vec!["id", "Submit"]);
     }
 
     #[test]

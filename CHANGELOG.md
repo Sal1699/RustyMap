@@ -4,6 +4,37 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.107.2] - 2026-11-13
+
+**Lab-report fixes (v0.107.1 Kali validation: 16/17 PASS, 0 regressions).** The
+v0.106.2 reply-correlation rewrite validated clean on Linux. This closes the two
+actionable bugs the run surfaced.
+
+### Fixed
+- **N11 (MEDIA) — blind-SQLi/timing probes missed every form with
+  `action="#"`.** The crawler resolved such an action to the page URL *with an
+  empty fragment* (`…/sqli/#`); the query the probes then append landed in the
+  fragment, which is never sent to the server, so the payload never ran. The
+  fragment is now stripped from a resolved form action, so the endpoint targets
+  the server (submitting back to the page, like a browser). (`web_crawl.rs`.)
+- **N10 (BASSA) — `-sS` now reports closed ports in the nmap-style "Not shown:
+  N closed" summary.** The raw SYN path dropped closed ports before the output
+  layer (which already summarises them for the connect path) ever saw them. The
+  raw engines now keep closed ports for display (honouring `--only-open`), with
+  host-up decided from the full result set so the change can't alter host-up.
+  (`raw_scan.rs`, `main.rs`.)
+
+### Note
+- **N12 (INFO)** — IPv6 link-local with a scope ID (`fe80::…%eth0`) reportedly
+  expands to 0 targets. The zone-split code and its unit test are present and
+  pass (`::1` and globals work), so the symptom is a link-local scope-binding /
+  environment case that needs a Linux repro with a real link-local iface; not
+  reproducible from the parser logic. Left open pending that repro.
+- **0.B (HIGH, carried-over)** — a named host resolving to loopback already
+  emits a loud warning on both resolve paths (`warn_if_loopback_resolution`), so
+  the "silent" part is handled; hardening it to *refuse* the scan by default is
+  a behaviour change held for an explicit decision.
+
 ## [0.107.1] - 2026-11-12
 
 **Test hardening (review #26)** — update 3 of 3 ("falli tutti dal engine

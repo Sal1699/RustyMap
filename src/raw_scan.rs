@@ -720,6 +720,7 @@ pub fn run_raw_tcp_scan(
     timeout: Duration,
     parallel: usize,
     host_timeout: Duration,
+    show_closed: bool,
 ) -> HostResult {
     let start = Instant::now();
     // --host-timeout ceiling (lab v0.95.0 B1): each worker stops at this
@@ -820,28 +821,36 @@ pub fn run_raw_tcp_scan(
     }
     all.sort_by_key(|p| p.port);
 
-    // SYN scan is dense — drop Closed to avoid output spam.
-    // Stealth scans (FIN/NULL/Xmas/ACK/Window/Maimon) keep ALL states
-    // because the *distinction* between Closed (got RST) and Filtered
-    // (no reply) is the whole point of those scans. Bug-04 / Bug-05.
-    let drop_closed = matches!(kind, RawTcpKind::Syn);
+    // Host-up is decided from the FULL result set, independent of what we
+    // display, so keeping closed ports for the nmap-style "Not shown: N closed"
+    // summary (lab bug N10) can't change host-up. Semantics are unchanged:
+    //   SYN     → up iff ≥1 open port;
+    //   stealth → up iff we probed something AND got any non-filtered reply
+    //             (a RST counts — "responded" = up).
+    let has_open = all.iter().any(|p| {
+        matches!(p.state, PortState::Open | PortState::OpenFiltered | PortState::Unfiltered)
+    });
+    let any_response = all.iter().any(|p| !matches!(p.state, PortState::Filtered));
+    let up = match kind {
+        RawTcpKind::Syn => has_open,
+        _ => !all.is_empty() && any_response,
+    };
+
+    // SYN scan is dense — plain-filtered stays hidden, but Closed are kept so
+    // the report can summarise them ("Not shown: N closed"), unless --only-open
+    // (show_closed=false). Stealth scans keep ALL states by default because the
+    // Closed-vs-Filtered distinction is the whole point. Bug-04 / Bug-05 / N10.
     let interesting: Vec<PortResult> = all
         .into_iter()
         .filter(|p| match p.state {
             PortState::Open | PortState::OpenFiltered | PortState::Unfiltered => true,
             PortState::Filtered => !matches!(kind, RawTcpKind::Syn),
-            PortState::Closed => !drop_closed,
+            PortState::Closed => show_closed,
         })
         .collect();
-    let any_response = interesting
-        .iter()
-        .any(|p| !matches!(p.state, PortState::Filtered));
 
     HostResult {
-        // For stealth scans, "host is up" includes "responded with RST"
-        // (we got something back). Otherwise fall back to the old
-        // "any interesting state" heuristic.
-        up: !interesting.is_empty() && (matches!(kind, RawTcpKind::Syn) || any_response),
+        up,
         target,
         ports: interesting,
         elapsed: start.elapsed(),
@@ -872,6 +881,7 @@ pub fn run_raw_tcp_fast(
     max_window: usize,
     min_rate: u32,
     host_timeout: Duration,
+    show_closed: bool,
 ) -> HostResult {
     let start = Instant::now();
     // --host-timeout ceiling: a cooperative deadline checked at wave/round
@@ -1082,19 +1092,27 @@ pub fn run_raw_tcp_fast(
         .collect();
     all.sort_by_key(|p| p.port);
 
-    let drop_closed = matches!(kind, RawTcpKind::Syn);
+    // See run_raw_tcp_scan: host-up from the full set (unchanged semantics),
+    // Closed kept for the "Not shown" summary unless --only-open (N10).
+    let has_open = all.iter().any(|p| {
+        matches!(p.state, PortState::Open | PortState::OpenFiltered | PortState::Unfiltered)
+    });
+    let any_response = all.iter().any(|p| !matches!(p.state, PortState::Filtered));
+    let up = match kind {
+        RawTcpKind::Syn => has_open,
+        _ => !all.is_empty() && any_response,
+    };
     let interesting: Vec<PortResult> = all
         .into_iter()
         .filter(|p| match p.state {
             PortState::Open | PortState::OpenFiltered | PortState::Unfiltered => true,
             PortState::Filtered => !matches!(kind, RawTcpKind::Syn),
-            PortState::Closed => !drop_closed,
+            PortState::Closed => show_closed,
         })
         .collect();
-    let any_response = interesting.iter().any(|p| !matches!(p.state, PortState::Filtered));
 
     HostResult {
-        up: !interesting.is_empty() && (matches!(kind, RawTcpKind::Syn) || any_response),
+        up,
         target,
         ports: interesting,
         elapsed: start.elapsed(),
