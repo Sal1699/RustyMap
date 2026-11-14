@@ -440,6 +440,9 @@ async fn run(mut args: Cli) -> Result<()> {
         }
     };
     output::set_rich(rich_style);
+    // Refuse to scan a named host that resolves to loopback unless the user
+    // opts in — a DNS catch-all / typo must not silently scan localhost (0.B).
+    target::set_scan_loopback(args.scan_loopback);
 
     // Anti-detection: when an evasion preset or per-probe rotation is active,
     // HTTP probes (--web-scan etc.) rotate a realistic browser User-Agent

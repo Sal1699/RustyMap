@@ -95,6 +95,13 @@ const REGISTRY: &[Feature] = &[
     Feature { key: "--apk-scan", tier: Tier::Production,
         note: "Android APK static analysis with inline AXML parser. Lab-validated v0.100.17 on InsecureBankv2: flagged 5 dangerous permissions, debuggable, allowBackup, exported components and AdMob/Analytics trackers — matching every known issue with zero false positives. Secret-string patterns may still FP on obfuscated/protected APKs." },
 
+    // ── Promoted from Alpha after the v0.107.2 Kali sweep (DVWA, parity with
+    // wapiti) ──
+    Feature { key: "--owasp-scan", tier: Tier::Production,
+        note: "Form/query-param web probes: reflected XSS, error- and time-based SQLi, command injection, LFI/path-traversal, open-redirect. Lab-validated v0.107.2 on DVWA — 8 findings with ZERO false positives, at parity with wapiti (RustyMap additionally caught the LFI wapiti missed). Scope limits (use ZAP/sqlmap for these): no DOM/JS-rendered XSS (no JS engine) and no multipart file-upload vectors. Blind-SQLi time payload uses a truthy prefix so the AND isn't short-circuited (N11)." },
+    Feature { key: "--web-crawl", tier: Tier::Production,
+        note: "BFS crawler with robots.txt + a cookie jar. Lab-validated v0.107.2 on DVWA — 32 pages / 49 endpoints, session held across the whole crawl, and it no longer follows /logout.php (bug N1). Still single-threaded and doesn't render JS, so ZAP is faster/deeper on large JS-heavy apps." },
+
     // ── Alpha — known limits or freshly landed; --experimental-confirm gate ──
     Feature { key: "--brute-protocol rdp", tier: Tier::Alpha,
         note: "RDP CredSSP brute. v0.106.0 implemented the pubKeyAuth channel binding (MS-CSSP v5+: SPKI from the TLS cert, NTLM session key, RC4-sealed SHA-256 binding hash); a server pubKeyAuth in the reply makes a positive authoritative. The crypto is UNVALIDATED against a real Windows RDP host (the lab has none; xrdp doesn't do CredSSP) — primitives unit-tested, end-to-end needs a Windows target (RUSTYMAP_RDP_DEBUG traces it). Negatives (NTSTATUS) reliable. Stays Alpha until a Windows host validates it." },
@@ -106,10 +113,6 @@ const REGISTRY: &[Feature] = &[
         note: "Builds an OS-fingerprint submission pack for HOST:LABEL and writes it to stdout or `--osdb-submit-out FILE` (does NOT auto-submit anywhere). Review the pack before sharing it — it describes your host/network." },
     Feature { key: "--os-fp-v6", tier: Tier::Alpha,
         note: "IPv6 OS fingerprint (`os_fp_v6.rs` / `os_fp_multi.rs`). v0.105.0 expanded the SYN-ACK classifier (Linux era, modern/legacy Windows, macOS/FreeBSD, OpenBSD-no-TS, NetBSD, Solaris/illumos/AIX, network gear). Still coarser than the v4 path — the full nmap S1–S12 raw IPv6 probe suite isn't implemented. Awaiting validation on real v6 hosts (Win/Linux/mac/BSD) before promotion." },
-    Feature { key: "--owasp-scan", tier: Tier::Alpha,
-        note: "Basic XSS/SQLi/open-redirect/SSRF probes (CLI flag: --owasp-scan URL). Heavy false-positive rate; dedicated tools (ZAP, sqlmap) outperform on real engagements." },
-    Feature { key: "--web-crawl", tier: Tier::Alpha,
-        note: "BFS crawler with robots.txt + cookie store. Slow vs ZAP and doesn't handle JS-rendered apps. Prefer dedicated tools for serious web work." },
 ];
 
 pub fn lookup(key: &str) -> Option<&'static Feature> {

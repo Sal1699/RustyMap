@@ -206,11 +206,18 @@ async fn test_sqli(client: &reqwest::Client, ep: &Endpoint, param: &str) -> Opti
     // (reuses `measure()` + a baseline, like the CMDi time-probe).
     let sleep_secs = 5u64;
     let baseline = measure(client, ep, param, "1").await?;
+    // A bare `' AND SLEEP(..)` short-circuits when the injected value matches no
+    // row: `WHERE col='' AND SLEEP(5)` is FALSE-first, so the DB never runs the
+    // sleep and the probe sees no delay (lab bug N11, part 2 — the fragment fix
+    // alone wasn't enough). A truthy prefix (matching the "1" baseline value)
+    // keeps the base comparison satisfiable so the sleep actually fires; the
+    // string- and numeric-context forms cover both quoted and unquoted columns.
     const BLIND: &[&str] = &[
-        "' AND SLEEP(5)-- -",          // MySQL / MariaDB, string context
-        "1 AND SLEEP(5)",              // MySQL / MariaDB, numeric context
-        "' AND pg_sleep(5)-- -",       // PostgreSQL
-        "'; WAITFOR DELAY '0:0:5'-- ", // MSSQL
+        "1' AND SLEEP(5)-- -",          // MySQL / MariaDB, string context
+        "1 AND SLEEP(5)",               // MySQL / MariaDB, numeric context
+        "1' AND pg_sleep(5)-- -",       // PostgreSQL, string context
+        "1 AND pg_sleep(5)",            // PostgreSQL, numeric context
+        "'; WAITFOR DELAY '0:0:5'-- ",  // MSSQL (stacked — runs unconditionally)
     ];
     for payload in BLIND {
         if let Some(elapsed) = measure(client, ep, param, payload).await {

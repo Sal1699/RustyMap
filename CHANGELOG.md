@@ -4,6 +4,47 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.108.0] - 2026-11-14
+
+**From the v0.107.2 Kali validation (another clean run: 4 bugs resolved, 3
+improved, 0 regressions; `--owasp-scan` and `--web-crawl` PASSed on DVWA).**
+Two Alpha features promoted, the blind-SQLi payload bug fixed, and the 0.B
+loopback-safety hardened. 709 unit + 4 integration tests.
+
+### Added
+- **`--owasp-scan` and `--web-crawl` promoted to Production.** Lab-validated
+  v0.107.2 on DVWA: owasp found 8 vulns with zero false positives at parity with
+  wapiti (and caught an LFI wapiti missed); the crawler covered 32 pages / 49
+  endpoints holding the session and no longer follows `/logout.php` (bug N1).
+  They no longer need `--experimental-confirm`. Honest scope limits are in the
+  maturity notes (no DOM/JS XSS, no multipart-upload vectors). (`maturity.rs`.)
+- **`--scan-loopback`** — opt-in to scan a named host that resolves to loopback
+  (see the behaviour change below). (`cli.rs`, `target.rs`, `guide.rs`.)
+
+### Fixed
+- **N11 (MEDIA) — blind/time-based SQLi now actually fires.** The v0.107.2
+  fragment fix let the payload reach the server, but `' AND SLEEP(5)` was
+  short-circuited: `WHERE col='' AND SLEEP(5)` is FALSE-first, so MySQL never ran
+  the sleep. The time payloads now use a truthy prefix (`1' AND SLEEP(5)`) in
+  both string and numeric contexts so the sleep executes. (`owasp_probes.rs`.)
+
+### Changed
+- **0.B (HIGH) hardened — a named host resolving to loopback is now REFUSED by
+  default, not just warned.** A DNS catch-all or a typo must not silently point
+  a scan at localhost. An explicit `127.0.0.1` / `localhost` / `*.localhost`
+  target is still scanned; to scan some other name that genuinely resolves to
+  loopback, pass `--scan-loopback`. This is a behaviour change: a scan that
+  previously proceeded with a warning now stops for that target with a clear
+  message. (`target.rs`.)
+
+### Note
+- **N12 (INFO)** — IPv6 link-local `%iface` → 0 targets is still open. The
+  zone-split expansion code and its test are correct, so the likely cause is the
+  default raw SYN scan hitting the IPv4-only raw-TCP guard (#13) and reporting
+  the host down — not a parse failure. Diagnostic for the next pass: re-run with
+  `--sT` (connect scan supports IPv6); if that expands and scans the host, N12
+  was the raw-v6 guard masking it, not an expansion bug.
+
 ## [0.107.2] - 2026-11-13
 
 **Lab-report fixes (v0.107.1 Kali validation: 16/17 PASS, 0 regressions).** The

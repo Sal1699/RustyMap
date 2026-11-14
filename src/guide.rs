@@ -442,6 +442,7 @@ pub fn print_guide() {
     line("--dns-spoof D=IP      Spoof risposte DNS (ripetibile)");
     line("--iface NOME          Interfaccia per sniff/spoof");
     line("-n, --no-dns          Niente risoluzione DNS sui target");
+    line("--scan-loopback       Scansiona un host che risolve a loopback (default: rifiuta — 0.B)");
     example("rustymap --dns-enum example.com");
     example("rustymap --dns-reverse 10.0.0.0/24");
     example("rustymap --dns-sniff --iface Ethernet");

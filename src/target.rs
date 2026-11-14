@@ -2,7 +2,22 @@ use anyhow::{anyhow, Result};
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV6};
+use std::sync::atomic::{AtomicBool, Ordering};
 use hickory_resolver::TokioAsyncResolver;
+
+/// When false (the default), a *named* host that resolves to a loopback address
+/// with no reason to is refused rather than scanned — a DNS catch-all / typo
+/// must not silently point a scan at localhost (lab bug 0.B). `--scan-loopback`
+/// flips this to scan it anyway (with the warning). Set once from main.
+static SCAN_LOOPBACK: AtomicBool = AtomicBool::new(false);
+
+pub fn set_scan_loopback(on: bool) {
+    SCAN_LOOPBACK.store(on, Ordering::Relaxed);
+}
+
+fn scan_loopback() -> bool {
+    SCAN_LOOPBACK.load(Ordering::Relaxed)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Target {
@@ -209,8 +224,12 @@ async fn expand_one(
             anyhow!("DNS lookup failed for '{}': {}{}", spec, e, hint)
         })?;
         let mut any = false;
+        let mut skipped_loopback = false;
         for ip in lookup.iter() {
-            warn_if_loopback_resolution(spec, ip);
+            if !accept_resolved_ip(spec, ip) {
+                skipped_loopback = true;
+                continue;
+            }
             out.push(Target {
                 ip,
                 hostname: Some(spec.to_string()),
@@ -219,7 +238,15 @@ async fn expand_one(
             any = true;
         }
         if !any {
-            return Err(anyhow!("No A/AAAA records for '{}'", spec));
+            return Err(anyhow!(
+                "No scannable records for '{}'{}",
+                spec,
+                if skipped_loopback {
+                    " (resolved only to loopback — use an explicit IP/localhost or --scan-loopback)"
+                } else {
+                    ""
+                }
+            ));
         }
         return Ok(());
     }
@@ -232,8 +259,12 @@ async fn expand_one(
     match tokio::net::lookup_host((clean, 0u16)).await {
         Ok(addrs) => {
             let mut any = false;
+            let mut skipped_loopback = false;
             for sa in addrs {
-                warn_if_loopback_resolution(spec, sa.ip());
+                if !accept_resolved_ip(spec, sa.ip()) {
+                    skipped_loopback = true;
+                    continue;
+                }
                 out.push(Target {
                     ip: sa.ip(),
                     hostname: Some(spec.to_string()),
@@ -244,7 +275,15 @@ async fn expand_one(
             if any {
                 return Ok(());
             }
-            Err(anyhow!("No A/AAAA records for '{}'", spec))
+            Err(anyhow!(
+                "No scannable records for '{}'{}",
+                spec,
+                if skipped_loopback {
+                    " (resolved only to loopback — use an explicit IP/localhost or --scan-loopback)"
+                } else {
+                    ""
+                }
+            ))
         }
         Err(e) => Err(anyhow!(
             "Cannot resolve target '{}' ({}). With -n/--no-dns you can still pass an \
@@ -271,17 +310,30 @@ fn is_loopback_surprise(spec: &str, ip: IpAddr) -> bool {
     !intentional
 }
 
-/// Scanning localhost by accident should never be silent: warn loudly when a
-/// named host resolves to loopback (lab bug 0.B — a nonexistent domain came
-/// back as 127.0.0.1 via a catch-all resolver and was scanned with no notice).
-fn warn_if_loopback_resolution(spec: &str, ip: IpAddr) {
-    if is_loopback_surprise(spec, ip) {
+/// Decide whether a hostname's resolved IP should be scanned. A loopback
+/// *surprise* (a named host → loopback for no reason) is **refused** by default
+/// so a DNS catch-all or a typo can't silently point the scan at localhost
+/// (lab bug 0.B). `--scan-loopback` overrides, scanning it with a loud warning.
+/// Returns false to skip the IP.
+fn accept_resolved_ip(spec: &str, ip: IpAddr) -> bool {
+    if !is_loopback_surprise(spec, ip) {
+        return true;
+    }
+    if scan_loopback() {
         eprintln!(
-            "\u{26a0} warning: '{}' resolved to loopback {} — likely a DNS catch-all \
-             or a typo, not a real target. RustyMap is about to scan localhost; pass \
-             the intended IP explicitly if that is not what you want.",
+            "\u{26a0} warning: '{}' resolved to loopback {} (DNS catch-all or typo?) — \
+             scanning it anyway because --scan-loopback was given.",
             spec, ip
         );
+        true
+    } else {
+        eprintln!(
+            "\u{2717} refusing to scan '{}': it resolved to loopback {} — almost always a \
+             DNS catch-all or a typo, not a real target. Use an explicit IP / localhost, \
+             or pass --scan-loopback to scan it anyway (lab bug 0.B).",
+            spec, ip
+        );
+        false
     }
 }
 

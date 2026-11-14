@@ -714,6 +714,11 @@ pub struct Cli {
     #[arg(short = 'n', long = "no-dns")]
     pub no_dns: bool,
 
+    /// Scan a named host even if it resolves to loopback. Default: refuse — a
+    /// DNS catch-all / typo must not silently scan localhost (lab bug 0.B)
+    #[arg(long = "scan-loopback")]
+    pub scan_loopback: bool,
+
     /// Enable adaptive rate limiting (auto-tune concurrency based on timeouts)
     #[arg(long = "adaptive")]
     pub adaptive: bool,
