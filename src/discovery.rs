@@ -52,7 +52,20 @@ pub async fn discover_hosts(
             (t, up)
         })
         .buffer_unordered(parallel)
-        .filter_map(|(t, up)| async move { if up { Some(t) } else { None } })
+        .filter_map(|(t, up)| async move {
+            // IPv6 link-local (fe80::/10) hosts are on-link by definition and
+            // can't be reliably discovery-pinged with their scope, so a real
+            // one would be dropped here and vanish before the scan (lab bug
+            // N12 — `fe80::…%iface` expanded fine but produced 0 results).
+            // Keep them regardless; they were named explicitly.
+            let link_local =
+                matches!(t.ip, std::net::IpAddr::V6(v) if (v.segments()[0] & 0xffc0) == 0xfe80);
+            if up || link_local {
+                Some(t)
+            } else {
+                None
+            }
+        })
         .collect()
         .await
 }

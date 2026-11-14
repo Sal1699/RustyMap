@@ -4,6 +4,38 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.108.1] - 2026-11-14
+
+**From the v0.108.0 Kali validation (milestone run: zero HIGH bugs open; owasp
+9/11 DVWA parity with wapiti).** Closes the two remaining actionable items the
+report pinned down. 709 unit + 4 integration tests.
+
+### Fixed
+- **N12 (INFO) — IPv6 link-local targets no longer vanish before the scan.** The
+  address *expanded* correctly (unit-proven), but host discovery `tcp_ping`
+  couldn't reach a `fe80::…%iface` host (link-local needs the scope), so it was
+  dropped as "down" and the scan reported 0 results — which looked like a parse
+  failure. `discover_hosts` now keeps IPv6 link-local (fe80::/10) hosts
+  regardless: they're on-link by definition and were named explicitly.
+  (`discovery.rs`.)
+
+### Changed
+- **1.A (now MEDIA) — UDP open-detection gained TFTP / mDNS / SIP payloads.** The
+  v0.108.0 lab run confirmed RustyMap already matches nmap on closed vs
+  open|filtered (the batch discrepancies were target ICMP rate-limiting, same as
+  nmap), and that the only real gap was missing protocol payloads for services
+  that answer only a well-formed request. Added `69/TFTP` (the one confirmed
+  miss — RRQ), `5353/mDNS` (PTR for `_services._dns-sd._udp.local`) and
+  `5060/SIP` (OPTIONS) to `udp_payload`, on top of the existing
+  53/111/123/137/161/500/1434/1900. A reply now marks those ports `open` instead
+  of `open|filtered`. (`udp_scan.rs`.)
+
+### Note
+- Residual items are all BASSA/INFO or infra-gated: N6 (ssh-audit non-standard
+  ports — feature request), N2 (osdb pack scope), N8/5.D (untestable in the lab),
+  and the 5 Alpha features that need a Windows host / real `.ipa` / mixed v6
+  hosts / a MISP instance. No HIGH bugs open.
+
 ## [0.108.0] - 2026-11-14
 
 **From the v0.107.2 Kali validation (another clean run: 4 bugs resolved, 3

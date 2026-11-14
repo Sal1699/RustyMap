@@ -227,6 +227,22 @@ fn udp_payload(port: u16) -> &'static [u8] {
         ],
         // MS-SQL Server browser: a single 0x02 byte elicits the instance list.
         1434 => &[0x02],
+        // TFTP read-request (RRQ) for file "r", mode octet. A tftpd answers
+        // with DATA or (for a missing file) an ERROR packet — either proves the
+        // port open (lab bug 1.A: the one open UDP service RustyMap under-read).
+        69 => &[0x00, 0x01, b'r', 0x00, b'o', b'c', b't', b'e', b't', 0x00],
+        // mDNS: a unicast PTR query for "_services._dns-sd._udp.local" — a
+        // responder (avahi/Bonjour) answers with its advertised services.
+        5353 => &[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x09, b'_', b's', b'e', b'r', b'v', b'i', b'c', b'e', b's',
+            0x07, b'_', b'd', b'n', b's', b'-', b's', b'd',
+            0x04, b'_', b'u', b'd', b'p',
+            0x05, b'l', b'o', b'c', b'a', b'l',
+            0x00, 0x00, 0x0c, 0x00, 0x01,
+        ],
+        // SIP OPTIONS — any SIP UA/proxy replies with a status line (200/403/…).
+        5060 => b"OPTIONS sip:nm SIP/2.0\r\nVia: SIP/2.0/UDP nm;branch=z9hG4bKnm\r\nFrom: <sip:nm@nm>;tag=rm\r\nTo: <sip:nm@nm>\r\nCall-ID: rustymap\r\nCSeq: 1 OPTIONS\r\nMax-Forwards: 70\r\nContent-Length: 0\r\n\r\n",
         _ => &[],
     }
 }
@@ -331,6 +347,11 @@ mod tests {
         assert!(udp_payload(1900).starts_with(b"M-SEARCH"));
         assert!(udp_payload(500).len() > 40);
         assert_eq!(udp_payload(1434), &[0x02]);
+        // v0.108.x payload gap fills (lab bug 1.A): TFTP RRQ, mDNS PTR, SIP.
+        assert_eq!(&udp_payload(69)[..2], &[0x00, 0x01]); // TFTP RRQ opcode
+        assert!(udp_payload(69).windows(5).any(|w| w == b"octet"));
+        assert!(udp_payload(5353).windows(9).any(|w| w == b"_services"));
+        assert!(udp_payload(5060).starts_with(b"OPTIONS sip:"));
         // Unknown ports get no payload (empty datagram; ICMP-only classification).
         assert!(udp_payload(9999).is_empty());
         assert!(udp_payload(80).is_empty());
