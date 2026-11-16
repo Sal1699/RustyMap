@@ -1465,7 +1465,11 @@ async fn run(mut args: Cli) -> Result<()> {
         let scan_ports = {
             let parsed = ports::parse_ports(&args.ports_spec()).unwrap_or_default();
             if parsed.is_empty() {
-                vec![21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 443, 445, 3306, 3389, 8080]
+                // No -p: scan the top-100 so the pack carries a representative
+                // open-port + service inventory and a closed-port baseline — not
+                // just a 15-port peek (lab bug N2). An explicit -p (incl. -p-)
+                // still wins for a fuller submission.
+                top_ports::top(100)
             } else {
                 parsed
             }
@@ -1481,7 +1485,7 @@ async fn run(mut args: Cli) -> Result<()> {
                 std::sync::Arc::clone(&ports_arc),
                 dur,
                 100,                       // parallel
-                false,                     // show_closed
+                true,                      // show_closed: pack needs a closed-port baseline for the fingerprint
                 cancel,
                 None,                      // no rate limiter
                 std::time::Duration::ZERO, // no scan delay

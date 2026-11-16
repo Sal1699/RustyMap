@@ -4,6 +4,19 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.108.3] - 2026-11-16
+
+**Closes the last open BASSA bug (N2).** 710 unit + 4 integration tests.
+
+### Fixed
+- **N2 (BASSA) — `--osdb-submit` builds a richer, fuller pack.** With no explicit
+  `-p` it used to scan only 15 ports (and dropped closed ports), so the
+  submission pack carried a thin inventory. It now scans the **top-100** ports by
+  default and keeps closed ports, and the pack includes a **closed-port sample**
+  — the baseline an OS-fingerprint submission actually needs (several nmap-os-db
+  tests derive from the response to a closed port). An explicit `-p` (incl.
+  `-p-`) still wins for a maximal submission. (`main.rs`, `osdb_submit.rs`.)
+
 ## [0.108.2] - 2026-11-16
 
 **Closing minor open bugs from the lab inventory.** 709 unit + 4 integration tests.

@@ -89,6 +89,19 @@ pub fn build_pack(host: &HostResult, user_label: &str) -> String {
     if !open.is_empty() {
         let _ = writeln!(&mut s, "Open ports: {}", open.join(","));
     }
+    // A known-closed port is part of the OS-fingerprint baseline (nmap derives
+    // several tests from the response to a closed port), so include a sample for
+    // the submission reviewer (lab bug N2 — the pack used to carry only opens).
+    let closed: Vec<String> = host
+        .ports
+        .iter()
+        .filter(|p| p.state == PortState::Closed)
+        .map(|p| p.port.to_string())
+        .take(20)
+        .collect();
+    if !closed.is_empty() {
+        let _ = writeln!(&mut s, "Closed ports (sample): {}", closed.join(","));
+    }
     let _ = writeln!(&mut s, "\n## Service banners");
     for p in &host.ports {
         if p.state != PortState::Open {
@@ -221,6 +234,21 @@ mod tests {
         assert!(pack.contains("cpe:2.3:o:linux:linux_kernel"));
         assert!(pack.contains("TTL=64"));
         assert!(pack.contains("Open ports: 22,80,443"));
+    }
+
+    #[test]
+    fn build_pack_lists_closed_port_baseline() {
+        // N2: the pack now carries a closed-port sample for the fingerprint.
+        let mut h = host("Linux 5.15", &[22]);
+        h.ports.push(PortResult {
+            port: 1,
+            state: PortState::Closed,
+            rtt: Duration::from_millis(0),
+            service: None,
+        });
+        let pack = build_pack(&h, "Ubuntu 22.04 server");
+        assert!(pack.contains("Open ports: 22"));
+        assert!(pack.contains("Closed ports (sample): 1"), "pack:\n{pack}");
     }
 
     #[test]
