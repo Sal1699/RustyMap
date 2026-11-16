@@ -64,8 +64,21 @@ pub async fn crawl(seed: &str, cfg: &CrawlConfig) -> Result<CrawlResult> {
     if let Some(cookie) = &cfg.cookie {
         seed_cookie_jar(&jar, cookie, &seed_url);
     }
+    // N8: never follow a redirect off the seed host. The cookie jar is already
+    // origin-scoped, but reqwest's default policy would still *fetch* an
+    // off-host 3xx target (a request leaving scope); a custom policy keeps every
+    // request — and the session — on the host we were pointed at. Same-host
+    // redirects (incl. http→https) still follow.
+    let scope_host = host.clone();
     let client = reqwest::Client::builder()
         .cookie_provider(Arc::clone(&jar))
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.url().host_str() == Some(scope_host.as_str()) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
         .timeout(cfg.timeout)
         .danger_accept_invalid_certs(true)
         .user_agent("rustymap/web-crawler")

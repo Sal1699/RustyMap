@@ -3233,14 +3233,26 @@ async fn run(mut args: Cli) -> Result<()> {
                     continue;
                 }
                 let host_port = format!("{}:{}", h.target.ip, p.port);
-                let standard_port = (want_ssh && (p.port == 22 || service_is_ssh(&p.service)))
-                    || (want_smb && (p.port == 445 || p.port == 139))
-                    || (want_rdp && p.port == 3389)
-                    || (want_smtp && (p.port == 25 || p.port == 465 || p.port == 587));
-                if standard_port {
+                // A dedicated --{ssh,smb,rdp,smtp}-audit with an explicit `-p`
+                // means "audit this protocol on the port(s) I named" — so probe
+                // them even on a non-standard port (lab bug N6: `--ssh-audit -p
+                // 2222` used to be skipped unless -sV had identified SSH there).
+                // Each protocol's handshake self-validates and errors out cleanly
+                // on a mismatched service. The --auth-audit *shortcut* stays
+                // conservative (standard ports only) so a broad multi-protocol
+                // sweep doesn't hammer every open port.
+                let explicit = args.ports.is_some();
+                let do_ssh = want_ssh
+                    && (p.port == 22 || service_is_ssh(&p.service) || (args.ssh_audit && explicit));
+                let do_smb = want_smb
+                    && (p.port == 445 || p.port == 139 || (args.smb_audit && explicit));
+                let do_rdp = want_rdp && (p.port == 3389 || (args.rdp_audit && explicit));
+                let do_smtp = want_smtp
+                    && (p.port == 25 || p.port == 465 || p.port == 587 || (args.smtp_audit && explicit));
+                if do_ssh || do_smb || do_rdp || do_smtp {
                     audited_anything = true;
                 }
-                if want_ssh && (p.port == 22 || service_is_ssh(&p.service)) {
+                if do_ssh {
                     match ssh_audit::audit(h.target.ip, p.port, auth_dur).await {
                         Ok(a) => {
                             ssh_audit::print_report(&host_label, p.port, &a);
@@ -3271,7 +3283,7 @@ async fn run(mut args: Cli) -> Result<()> {
                         Err(e) => eprintln!("[!] ssh-audit {}:{}: {}", host_label, p.port, e),
                     }
                 }
-                if want_smb && (p.port == 445 || p.port == 139) {
+                if do_smb {
                     match smb_audit::audit(h.target.ip, p.port, auth_dur).await {
                         Ok(a) => {
                             smb_audit::print_report(&host_label, p.port, &a);
@@ -3301,7 +3313,7 @@ async fn run(mut args: Cli) -> Result<()> {
                         Err(e) => eprintln!("[!] smb-audit {}:{}: {}", host_label, p.port, e),
                     }
                 }
-                if want_rdp && p.port == 3389 {
+                if do_rdp {
                     match rdp_audit::audit(h.target.ip, p.port, auth_dur).await {
                         Ok(a) => {
                             rdp_audit::print_report(&host_label, p.port, &a);
@@ -3326,8 +3338,7 @@ async fn run(mut args: Cli) -> Result<()> {
                         Err(e) => eprintln!("[!] rdp-audit {}:{}: {}", host_label, p.port, e),
                     }
                 }
-                let _ = standard_port; // suppress unused-variable lint
-                if want_smtp && (p.port == 25 || p.port == 465 || p.port == 587) {
+                if do_smtp {
                     match smtp_audit::audit(h.target.ip, p.port, auth_dur).await {
                         Ok(a) => {
                             smtp_audit::print_report(&host_label, p.port, &a);
@@ -3370,10 +3381,10 @@ async fn run(mut args: Cli) -> Result<()> {
             if want_smtp { wanted.push("SMTP:25,465,587"); }
             eprintln!(
                 "[i] --auth-audit / --{{ssh,smb,rdp,smtp}}-audit ran but no open \
-                 port matched the protocols' standard ports ({}). Auth-audit \
-                 currently does not probe non-standard ports — open a feature \
-                 request if you have evidence a target runs one of these \
-                 services on an unusual port.",
+                 port matched the protocols' standard ports ({}). To audit a \
+                 service on a non-standard port, use its dedicated flag with an \
+                 explicit -p (e.g. `--ssh-audit -p 2222`), which probes exactly \
+                 the port(s) you name.",
                 wanted.join(" ")
             );
         }

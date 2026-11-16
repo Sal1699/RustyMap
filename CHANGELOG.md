@@ -4,6 +4,34 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.108.2] - 2026-11-16
+
+**Closing minor open bugs from the lab inventory.** 709 unit + 4 integration tests.
+
+### Fixed
+- **N6 (INFO) — `--ssh-audit` (and `--smb/-rdp/-smtp-audit`) now audit a
+  non-standard port when you name it.** The audit only ran on a protocol's
+  standard port (or a port `-sV` had identified), so `--ssh-audit -p 2222` was
+  skipped. A **dedicated** audit flag together with an explicit `-p` now probes
+  exactly the port(s) you named — each protocol's handshake self-validates and
+  errors out cleanly on a mismatched service. The `--auth-audit` shortcut stays
+  conservative (standard ports only) so a broad multi-protocol sweep doesn't
+  hammer every open port. (`main.rs`.)
+- **N8 (BASSA) — the web crawler never follows a redirect off the seed host.**
+  Links were already scoped to the seed host and the cookie jar is origin-scoped,
+  but reqwest's default redirect policy would still *fetch* an off-host 3xx
+  target — a request leaving scope. A custom redirect policy now stops at any
+  host change (same-host redirects, incl. http→https, still follow), so no
+  request or session cookie can leave the host you pointed at. (`web_crawl.rs`.)
+
+### Note
+- **5.D** — on review this is already handled: `vuln-ssl-ccs` distinguishes a
+  TLS port that merely rejects the legacy TLS 1.0 handshake (`n/a — modern TLS`)
+  from a genuinely non-TLS port (`n/a — port not TLS`); `is_tls` is latched on
+  the first reply and never reset. It just hasn't been lab-confirmed (needs a
+  TLS target). **N2** (osdb pack doesn't merge an external `-O/-sV` inventory)
+  remains the one open BASSA item; the 5 Alpha features stay infra-gated.
+
 ## [0.108.1] - 2026-11-14
 
 **From the v0.108.0 Kali validation (milestone run: zero HIGH bugs open; owasp
