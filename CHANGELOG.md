@@ -4,6 +4,34 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.108.4] - 2026-11-16
+
+**Whole-crate code-quality scan (clippy + manual review).** The scan found the
+codebase clean — no behaviour bugs — and surfaced two code smells plus a
+false-positive lint, all fixed below. 710 unit + 4 integration tests.
+
+### Changed (cleanup, no behaviour change)
+- **`iot_discover::extract_dns_label_runs` — garbled DNS-label condition
+  simplified.** The accept-check had a no-op term (`b == b'A'.saturating_sub(0)`,
+  i.e. just `== 'A'`) and an `else if` whose block was identical to the `if`.
+  Collapsed to `b.is_ascii_alphanumeric() || b == b'_' | b'-' | b'.'` — same
+  character set, much clearer.
+- **`brute_mssql` — removed a redundant `drop(cur)`.** `cur` (a `Cursor`) isn't
+  `Drop`; the call only ended its borrow of `pending`, which non-lexical
+  lifetimes already do at its last use, so the following `pending.drain(..)`
+  compiles without it.
+- **`run_raw_tcp` tagged `#[allow(clippy::too_many_arguments)]`** — it's the
+  per-host dispatch wrapper and legitimately threads 10 scan parameters, like
+  the other raw-engine entry points.
+
+### Note
+- The remaining clippy items were reviewed and deliberately left: cosmetic
+  doc-comment indentation; cfg-gated helpers that are "unused" only on the
+  non-Linux build (the `kernel_guard` iptables/nft RST-drop guard); the
+  `Tier::Beta` maturity-ladder slot; the dormant `adaptive_timing` module; and
+  `sort_by`→`sort_by_key` suggestions that would force a `String` clone per
+  comparison (a pessimisation). None are bugs.
+
 ## [0.108.3] - 2026-11-16
 
 **Closes the last open BASSA bug (N2).** 710 unit + 4 integration tests.

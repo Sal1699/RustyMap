@@ -204,9 +204,8 @@ fn extract_dns_label_runs(data: &[u8]) -> Vec<String> {
     let mut runs = Vec::new();
     let mut current = String::new();
     for &b in data {
-        if b == b'_' || b == b'-' || b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'A'.saturating_sub(0) {
-            current.push(b as char);
-        } else if b.is_ascii_uppercase() {
+        // DNS-label characters: letters (any case), digits, and `_ - .`.
+        if b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'.' {
             current.push(b as char);
         } else {
             if current.contains('_') && current.len() >= 4 {

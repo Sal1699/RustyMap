@@ -4122,6 +4122,7 @@ fn resolve_db_path(explicit: &Option<String>) -> String {
     "rustymap.db".to_string()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_raw_tcp(
     targets: Vec<target::Target>,
     ports: Arc<Vec<u16>>,

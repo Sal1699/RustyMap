@@ -469,7 +469,8 @@ async fn read_login_response(
             // Keep any bytes read_tls did not consume (a TLS record split
             // across TCP segments): the next socket read appends its tail.
             let consumed = cur.position() as usize;
-            drop(cur);
+            // `cur`'s borrow of `pending` ends at its last use above, so the
+            // drain below is free to mutably borrow it.
             pending.drain(..consumed);
         }
         // Drain whatever plaintext rustls now holds.
