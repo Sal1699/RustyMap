@@ -102,6 +102,10 @@ const REGISTRY: &[Feature] = &[
     Feature { key: "--web-crawl", tier: Tier::Production,
         note: "BFS crawler with robots.txt + a cookie jar. Lab-validated v0.107.2 on DVWA — 32 pages / 49 endpoints, session held across the whole crawl, and it no longer follows /logout.php (bug N1). Still single-threaded and doesn't render JS, so ZAP is faster/deeper on large JS-heavy apps." },
 
+    // ── Promoted after the v0.108.4 Kali validation (N2 resolved → full pack) ──
+    Feature { key: "--osdb-submit", tier: Tier::Production,
+        note: "Builds an OS-fingerprint submission pack for HOST:LABEL (stdout or --osdb-submit-out FILE); it NEVER auto-submits anywhere. Lab-validated v0.108.4: with no -p it scans the top-100 so the pack carries open ports, service banners, the full nmap-style fingerprint and a closed-port baseline (bug N2 fixed). PRIVACY: the pack describes your host/network — review it before sharing." },
+
     // ── Alpha — known limits or freshly landed; --experimental-confirm gate ──
     Feature { key: "--brute-protocol rdp", tier: Tier::Alpha,
         note: "RDP CredSSP brute. v0.106.0 implemented the pubKeyAuth channel binding (MS-CSSP v5+: SPKI from the TLS cert, NTLM session key, RC4-sealed SHA-256 binding hash); a server pubKeyAuth in the reply makes a positive authoritative. The crypto is UNVALIDATED against a real Windows RDP host (the lab has none; xrdp doesn't do CredSSP) — primitives unit-tested, end-to-end needs a Windows target (RUSTYMAP_RDP_DEBUG traces it). Negatives (NTSTATUS) reliable. Stays Alpha until a Windows host validates it." },
@@ -109,8 +113,6 @@ const REGISTRY: &[Feature] = &[
         note: "iOS IPA static analysis. v0.104.0 added a Mach-O header parser (arch / PIE / FairPlay encryption / code-signature / __RESTRICT) and entitlements from embedded.mobileprovision (get-task-allow, aps-environment, capabilities), on top of the Info.plist/ATS/secrets sweep. Awaiting a Kali re-test on a real IPA (the earlier lab test used a plist-only synthetic IPA) before promotion." },
     Feature { key: "--threat-intel-misp", tier: Tier::Alpha,
         note: "MISP IoC pull + match (`--threat-intel-misp URL --misp-api-key KEY`, flag hits with `--threat-intel-match`). Pull-only, no de-duplication across syncs; rate-limit handling minimal." },
-    Feature { key: "--osdb-submit", tier: Tier::Alpha,
-        note: "Builds an OS-fingerprint submission pack for HOST:LABEL and writes it to stdout or `--osdb-submit-out FILE` (does NOT auto-submit anywhere). Review the pack before sharing it — it describes your host/network." },
     Feature { key: "--os-fp-v6", tier: Tier::Alpha,
         note: "IPv6 OS fingerprint (`os_fp_v6.rs` / `os_fp_multi.rs`). v0.105.0 expanded the SYN-ACK classifier (Linux era, modern/legacy Windows, macOS/FreeBSD, OpenBSD-no-TS, NetBSD, Solaris/illumos/AIX, network gear). Still coarser than the v4 path — the full nmap S1–S12 raw IPv6 probe suite isn't implemented. Awaiting validation on real v6 hosts (Win/Linux/mac/BSD) before promotion." },
 ];

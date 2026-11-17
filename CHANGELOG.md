@@ -4,6 +4,24 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.108.5] - 2026-11-17
+
+**`--osdb-submit` promoted to Production** after the v0.108.4 Kali validation
+(6 PASS / 0 FAIL / 0 regressions; all 14 tracker bugs closed). 710 unit + 4
+integration tests.
+
+### Changed
+- **`--osdb-submit` is now Production — no longer needs `--experimental-confirm`.**
+  The one thing keeping it Alpha was the sparse pack (bug N2), fixed in v0.108.3
+  and lab-validated in v0.108.4 (the pack now carries the full fingerprint, open
+  ports, service banners and a closed-port baseline). It still **never**
+  auto-submits anything, and it now prints a one-line privacy reminder after
+  writing the pack — it describes your host/network, so review it before sharing.
+  (`maturity.rs`, `main.rs`.)
+- Remaining Alpha features (4): `--brute-protocol rdp`, `--ipa-scan`,
+  `--os-fp-v6`, `--threat-intel-misp` — all blocked on lab infrastructure, not
+  bugs.
+
 ## [0.108.4] - 2026-11-16
 
 **Whole-crate code-quality scan (clippy + manual review).** The scan found the

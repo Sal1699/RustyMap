@@ -1513,6 +1513,13 @@ async fn run(mut args: Cli) -> Result<()> {
             } else {
                 osdb_submit::print_pack(&pack);
             }
+            // Now that --osdb-submit is Production (ungated), keep the privacy
+            // reminder the old Alpha gate used to imply: the pack describes the
+            // host/network, so the user should review it before sharing.
+            eprintln!(
+                "[osdb-submit] note: this pack describes {} and its services — review it before sharing publicly.",
+                h.target.ip
+            );
         }
         return Ok(());
     }
