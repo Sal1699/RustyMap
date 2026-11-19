@@ -118,6 +118,14 @@ impl PairSource {
 /// and the matching attempt was one of them).
 const PAIR_ERROR_RETRIES: u32 = 4;
 
+/// If the target never once accepts a connection and this many consecutive pairs
+/// all fail at the transport layer, treat it as down/filtered and abort the run
+/// — otherwise a dead host grinds the whole wordlist × per-pair retry-backoff and
+/// looks like a hang (lab: an RDP brute against a filtered :3389 appeared to hang
+/// indefinitely). A single successful connection (even an auth *failure*) proves
+/// the service is up and disables this guard for the rest of the run.
+const HOST_DOWN_ABORT: usize = 2;
+
 /// Run an adapter against a pair source under the safety policy.
 pub async fn run<A: BruteAdapter>(
     adapter: A,
@@ -154,6 +162,12 @@ pub async fn run<A: BruteAdapter>(
     };
     let counter = Arc::new(AtomicUsize::new(0));
     let max = cfg.max_tries.max(1);
+
+    // Host-down guard state: have we ever completed a connection (any auth
+    // verdict), and how many consecutive pairs have failed at the transport
+    // layer. See HOST_DOWN_ABORT.
+    let mut connected_ever = false;
+    let mut consec_errors = 0usize;
 
     for (user, pass) in pairs.iter() {
         let count = counter.fetch_add(1, Ordering::Relaxed);
@@ -218,6 +232,25 @@ pub async fn run<A: BruteAdapter>(
             }
         } else {
             report.attempts.push(attempt);
+        }
+        // Host-down guard: a completed connection (Success OR a real auth
+        // Failed) proves the service is up and disables the guard; a transport
+        // Error while we have never once connected counts toward the abort.
+        match outcome {
+            AttemptOutcome::Success | AttemptOutcome::Failed => {
+                connected_ever = true;
+                consec_errors = 0;
+            }
+            AttemptOutcome::Error => consec_errors += 1,
+        }
+        if !connected_ever && consec_errors >= HOST_DOWN_ABORT {
+            report.aborted_reason = Some(format!(
+                "target unreachable — {} consecutive connection errors with no successful \
+                 connection; aborting instead of grinding the wordlist against a dead/filtered \
+                 host (is the service up on {}?)",
+                consec_errors, cfg.target
+            ));
+            break;
         }
         if !rate_delay.is_zero() {
             sleep(rate_delay).await;
@@ -412,6 +445,38 @@ mod tests {
         assert_eq!(r.successes.len(), 0);
         // 1 initial + PAIR_ERROR_RETRIES retries on the single pair.
         assert_eq!(calls.load(Ordering::Relaxed), (PAIR_ERROR_RETRIES + 1) as usize);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn host_down_aborts_without_grinding_whole_list() {
+        // A dead/filtered host: every connect errors, nothing ever authenticates.
+        // The run must bail after HOST_DOWN_ABORT pairs instead of trying the
+        // whole wordlist × retry-backoff (lab: an RDP brute against a filtered
+        // :3389 appeared to hang indefinitely).
+        let calls = Arc::new(AtomicUsize::new(0));
+        let adapter = FlakyAdapter {
+            fail_first: AtomicUsize::new(100_000), // always errors — never connects
+            calls: Arc::clone(&calls),
+        };
+        let pairs = PairSource::Fixed(
+            (0..10).map(|i| (format!("u{i}"), format!("p{i}"))).collect(),
+        );
+        let r = run(adapter, cfg(true, false), pairs).await.unwrap();
+        assert_eq!(r.successes.len(), 0);
+        assert!(
+            r.aborted_reason.as_deref().unwrap_or("").contains("unreachable"),
+            "expected a host-down abort, got {:?}",
+            r.aborted_reason
+        );
+        // Only HOST_DOWN_ABORT pairs attempted (each 1 + PAIR_ERROR_RETRIES),
+        // the remaining 8 skipped.
+        let expected = HOST_DOWN_ABORT * (PAIR_ERROR_RETRIES as usize + 1);
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            expected,
+            "should stop after {} pairs, not grind all 10",
+            HOST_DOWN_ABORT
+        );
     }
 
     #[tokio::test]

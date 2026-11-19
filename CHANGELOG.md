@@ -4,6 +4,40 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.108.6] - 2026-11-19
+
+**Two Alpha features promoted after lab validation, plus a brute-force
+host-down fix the same report surfaced.** 711 unit + 4 integration tests.
+
+### Changed
+- **`--ipa-scan` promoted to Production.** Lab-validated v0.108.5 against two
+  real signed IPAs (DVIA-v2, iGoat-Swift): 27/28 fields matched a manual
+  plist + Mach-O parse (Info.plist, ATS, URL schemes, secrets, Mach-O header,
+  CMS/DER entitlements). No longer needs `--experimental-confirm`. Cosmetic
+  limit documented: a FAT (multi-arch) binary reports the first slice's arch
+  only. (`maturity.rs`.)
+- **`--threat-intel-misp` promoted to Production.** Lab-validated v0.108.5
+  end-to-end against a real MISP v2.5.51 (IP + domain IoCs: true-positive on
+  seeded hosts, true-negative elsewhere, scan output unaffected). No longer
+  needs `--experimental-confirm`. (`maturity.rs`.)
+
+### Fixed
+- **Brute-force no longer appears to hang against a dead/filtered host.** A
+  transport error is retried per-pair with backoff (hydra-style, for throttling
+  servers), but on a host that never once accepts a connection that meant
+  grinding the whole wordlist × retries — e.g. an RDP brute against a filtered
+  `:3389` looked like an indefinite hang. The run now aborts after 2 consecutive
+  pairs fail at the transport layer with no successful connection ("target
+  unreachable …"); a single completed connection (even an auth *failure*) proves
+  the service is up and disables the guard. Affects all brute protocols.
+  (`brute.rs`.)
+
+### Alpha remaining (2)
+- `--brute-protocol rdp` (needs a Windows+NLA host) and `--os-fp-v6` (needs real
+  Windows/macOS/BSD IPv6 targets on a non-NAT link) — both blocked on lab
+  infrastructure, not bugs. os-fp-v6's Linux classification is lab-confirmed; its
+  Windows/macOS branches await a bridged non-Linux v6 host.
+
 ## [0.108.5] - 2026-11-17
 
 **`--osdb-submit` promoted to Production** after the v0.108.4 Kali validation
