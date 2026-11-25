@@ -1,9 +1,9 @@
 use anyhow::Result;
+use parking_lot::Mutex;
 use serde::Serialize;
 use serde_json::json;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::sync::Mutex;
 
 pub struct Audit {
     file: Option<Mutex<std::fs::File>>,
@@ -24,9 +24,10 @@ impl Audit {
         let Some(ref f) = self.file else { return };
         let ts = chrono::Local::now().to_rfc3339();
         let line = json!({ "ts": ts, "event": event, "data": payload }).to_string();
-        if let Ok(mut g) = f.lock() {
-            let _ = writeln!(g, "{}", line);
-        }
+        // parking_lot: non-poisoning, so a panicked thread elsewhere can't block
+        // the audit log (consistent with the scan hot path, review #10).
+        let mut g = f.lock();
+        let _ = writeln!(g, "{}", line);
     }
 
     #[allow(dead_code)]

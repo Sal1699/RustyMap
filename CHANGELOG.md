@@ -4,6 +4,28 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.111.1] - 2026-11-25
+
+**Improvements batch — Phase D (internal cleanup, no behaviour change).** 712
+unit + 4 integration tests.
+
+### Internal
+- **`audit.rs` moved to `parking_lot::Mutex`** — consistent with the scan
+  hot-path migration (review #10), so a panicked thread elsewhere can't block the
+  audit log.
+- **Two timeout loops rewritten as `while let`** (`broadcast_dhcp`,
+  `vuln_ssl_ccs`) — the `loop { let x = match …{Some→x, None→break} }` shape is
+  now `while let Some(x) = …`, same behaviour, less noise.
+
+### Note
+- Phase D is deliberately modest: the high-value internal work — the five
+  architecture refactors (run()→subcommands, Cli split, ScanContext, workspace,
+  cargo features) — stays **deferred** (zero user-facing change, real regression
+  risk on the nmap-compat CLI, not unit-testable). The remaining clippy items are
+  cosmetic (doc-comment indentation), cfg-gated `kernel_guard` helpers (unused
+  only on the non-Linux build), the `Tier::Beta` ladder slot, and `sort_by_key`
+  suggestions that would clone `String` keys — none are bugs, all left as-is.
+
 ## [0.111.0] - 2026-11-25
 
 **Improvements batch — Phase C (scripting SDK).** 712 unit + 4 integration tests.

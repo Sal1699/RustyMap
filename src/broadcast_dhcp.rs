@@ -60,11 +60,7 @@ pub async fn discover(dur: Duration) -> Result<Vec<DhcpOffer>> {
     let deadline = Instant::now() + dur;
     let mut buf = vec![0u8; 1500];
     let mut offers: Vec<DhcpOffer> = Vec::new();
-    loop {
-        let remaining = match deadline.checked_duration_since(Instant::now()) {
-            Some(r) => r,
-            None => break,
-        };
+    while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
         match timeout(remaining, sock.recv_from(&mut buf)).await {
             Ok(Ok((n, _src))) => {
                 if let Some(o) = parse_offer(&buf[..n], xid) {

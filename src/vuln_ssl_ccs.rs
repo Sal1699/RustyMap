@@ -170,11 +170,7 @@ async fn read_server_flight(s: &mut TcpStream, dur: Duration) -> HsOutcome {
     let mut buf = vec![0u8; 4096];
     let mut is_tls = false;
     let mut first = true;
-    loop {
-        let remaining = match deadline.checked_duration_since(std::time::Instant::now()) {
-            Some(r) => r,
-            None => break,
-        };
+    while let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) {
         let n = match timeout(remaining, s.read(&mut buf)).await {
             Ok(Ok(n)) => n,
             _ => break,
