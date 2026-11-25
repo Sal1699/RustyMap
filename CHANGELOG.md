@@ -4,6 +4,41 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.111.2] - 2026-11-25
+
+**Speed — adaptive per-probe timeout on the default connect scan.** The one
+scan path that still waited the full `--timeout` on every unanswered port.
+712 unit + 4 integration tests; classification (open/closed/filtered) is
+byte-unchanged — this only shortens *how long* a genuinely-filtered port waits.
+
+### Changed
+- **`-sT` without `--adaptive` now shrinks the first connect attempt toward the
+  observed RTT**, the same floor-bounded `rate::adaptive_timeout` the
+  `--adaptive` limiter path and the raw SYN engine already used. Previously the
+  default connect path dialed every port with the full `--timeout` (1500 ms), so
+  a full-port `-sT` behind a firewall was bounded by `timeout × #filtered` — a
+  filtered port cost the whole window even on a host answering other ports in
+  microseconds. A shared EWMA of the real connect latency (fed by every open or
+  refused port, gated at ≥2 samples) now drives a per-probe timeout floored by
+  `rate::timeout_floor` (≥150 ms for the default base), so a filtered port on a
+  responsive host rejects fast instead of burning 1500 ms. (`scanner.rs`.)
+- **Retries are deliberately left at the full `--timeout`.** Only the *first*
+  attempt is shrunk; the `--max-retries` re-probes keep the whole window so a
+  slow-but-real service (a warmed-up VirtualBox-Slirp forward — lab bug B12)
+  still gets its full second chance, and that same retry is the safety net if the
+  shrunk first attempt ever clips a genuinely slow reply. No RTT yet, or a wholly
+  silent host → full timeout exactly as before.
+
+### Note
+- Floor-bounded + retry-backed, so it cannot introduce new false-filtered on a
+  host that answered any port in under the floor. Worst case (all-filtered,
+  retry-dominated Windows loopback) measured ~13% faster; the win is larger on
+  large port ranges and real remote hosts, where refused ports seed the EWMA
+  immediately and nearly every probe benefits. **Timing gains want Kali
+  validation on a real firewalled target** to quantify; correctness is covered by
+  the existing `rate::` and integration tests. `--fast-engine` is untouched and
+  stays opt-in.
+
 ## [0.111.1] - 2026-11-25
 
 **Improvements batch — Phase D (internal cleanup, no behaviour change).** 712

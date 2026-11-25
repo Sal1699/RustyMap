@@ -177,9 +177,21 @@ pub async fn tcp_connect_scan(
         }
         out
     } else {
+        // Default (non-adaptive) connect path: give it the same RTT-shrinking
+        // per-probe timeout the --adaptive and raw paths already use, so a
+        // filtered port on a responsive host no longer waits the full --timeout
+        // (a full-port -sT behind a firewall was bounded by base-timeout ×
+        // #filtered). A shared EWMA of the real connect latency drives it; the
+        // floor keeps it from waiting so little it drops a slow-but-real reply.
+        // No RTT yet (or a silent host) → full timeout, exactly as before.
+        let rtt_ewma = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let rtt_samples = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let tfloor = crate::rate::timeout_floor(timeout_dur);
         stream::iter(ports.iter().copied())
             .map(|port| {
                 let cancel = Arc::clone(&cancel);
+                let rtt_ewma = Arc::clone(&rtt_ewma);
+                let rtt_samples = Arc::clone(&rtt_samples);
                 async move {
                 if !scan_delay.is_zero() { tokio::time::sleep(scan_delay).await; }
                 if cancel.load(Ordering::Relaxed) {
@@ -193,7 +205,26 @@ pub async fn tcp_connect_scan(
                 let mut attempt = 0u8;
                 let mut state;
                 loop {
-                    let res = dial(addr, timeout_dur).await;
+                    // First attempt: shrink the wait toward the observed RTT once
+                    // a couple of probes have completed, so a genuinely filtered
+                    // port is rejected fast instead of burning the full --timeout.
+                    // Retries keep the FULL timeout: a slow-but-real service (a
+                    // warmed-up VirtualBox-Slirp forward, lab bug B12) still gets
+                    // the whole window on its second chance, and that same retry
+                    // is the safety net if the shrunk first attempt ever clips a
+                    // slow reply. Early/silent probes (no RTT yet) keep full too.
+                    let eff = if attempt == 0 {
+                        let mean = if rtt_samples.load(Ordering::Relaxed) >= 2 {
+                            let us = rtt_ewma.load(Ordering::Relaxed);
+                            (us != 0).then(|| Duration::from_micros(us))
+                        } else {
+                            None
+                        };
+                        crate::rate::adaptive_timeout(timeout_dur, mean, None, tfloor)
+                    } else {
+                        timeout_dur
+                    };
+                    let res = dial(addr, eff).await;
                     state = match res {
                         Ok(_stream) => PortState::Open,
                         Err(e) => match e.kind() {
@@ -207,6 +238,15 @@ pub async fn tcp_connect_scan(
                     attempt += 1;
                 }
                 let rtt = t0.elapsed();
+                // A completed connect (open OR refused) measured a real RTT → feed
+                // the shared EWMA so later probes shrink their wait.
+                if state != PortState::Filtered {
+                    let sample = rtt.as_micros().min(u64::MAX as u128) as u64;
+                    let prev = rtt_ewma.load(Ordering::Relaxed);
+                    let next = if prev == 0 { sample } else { (prev * 3 + sample) / 4 };
+                    rtt_ewma.store(next, Ordering::Relaxed);
+                    rtt_samples.fetch_add(1, Ordering::Relaxed);
+                }
                 crate::scan_stats::global().record_result(state);
                 PortResult { port, state, rtt, service: None }
                 }
