@@ -984,7 +984,13 @@ pub async fn probe(
     // names e.g. lighttpd-on-443 instead of a bare "ssl/https". We send an
     // app-layer payload (HTTP GET on web ports, read-only elsewhere) over the
     // decrypted stream and run the reply through the same matchers.
-    if intensity >= 7 && crate::tls_probe::likely_tls(port) {
+    // Run the behind-TLS application probe at intensity >=7 for the full TLS
+    // port set, and at the DEFAULT intensity (>=5) for the canonical HTTPS ports
+    // (443/8443) so a plain `-sV` names the web server + version instead of a
+    // bare "ssl/https" — matching nmap's default behaviour (improvement A).
+    if crate::tls_probe::likely_tls(port)
+        && (intensity >= 7 || (intensity >= 5 && matches!(port, 443 | 8443)))
+    {
         let payload = tls_app_payload(port, sni);
         if let Some((tls, banner)) =
             crate::tls_probe::probe_app(ip, port, timeout_dur, sni, &payload).await

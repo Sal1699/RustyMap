@@ -4,6 +4,29 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.109.0] - 2026-11-25
+
+**Improvements batch — Phase A (service detection over TLS).** 711 unit + 4
+integration tests.
+
+### Changed
+- **Plain `-sV` now names the web server + version on HTTPS ports.** The
+  behind-TLS application probe (handshake → app-layer payload over the decrypted
+  stream → Server-header / signature match, added in Fase 32) ran only at
+  `--version-intensity >= 7`, so a default `-sV` on 443/8443 reported a bare
+  `ssl/https`. It now also runs at the default intensity (>=5) for the canonical
+  HTTPS ports **443 and 8443**, so e.g. `lighttpd/1.4.59` is named without
+  needing `--version-all` — matching nmap's default. The full TLS port set
+  (465/636/993/995/…) still gates at >=7 to keep a default scan light.
+  (`service_probe.rs`.)
+
+### Note (deferred to the IPv6-lab cycle)
+- The other Phase-A items — **raw-socket scanning over IPv6** (`-sS/-sF/…`, today
+  IPv4-only) and the **full nmap S1–S12 IPv6 OS-probe suite** (`--os-fp-v6`) —
+  are large network features validatable only against the IPv6 hosts being set
+  up for the `rdp` / `os-fp-v6` promotions. They'll be implemented in that cycle
+  so they ship validated rather than blind.
+
 ## [0.108.6] - 2026-11-19
 
 **Two Alpha features promoted after lab validation, plus a brute-force
