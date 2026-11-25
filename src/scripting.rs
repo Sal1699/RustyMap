@@ -1027,6 +1027,107 @@ fn build_engine() -> Engine {
         out
     });
 
+    // http_post(url, body, content_type, timeout_ms) → {status, body, headers}
+    // (improvement C: scripts could only GET before, so POST-based checks — form
+    // auth, JSON APIs, SOAP — weren't expressible).
+    engine.register_fn(
+        "http_post",
+        |url: &str, body: &str, content_type: &str, timeout_ms: i64| -> Map {
+            use reqwest::blocking::Client;
+            let timeout = Duration::from_millis(timeout_ms.clamp(50, 30_000) as u64);
+            let mut out = Map::new();
+            let fail = |out: &mut Map| {
+                out.insert("status".into(), Dynamic::from(0i64));
+                out.insert("body".into(), Dynamic::from(String::new()));
+                out.insert("headers".into(), Dynamic::from(String::new()));
+            };
+            let client = match Client::builder()
+                .timeout(timeout)
+                .danger_accept_invalid_certs(true)
+                .user_agent("rustymap/script")
+                .build()
+            {
+                Ok(c) => c,
+                Err(_) => {
+                    fail(&mut out);
+                    return out;
+                }
+            };
+            let mut req = client.post(url).body(body.to_string());
+            if !content_type.is_empty() {
+                req = req.header("Content-Type", content_type);
+            }
+            match req.send() {
+                Ok(resp) => {
+                    let status = resp.status().as_u16() as i64;
+                    let headers: String = resp
+                        .headers()
+                        .iter()
+                        .map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("")))
+                        .collect::<Vec<_>>()
+                        .join("\r\n");
+                    let text = resp.text().unwrap_or_default();
+                    let truncated: String = text.chars().take(8192).collect();
+                    out.insert("status".into(), Dynamic::from(status));
+                    out.insert("body".into(), Dynamic::from(truncated));
+                    out.insert("headers".into(), Dynamic::from(headers));
+                }
+                Err(_) => fail(&mut out),
+            }
+            out
+        },
+    );
+
+    // Percent-encode / decode for building request parameters (improvement C).
+    engine.register_fn("url_encode", |s: &str| -> String {
+        let mut out = String::with_capacity(s.len());
+        for &b in s.as_bytes() {
+            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+                out.push(b as char);
+            } else {
+                out.push_str(&format!("%{:02X}", b));
+            }
+        }
+        out
+    });
+    engine.register_fn("url_decode", |s: &str| -> String {
+        let bytes = s.as_bytes();
+        let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'%' if i + 2 < bytes.len() => {
+                    let hi = (bytes[i + 1] as char).to_digit(16);
+                    let lo = (bytes[i + 2] as char).to_digit(16);
+                    if let (Some(h), Some(l)) = (hi, lo) {
+                        out.push((h * 16 + l) as u8);
+                        i += 3;
+                        continue;
+                    }
+                    out.push(b'%');
+                    i += 1;
+                }
+                b'+' => {
+                    out.push(b' ');
+                    i += 1;
+                }
+                c => {
+                    out.push(c);
+                    i += 1;
+                }
+            }
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    });
+
+    // Random lowercase-hex (nonces / tokens / cache-busters in probes).
+    engine.register_fn("rand_hex", |n_bytes: i64| -> String {
+        use rand::Rng;
+        let n = n_bytes.clamp(1, 1024) as usize;
+        let mut rng = rand::thread_rng();
+        (0..n).map(|_| format!("{:02x}", rng.gen::<u8>())).collect()
+    });
+
     engine
 }
 
@@ -1225,5 +1326,15 @@ mod tests {
         assert!(priv1);
         let priv2: bool = engine.eval(r#"is_private_ip("8.8.8.8")"#).unwrap();
         assert!(!priv2);
+        // improvement C: url_encode/decode round-trip + rand_hex length.
+        let enc: String = engine.eval(r#"url_encode("a b&c=/d")"#).unwrap();
+        assert_eq!(enc, "a%20b%26c%3D%2Fd");
+        let dec: String = engine.eval(r#"url_decode("a%20b%2Bc")"#).unwrap();
+        assert_eq!(dec, "a b+c");
+        let plus: String = engine.eval(r#"url_decode("a+b")"#).unwrap();
+        assert_eq!(plus, "a b");
+        let rh: String = engine.eval(r#"rand_hex(8)"#).unwrap();
+        assert_eq!(rh.len(), 16); // 8 bytes → 16 hex chars
+        assert!(rh.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

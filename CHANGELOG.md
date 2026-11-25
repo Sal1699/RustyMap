@@ -4,6 +4,31 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.111.0] - 2026-11-25
+
+**Improvements batch — Phase C (scripting SDK).** 712 unit + 4 integration tests.
+
+### Added
+- **New Rhai script helpers (improvement C).** The SDK was already rich
+  (`tcp_send`/`udp_send`, hex/base64, md5/sha1/sha256/hmac_sha256, the `regex_*`
+  family, `http_get`, `is_private_ip`), but a few common building blocks were
+  missing:
+  - **`http_post(url, body, content_type, timeout_ms)`** → `{status, body,
+    headers}` — scripts could only GET before, so form-auth / JSON-API / SOAP
+    checks weren't expressible.
+  - **`url_encode(s)` / `url_decode(s)`** — percent-encoding for request params
+    (decode also maps `+` → space).
+  - **`rand_hex(n)`** — n random bytes as lowercase hex, for nonces / tokens /
+    cache-busters in probes.
+  (`scripting.rs`.)
+
+### Note
+- Parallelising built-in script execution across hosts (to lift the ≤8-host
+  auto-run cap) was considered but deferred: it's a concurrency/timing change to
+  the scan engine that needs lab validation (the cap exists precisely because
+  auto-running scripts on a large sweep was slow/aggressive), so it belongs with
+  the perf items that validate on Kali rather than shipped blind.
+
 ## [0.110.0] - 2026-11-25
 
 **Improvements batch — Phase B (detection depth).** 712 unit + 4 integration tests.
