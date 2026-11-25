@@ -4,6 +4,41 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.111.3] - 2026-11-25
+
+**Speed — parallelize `-sV` service detection across hosts.** Lever 3 of the
+"faster without `--fast-engine`" pass. 712 unit + 4 integration tests.
+
+### Changed
+- **`-sV` now probes all up hosts concurrently instead of strictly one at a
+  time.** `probe_services` used a `for h in hosts` loop, so a multi-host sweep
+  with service detection serialized each host's banner-grabbing even though the
+  work is independent and I/O-bound — 50 hosts × ~1 s each was ~50 s of
+  wall-clock. Every `(host, open-port)` probe is now flattened into a single
+  stream with one **global** `buffer_unordered(64)` cap, keyed by
+  `(host_idx, port_idx)` and written back by key so the reported order is
+  unchanged. (`main.rs`.)
+
+### Note
+- The global fd cap is deliberate: an unbounded per-host × per-port fan-out is
+  exactly the `connect()`-storm that caused lab bug-09 (EMFILE → every port
+  mis-classified filtered). 64 is modest and well under default ulimits; this
+  phase runs *after* the port scan, so it never competes with the scan's own
+  pool. Single-host behaviour is unchanged-to-slightly-better (one host's open
+  ports cap at 64 vs the old 32). Correctness is unchanged — same probes, same
+  results, only concurrency differs; the multi-host wall-clock win wants a Kali
+  sweep (`-sV` over a subnet) to quantify.
+
+### Ranking note (speed pass)
+- Investigating the three candidate levers flipped their order. **Lever 1
+  (raise default parallelism) was dropped** — `parallel()` is already pinned to
+  the fd ceiling (500 default, 1000 for `-p-`, then `fd_safe_cap`) precisely
+  because bug-09 showed a higher default hits the 1024 ulimit and mis-scans.
+  **Lever 2 (seed the connect EWMA from the discovery RTT)** is low-ROI: the
+  EWMA already seeds within the first batch from in-scan open/refused ports, and
+  the firewall case that would benefit is usually run with `-Pn` (no discovery
+  phase to seed from). Lever 3 (this change) was the real safe win.
+
 ## [0.111.2] - 2026-11-25
 
 **Speed — adaptive per-probe timeout on the default connect scan.** The one

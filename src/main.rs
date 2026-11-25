@@ -3994,26 +3994,45 @@ async fn probe_services(
     use futures::stream::{self, StreamExt};
     // Use a shorter timeout for banner probing (at most 3s, or scan timeout if lower)
     let probe_timeout = timeout_dur.min(std::time::Duration::from_secs(3));
-    for h in hosts.iter_mut() {
-        if !h.up { continue; }
-        let ip = h.target.ip;
-        let hostname = h.target.hostname.clone();
-        let open_idx: Vec<usize> = h.ports.iter().enumerate()
-            .filter(|(_, p)| p.state == PortState::Open)
-            .map(|(i, _)| i).collect();
-        let concurrency = open_idx.len().clamp(4, 32);
-        let infos: Vec<(usize, Option<service_probe::ServiceInfo>)> = stream::iter(open_idx)
-            .map(|i| {
-                let port = h.ports[i].port;
-                let host = hostname.clone();
-                async move { (i, service_probe::probe(ip, port, probe_timeout, host.as_deref(), intensity).await) }
-            })
-            .buffer_unordered(concurrency)
-            .collect()
-            .await;
-        for (i, info) in infos {
-            h.ports[i].service = info;
-        }
+    // Flatten every (host, open-port) probe across ALL up hosts into one
+    // stream so a multi-host `-sV` sweep probes hosts concurrently instead of
+    // strictly one host at a time. The old `for h in hosts` loop serialized
+    // them — 50 hosts × ~1s of banner-grabbing was ~50s wall-clock even though
+    // the work is independent and I/O-bound. Jobs are keyed by (host_idx,
+    // port_idx) and written back afterwards, so the reported order is unchanged.
+    // A single GLOBAL concurrency cap bounds the total open fd count (lab
+    // bug-09: unbounded connect() fan-out hits EMFILE and mis-scans) — kept
+    // deliberately modest since this runs after the port scan. Single-host
+    // behaviour is unchanged-to-better (one host's open ports still cap at
+    // PROBE_FANOUT, vs the old 32).
+    const PROBE_FANOUT: usize = 64;
+    #[allow(clippy::type_complexity)]
+    let jobs: Vec<(usize, usize, std::net::IpAddr, u16, Option<String>)> = hosts
+        .iter()
+        .enumerate()
+        .filter(|(_, h)| h.up)
+        .flat_map(|(hi, h)| {
+            let ip = h.target.ip;
+            let hostname = h.target.hostname.clone();
+            h.ports
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.state == PortState::Open)
+                .map(move |(pi, p)| (hi, pi, ip, p.port, hostname.clone()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    let results: Vec<(usize, usize, Option<service_probe::ServiceInfo>)> = stream::iter(jobs)
+        .map(|(hi, pi, ip, port, host)| async move {
+            (hi, pi, service_probe::probe(ip, port, probe_timeout, host.as_deref(), intensity).await)
+        })
+        .buffer_unordered(PROBE_FANOUT)
+        .collect()
+        .await;
+
+    for (hi, pi, info) in results {
+        hosts[hi].ports[pi].service = info;
     }
 }
 
