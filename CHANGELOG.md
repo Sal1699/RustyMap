@@ -4,6 +4,33 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.110.0] - 2026-11-25
+
+**Improvements batch — Phase B (detection depth).** 712 unit + 4 integration tests.
+
+### Added
+- **Six more UDP service payloads (improvement B4).** On top of the existing
+  53/69/111/123/137/161/500/1434/1900/5060/5353, `udp_scan` now sends
+  well-formed probes to high-value services that only answer a proper request,
+  so they report `open` (not `open|filtered`): **IPMI/BMC 623** (ASF RMCP
+  presence ping), **Memcached 11211**, **CoAP 5683** (`GET /.well-known/core`),
+  **STUN 3478**, **NAT-PMP 5351**, **LLMNR 5355**. (`udp_scan.rs`.)
+
+### Changed
+- **`--ipa-scan` reports every arch of a FAT/universal binary (improvement B8).**
+  It followed only the first slice, so a universal binary showed e.g. `armv7`;
+  it now lists all slices — `armv7+arm64` — while the per-slice hardening flags
+  (PIE / encryption / code-signature) still come from the first slice.
+  (`ipa_scan.rs`.)
+
+### Note
+- **B9** (MISP cross-sync de-dup) was reviewed and left as-is: the cache already
+  de-dups within a sync (`HashSet`), and replacing it on each sync is the right
+  behaviour for threat intel (a re-sync should reflect MISP's *current* state;
+  accumulating would keep de-listed IoCs and cause false positives). **B7**
+  (osdb pack reusing a prior `--db` scan instead of re-scanning) is a reasonable
+  follow-up but lower value, deferred.
+
 ## [0.109.0] - 2026-11-25
 
 **Improvements batch — Phase A (service detection over TLS).** 711 unit + 4

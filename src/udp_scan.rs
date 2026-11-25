@@ -243,6 +243,32 @@ fn udp_payload(port: u16) -> &'static [u8] {
         ],
         // SIP OPTIONS — any SIP UA/proxy replies with a status line (200/403/…).
         5060 => b"OPTIONS sip:nm SIP/2.0\r\nVia: SIP/2.0/UDP nm;branch=z9hG4bKnm\r\nFrom: <sip:nm@nm>;tag=rm\r\nTo: <sip:nm@nm>\r\nCall-ID: rustymap\r\nCSeq: 1 OPTIONS\r\nMax-Forwards: 70\r\nContent-Length: 0\r\n\r\n",
+        // ── added v0.110.0 (improvement B4): high-value exposure/amplification
+        //    and IoT/infra services that only answer a well-formed datagram ──
+        // IPMI/BMC — ASF RMCP Presence Ping (IANA 4542, msg-type 0x80). A BMC pongs.
+        623 => &[0x06, 0x00, 0xff, 0x06, 0x00, 0x00, 0x11, 0xbe, 0x80, 0x00, 0x00, 0x00],
+        // Memcached (UDP frame header: req-id, seq, n-datagrams=1, reserved) + "stats".
+        11211 => &[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+            b's', b't', b'a', b't', b's', b'\r', b'\n',
+        ],
+        // CoAP (IoT) — CON GET /.well-known/core (ver 1, code 0.01, Uri-Path options).
+        5683 => &[
+            0x40, 0x01, 0x00, 0x01, 0xbb, b'.', b'w', b'e', b'l', b'l', b'-', b'k',
+            b'n', b'o', b'w', b'n', 0x04, b'c', b'o', b'r', b'e',
+        ],
+        // STUN (VoIP/WebRTC) — Binding Request with the magic cookie + zero txid.
+        3478 => &[
+            0x00, 0x01, 0x00, 0x00, 0x21, 0x12, 0xa4, 0x42,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ],
+        // NAT-PMP — external-address request (version 0, opcode 0); the gateway replies.
+        5351 => &[0x00, 0x00],
+        // LLMNR — a unicast query for "wpad" (DNS wire format, like mDNS on 5355).
+        5355 => &[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x04, b'w', b'p', b'a', b'd', 0x00, 0x00, 0x01, 0x00, 0x01,
+        ],
         _ => &[],
     }
 }
@@ -352,6 +378,12 @@ mod tests {
         assert!(udp_payload(69).windows(5).any(|w| w == b"octet"));
         assert!(udp_payload(5353).windows(9).any(|w| w == b"_services"));
         assert!(udp_payload(5060).starts_with(b"OPTIONS sip:"));
+        // v0.110.0 (B4): IPMI ASF ping, Memcached stats, STUN magic cookie.
+        assert_eq!(&udp_payload(623)[..4], &[0x06, 0x00, 0xff, 0x06]);
+        assert!(udp_payload(11211).windows(5).any(|w| w == b"stats"));
+        assert_eq!(&udp_payload(3478)[4..8], &[0x21, 0x12, 0xa4, 0x42]); // STUN magic cookie
+        assert_eq!(udp_payload(5351), &[0x00, 0x00]); // NAT-PMP
+        assert!(udp_payload(5683).starts_with(&[0x40, 0x01])); // CoAP CON GET
         // Unknown ports get no payload (empty datagram; ICMP-only classification).
         assert!(udp_payload(9999).is_empty());
         assert!(udp_payload(80).is_empty());

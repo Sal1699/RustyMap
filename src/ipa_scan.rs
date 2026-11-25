@@ -143,7 +143,9 @@ fn is_macho_magic(b: &[u8]) -> bool {
 }
 
 /// Parse the main Mach-O image's security flags. Fat/universal binaries are
-/// followed to their first architecture slice; iOS slices are little-endian.
+/// followed to their first architecture slice for the per-slice flags (PIE,
+/// encryption, code-signature), but the reported `arch` lists EVERY slice —
+/// e.g. "armv7+arm64" — rather than just the first (improvement B8).
 fn parse_macho(bytes: &[u8]) -> Option<MachOInfo> {
     if bytes.len() < 8 {
         return None;
@@ -152,7 +154,12 @@ fn parse_macho(bytes: &[u8]) -> Option<MachOInfo> {
         0xCAFE_BABE => {
             // 32-bit fat: fat_arch[0].offset is a big-endian u32 at byte 16.
             let off = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]) as usize;
-            bytes.get(off..).and_then(parse_thin_macho)
+            let mut info = bytes.get(off..).and_then(parse_thin_macho)?;
+            let arches = fat_arches(bytes, 20); // fat_arch = 20 bytes
+            if !arches.is_empty() {
+                info.arch = arches.join("+");
+            }
+            Some(info)
         }
         0xCAFE_BABF => {
             // 64-bit fat: fat_arch_64[0].offset is a big-endian u64 at byte 16.
@@ -161,10 +168,47 @@ fn parse_macho(bytes: &[u8]) -> Option<MachOInfo> {
             }
             let mut o = [0u8; 8];
             o.copy_from_slice(&bytes[16..24]);
-            bytes.get(u64::from_be_bytes(o) as usize..).and_then(parse_thin_macho)
+            let mut info = bytes.get(u64::from_be_bytes(o) as usize..).and_then(parse_thin_macho)?;
+            let arches = fat_arches(bytes, 32); // fat_arch_64 = 32 bytes
+            if !arches.is_empty() {
+                info.arch = arches.join("+");
+            }
+            Some(info)
         }
         _ => parse_thin_macho(bytes),
     }
+}
+
+/// Map a Mach-O `cputype` to a short arch name.
+fn cputype_arch(cputype: u32) -> &'static str {
+    match cputype {
+        0x0100_000C => "arm64",
+        0x0000_000C => "armv7",
+        0x0100_0007 => "x86_64",
+        0x0000_0007 => "x86",
+        _ => "unknown",
+    }
+}
+
+/// Collect the arch of every slice in a FAT/universal header (B8). `entry_size`
+/// is 20 for `fat_arch`, 32 for `fat_arch_64`; each entry begins with its
+/// big-endian `cputype`, and `nfat_arch` is a big-endian u32 at byte 4. Capped
+/// at 16 slices so a crafted count can't spin the loop.
+fn fat_arches(bytes: &[u8], entry_size: usize) -> Vec<&'static str> {
+    let nfat = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize;
+    let mut out: Vec<&'static str> = Vec::new();
+    for i in 0..nfat.min(16) {
+        let base = 8 + i * entry_size;
+        if base + 4 > bytes.len() {
+            break;
+        }
+        let ct = u32::from_be_bytes([bytes[base], bytes[base + 1], bytes[base + 2], bytes[base + 3]]);
+        let a = cputype_arch(ct);
+        if !out.contains(&a) {
+            out.push(a);
+        }
+    }
+    out
 }
 
 fn parse_thin_macho(b: &[u8]) -> Option<MachOInfo> {
@@ -181,14 +225,7 @@ fn parse_thin_macho(b: &[u8]) -> Option<MachOInfo> {
     // mach_header layout: … ncmds@16, sizeofcmds@20, flags@24 (then reserved@28
     // for 64-bit). flags carries MH_PIE.
     let flags = u32::from_le_bytes([b[24], b[25], b[26], b[27]]);
-    let arch = match cputype {
-        0x0100_000C => "arm64",
-        0x0000_000C => "armv7",
-        0x0100_0007 => "x86_64",
-        0x0000_0007 => "x86",
-        _ => "unknown",
-    }
-    .to_string();
+    let arch = cputype_arch(cputype).to_string();
     let mut info = MachOInfo {
         arch,
         pie: flags & 0x0020_0000 != 0, // MH_PIE
@@ -544,6 +581,45 @@ mod tests {
         h.extend_from_slice(&flags.to_le_bytes());
         h.extend_from_slice(&0u32.to_le_bytes()); // reserved (64-bit)
         h
+    }
+
+    fn macho_header_32(cputype: u32, flags: u32, ncmds: u32) -> Vec<u8> {
+        let mut h = Vec::new();
+        h.extend_from_slice(&0xFEED_FACEu32.to_le_bytes()); // MH_MAGIC (32-bit)
+        h.extend_from_slice(&cputype.to_le_bytes());
+        h.extend_from_slice(&0u32.to_le_bytes()); // cpusubtype
+        h.extend_from_slice(&2u32.to_le_bytes()); // filetype MH_EXECUTE
+        h.extend_from_slice(&ncmds.to_le_bytes());
+        h.extend_from_slice(&0u32.to_le_bytes()); // sizeofcmds
+        h.extend_from_slice(&flags.to_le_bytes());
+        h // 28 bytes — no reserved field on 32-bit
+    }
+
+    #[test]
+    fn parse_macho_fat_reports_all_slice_arches() {
+        // A FAT/universal binary wrapping armv7 + arm64 slices must report
+        // "armv7+arm64", not just the first slice's arch (improvement B8).
+        let slice_v7 = macho_header_32(0x0000_000C, 0x0020_0000, 0); // armv7 thin, PIE (slice 0)
+        let slice_a64 = macho_header_64(0x0100_000C, 0, 0); // arm64 thin, NOT PIE
+        let off0: u32 = 8 + 2 * 20; // after the FAT header + 2 fat_arch entries
+        let off1 = off0 + slice_v7.len() as u32;
+        let mut b = Vec::new();
+        b.extend_from_slice(&0xCAFE_BABEu32.to_be_bytes()); // 32-bit FAT magic
+        b.extend_from_slice(&2u32.to_be_bytes()); // nfat_arch
+        for (cputype, off, size) in
+            [(0x0000_000Cu32, off0, slice_v7.len() as u32), (0x0100_000C, off1, slice_a64.len() as u32)]
+        {
+            b.extend_from_slice(&cputype.to_be_bytes());
+            b.extend_from_slice(&0u32.to_be_bytes()); // cpusubtype
+            b.extend_from_slice(&off.to_be_bytes());
+            b.extend_from_slice(&size.to_be_bytes());
+            b.extend_from_slice(&0u32.to_be_bytes()); // align
+        }
+        b.extend_from_slice(&slice_v7);
+        b.extend_from_slice(&slice_a64);
+        let info = parse_macho(&b).expect("FAT parses");
+        assert_eq!(info.arch, "armv7+arm64");
+        assert!(info.pie, "per-slice flags come from the first slice");
     }
 
     #[test]
