@@ -186,6 +186,20 @@ pub async fn tcp_connect_scan(
         // No RTT yet (or a silent host) → full timeout, exactly as before.
         let rtt_ewma = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let rtt_samples = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        // Seed the EWMA from the discovery (ping) RTT so the very first probes
+        // already shrink instead of warming up cold across the whole first
+        // buffer_unordered batch (their own open/refused samples only land
+        // after every probe in that batch has been polled). Floor-bounded +
+        // retry-backed on use, so the seed can only shorten within the same
+        // safe limits as an in-scan sample. No discovery RTT (e.g. -Pn) → the
+        // EWMA stays cold and warms up exactly as before.
+        if let Some(d) = crate::rate::discovery_rtt() {
+            let us = d.as_micros().min(u64::MAX as u128) as u64;
+            if us != 0 {
+                rtt_ewma.store(us, Ordering::Relaxed);
+                rtt_samples.store(2, Ordering::Relaxed); // satisfies the >=2 gate
+            }
+        }
         let tfloor = crate::rate::timeout_floor(timeout_dur);
         stream::iter(ports.iter().copied())
             .map(|port| {

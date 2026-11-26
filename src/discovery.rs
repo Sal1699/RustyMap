@@ -1,7 +1,7 @@
 use crate::target::Target;
 use futures::stream::{self, StreamExt};
 use std::net::SocketAddr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
@@ -27,18 +27,38 @@ pub async fn tcp_ping(target: &Target, timeout_dur: Duration) -> bool {
     // answers in 1 ms is not held hostage by 9 filtered ports that will
     // only resolve at the full timeout. Bounds discovery latency per host
     // by the fastest reply rather than the slowest timeout.
-    stream::iter(PROBE_PORTS.iter().copied())
+    // The first probe to prove the host alive (open OR RST) also yields a real
+    // RTT sample. `.filter_map(..).next()` short-circuits on that fastest reply
+    // (completion order) and drops the still-pending probes, exactly as the old
+    // `.any()` did — but now we keep the winning RTT to seed the connect scan's
+    // adaptive per-probe timeout (rate::discovery_rtt), so its first
+    // buffer_unordered batch no longer warms up cold.
+    let hit = stream::iter(PROBE_PORTS.iter().copied())
         .map(|port| async move {
             let addr = SocketAddr::new(ip, port);
+            let t0 = Instant::now();
             match timeout(timeout_dur, TcpStream::connect(addr)).await {
-                Ok(Ok(_)) => true, // open
-                Ok(Err(e)) => matches!(e.kind(), std::io::ErrorKind::ConnectionRefused),
-                Err(_) => false,
+                Ok(Ok(_)) => Some(t0.elapsed()), // open
+                Ok(Err(e)) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused) => {
+                    Some(t0.elapsed()) // RST → alive
+                }
+                _ => None,
             }
         })
         .buffer_unordered(PROBE_PORTS.len())
-        .any(|up| async move { up })
+        .filter_map(|r| async move { r })
+        .take(1)
+        .collect::<Vec<_>>()
         .await
+        .into_iter()
+        .next();
+    match hit {
+        Some(rtt) => {
+            crate::rate::record_discovery_rtt(rtt);
+            true
+        }
+        None => false,
+    }
 }
 
 pub async fn discover_hosts(

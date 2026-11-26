@@ -70,6 +70,32 @@ pub fn timeout_floor(base: Duration) -> Duration {
     (base / 10).clamp(Duration::from_millis(50), Duration::from_millis(300))
 }
 
+/// Representative host RTT observed during the discovery (ping) phase, in
+/// microseconds (0 = unknown). The default connect scan seeds its per-probe
+/// adaptive timeout from this so the very first `buffer_unordered` batch
+/// already shrinks instead of warming up cold (its own open/refused probes
+/// only feed the EWMA *after* the whole first batch has been polled). It is
+/// only ever a seed: floored and clamped by `adaptive_timeout` on use and
+/// backed by the full-timeout retry, so a cross-host or stale value can only
+/// shorten a wait within the same safe bounds as an in-scan sample. Unset
+/// (`-Pn`, no discovery) → stays 0 → cold warm-up exactly as before.
+static DISCOVERY_RTT_US: AtomicU64 = AtomicU64::new(0);
+
+/// Record the RTT of the probe that proved a host up during discovery.
+/// Zero is ignored (the loopback shortcut has no measured RTT).
+pub fn record_discovery_rtt(rtt: Duration) {
+    let us = rtt.as_micros().min(u64::MAX as u128) as u64;
+    if us != 0 {
+        DISCOVERY_RTT_US.store(us, Ordering::Relaxed);
+    }
+}
+
+/// The discovery-phase RTT seed, if one was measured.
+pub fn discovery_rtt() -> Option<Duration> {
+    let us = DISCOVERY_RTT_US.load(Ordering::Relaxed);
+    (us != 0).then(|| Duration::from_micros(us))
+}
+
 impl AdaptiveLimiter {
     pub fn new(initial: usize, min_parallel: usize, max_parallel: usize, verbose: bool) -> Arc<Self> {
         let clamped = initial.clamp(min_parallel, max_parallel);
@@ -360,6 +386,24 @@ mod tests {
     fn adaptive_timeout_uses_base_without_samples() {
         let base = Duration::from_millis(1500);
         assert_eq!(adaptive_timeout(base, None, None, timeout_floor(base)), base);
+    }
+
+    #[test]
+    fn discovery_rtt_seed_roundtrips_and_ignores_zero() {
+        // A real sample sticks and comes back as the seed.
+        record_discovery_rtt(Duration::from_micros(1234));
+        assert_eq!(discovery_rtt(), Some(Duration::from_micros(1234)));
+        // Zero is ignored — it must not clobber the last real value
+        // (the loopback discovery shortcut has no measured RTT).
+        record_discovery_rtt(Duration::ZERO);
+        assert_eq!(discovery_rtt(), Some(Duration::from_micros(1234)));
+        // It feeds adaptive_timeout exactly like an in-scan sample would: a
+        // 1.234ms RTT floors to the 150ms floor, well under the 1500ms base.
+        let base = Duration::from_millis(1500);
+        assert_eq!(
+            adaptive_timeout(base, discovery_rtt(), None, timeout_floor(base)),
+            timeout_floor(base)
+        );
     }
 
     #[test]

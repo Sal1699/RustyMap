@@ -4,6 +4,38 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.111.4] - 2026-11-26
+
+**Speed — seed the connect scan's adaptive timeout from the discovery RTT.**
+Lever 2 of the "faster without `--fast-engine`" pass; completes v0.111.2.
+713 unit + 4 integration tests.
+
+### Changed
+- **The default `-sT` adaptive timeout (v0.111.2) now starts warm.** v0.111.2
+  shrank the first connect attempt toward the observed RTT, but its EWMA only
+  began to fill from the scan's own open/refused ports — and because
+  `buffer_unordered` polls the whole first batch (up to `parallel`, i.e. 500–
+  1000 ports) before any of them complete, that entire first batch still ran at
+  the cold full `--timeout`. The host-discovery (ping) phase already measures a
+  real RTT a moment earlier, so it now records it (`rate::record_discovery_rtt`,
+  set by `discovery::tcp_ping` from the fastest port that proved the host up)
+  and the connect scan seeds its EWMA from it (`rate::discovery_rtt`). The first
+  batch now shrinks immediately instead of warming up cold.
+
+### Note
+- Same safety envelope as v0.111.2: the seed only feeds the **first** attempt,
+  is floored by `rate::timeout_floor` (≥150 ms) and clamped by
+  `adaptive_timeout`, and retries stay at the full `--timeout` — so it can only
+  shorten a wait within the exact bounds an in-scan sample already could, never
+  into a new false-`filtered`. A LAN discovery RTT (µs–few ms) floors to 150 ms;
+  a slow-WAN RTT yields a correspondingly larger (safer) seed. No discovery
+  phase (`-Pn`) or a loopback target → no seed recorded → cold warm-up exactly
+  as before. Implemented as a process-global seed (one CLI run = one scan),
+  idiomatic here alongside `scanner::MAX_RETRIES` / `PROXY_CHAIN`; **zero
+  function-signature changes**. The real-host gain wants Kali validation (a
+  full-port `-sT` of an up-but-firewalled host, *without* `-Pn`), where it saves
+  the first batch's cold-start.
+
 ## [0.111.3] - 2026-11-25
 
 **Speed — parallelize `-sV` service detection across hosts.** Lever 3 of the
