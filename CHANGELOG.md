@@ -4,6 +4,38 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.113.0] - 2026-11-27
+
+**Rhai scripting SDK, round 2.** Ten new script primitives + a doc-sync fix,
+found by auditing the registered helper set against what the 607-script
+ecosystem actually needs. Pure additive engine-side surface — no scan path,
+classification or `-sV` behaviour changes. 720 unit (+1) + 4 integration tests.
+
+### Added — script helpers (`scripting.rs`, `build_engine`)
+- **`json_parse(s)` → map/array/scalar** and **`to_json(value)` → string**:
+  scripts could fetch a JSON body via `http_get`/`http_post` but had no way to
+  parse it — they regex-scraped the raw text. Now they walk the response as
+  native `#{...}` maps/arrays and build JSON request bodies from maps. Malformed
+  input yields unit (`()`), serialising failures yield `""`.
+- **`tcp_send_hex` / `udp_send_hex`(host, port, hex, timeout_ms) → hex reply**:
+  the UTF-8 `tcp_send`/`udp_send` corrupt binary protocols (lossy decode on the
+  reply, text-only payload). The hex-in/hex-out variants are the only faithful
+  way to script a binary probe. Bad hex or a dead peer returns `""`.
+- **`sha512`, `md4`, `crc32`(s) → hex** and **`hmac_sha1`(key, msg) → hex**:
+  round out the existing md5/sha1/sha256/hmac_sha256 set (md4 for NTLM-era
+  checks, hmac_sha1 for AWS SigV2 / TOTP / legacy webhooks, crc32 for
+  protocol/firmware checksums; IEEE 802.3, table-free, no new dependency).
+- **`dns_resolve(host)` → first IP string** (`""` on failure): `tcp_send`
+  already accepts hostnames, but CDN-origin / SPF-MX / rDNS-correlation scripts
+  need the resolved address itself.
+- **`rand_int(min, max)` → inclusive i64** (args auto-ordered): companion to
+  `rand_hex` for jitter and random selection inside probes.
+
+### Fixed — scripting API doc drift (`guide.rs`)
+The `--guide` "Script API" block had gone stale: it never listed the v0.111.0
+additions (`http_post`, `url_encode`/`url_decode`, `rand_hex`). Rebuilt the
+block to cover every registered helper, including this release's ten.
+
 ## [0.112.0] - 2026-11-27
 
 **Detection & output coverage pass.** Ten+ gaps found by auditing the probe

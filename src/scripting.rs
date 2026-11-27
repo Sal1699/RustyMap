@@ -806,6 +806,83 @@ fn trace_event(script: &str, host: &str, status: &str, detail: &str) {
     );
 }
 
+/// Recursively convert a parsed `serde_json::Value` into a Rhai `Dynamic`
+/// (objects → Map, arrays → Array, null → unit). Used by `json_parse` so
+/// scripts can walk an HTTP/JSON API response as native maps/arrays rather
+/// than hand-rolling string scraping on the raw body.
+fn json_to_dynamic(v: &serde_json::Value) -> Dynamic {
+    match v {
+        serde_json::Value::Null => Dynamic::UNIT,
+        serde_json::Value::Bool(b) => Dynamic::from(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Dynamic::from(i)
+            } else if let Some(f) = n.as_f64() {
+                Dynamic::from(f)
+            } else {
+                Dynamic::UNIT
+            }
+        }
+        serde_json::Value::String(s) => Dynamic::from(s.clone()),
+        serde_json::Value::Array(a) => {
+            let arr: Array = a.iter().map(json_to_dynamic).collect();
+            Dynamic::from(arr)
+        }
+        serde_json::Value::Object(o) => {
+            let mut m = Map::new();
+            for (k, val) in o {
+                m.insert(k.clone().into(), json_to_dynamic(val));
+            }
+            Dynamic::from(m)
+        }
+    }
+}
+
+/// Inverse of [`json_to_dynamic`]: serialise a Rhai value back to
+/// `serde_json::Value` so scripts can build a JSON request body from a
+/// native `#{...}` map and hand it to `http_post`.
+fn dynamic_to_json(d: &Dynamic) -> serde_json::Value {
+    if d.is_unit() {
+        serde_json::Value::Null
+    } else if d.is_bool() {
+        serde_json::Value::Bool(d.as_bool().unwrap_or(false))
+    } else if d.is_int() {
+        serde_json::Value::from(d.as_int().unwrap_or(0))
+    } else if d.is_float() {
+        serde_json::Number::from_f64(d.as_float().unwrap_or(0.0))
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null)
+    } else if d.is_string() {
+        serde_json::Value::String(d.clone().into_string().unwrap_or_default())
+    } else if d.is_array() {
+        let arr = d.clone().cast::<Array>();
+        serde_json::Value::Array(arr.iter().map(dynamic_to_json).collect())
+    } else if d.is_map() {
+        let m = d.clone().cast::<Map>();
+        let mut obj = serde_json::Map::new();
+        for (k, v) in m.iter() {
+            obj.insert(k.to_string(), dynamic_to_json(v));
+        }
+        serde_json::Value::Object(obj)
+    } else {
+        serde_json::Value::Null
+    }
+}
+
+/// IEEE-802.3 CRC-32 (zlib/PNG/Ethernet polynomial 0xEDB88320), table-free.
+/// Self-contained so the script helper carries no extra dependency surface.
+fn crc32_ieee(data: &[u8]) -> u32 {
+    let mut crc: u32 = 0xFFFF_FFFF;
+    for &byte in data {
+        crc ^= byte as u32;
+        for _ in 0..8 {
+            let mask = (crc & 1).wrapping_neg(); // 0xFFFFFFFF if LSB set, else 0
+            crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
+        }
+    }
+    !crc
+}
+
 /// Build a rhai Engine with our network/probe primitives registered.
 /// Used by both run_inline and run_scripts so file-based scripts get
 /// the same active-probe API as the built-ins.
@@ -1128,7 +1205,152 @@ fn build_engine() -> Engine {
         (0..n).map(|_| format!("{:02x}", rng.gen::<u8>())).collect()
     });
 
+    // --- SDK round 2 (v0.113.0) ---
+
+    // json_parse(s) -> map/array/scalar (unit on error). Lets a script walk an
+    // HTTP/JSON API response natively instead of regex-scraping the raw body.
+    engine.register_fn("json_parse", |s: &str| -> Dynamic {
+        match serde_json::from_str::<serde_json::Value>(s) {
+            Ok(v) => json_to_dynamic(&v),
+            Err(_) => Dynamic::UNIT,
+        }
+    });
+    // to_json(value) -> string ("" on error). Build a JSON body from a #{...}
+    // map and feed it to http_post; the inverse of json_parse.
+    engine.register_fn("to_json", |v: Dynamic| -> String {
+        serde_json::to_string(&dynamic_to_json(&v)).unwrap_or_default()
+    });
+
+    // Extra digests to round out md5/sha1/sha256/hmac_sha256.
+    engine.register_fn("sha512", |s: &str| -> String {
+        use sha2::Digest;
+        let mut h = sha2::Sha512::new();
+        h.update(s.as_bytes());
+        h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+    });
+    engine.register_fn("md4", |s: &str| -> String {
+        use md4::Digest;
+        let mut h = md4::Md4::new();
+        h.update(s.as_bytes());
+        h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+    });
+    // hmac_sha1 — legacy but still needed (AWS SigV2, TOTP/HOTP, old webhooks).
+    engine.register_fn("hmac_sha1", |key: &str, msg: &str| -> String {
+        use hmac::Mac;
+        let mut mac = match hmac::Hmac::<sha1::Sha1>::new_from_slice(key.as_bytes()) {
+            Ok(m) => m,
+            Err(_) => return String::new(),
+        };
+        mac.update(msg.as_bytes());
+        mac.finalize().into_bytes().iter().map(|b| format!("{:02x}", b)).collect()
+    });
+    // crc32(s) -> 8-char lowercase hex (IEEE). Protocol/firmware checksums.
+    engine.register_fn("crc32", |s: &str| -> String {
+        format!("{:08x}", crc32_ieee(s.as_bytes()))
+    });
+
+    // dns_resolve(host) -> first IP string ("" on failure). tcp_send already
+    // accepts hostnames, but scripts often need the resolved A/AAAA itself
+    // (CDN origin checks, SPF/MX pivots, rDNS correlation).
+    engine.register_fn("dns_resolve", |host: &str| -> String {
+        match (host, 0u16).to_socket_addrs() {
+            Ok(mut addrs) => addrs
+                .next()
+                .map(|a| a.ip().to_string())
+                .unwrap_or_default(),
+            Err(_) => String::new(),
+        }
+    });
+
+    // rand_int(min, max) -> inclusive i64 in range (args auto-ordered).
+    // Complements rand_hex for jitter / random selection inside probes.
+    engine.register_fn("rand_int", |min: i64, max: i64| -> i64 {
+        use rand::Rng;
+        let (lo, hi) = if min <= max { (min, max) } else { (max, min) };
+        rand::thread_rng().gen_range(lo..=hi)
+    });
+
+    // tcp_send_hex / udp_send_hex: hex in, hex out. The UTF-8 tcp_send/udp_send
+    // mangle binary protocols (lossy decode on reply, text-only payload), so a
+    // raw-bytes variant is the only way to script a binary probe faithfully.
+    engine.register_fn(
+        "tcp_send_hex",
+        |host: &str, port: i64, payload_hex: &str, timeout_ms: i64| -> String {
+            let payload = match hex_to_bytes(payload_hex) {
+                Some(p) => p,
+                None => return String::new(),
+            };
+            let timeout = Duration::from_millis(timeout_ms.clamp(50, 30_000) as u64);
+            let port = port.clamp(1, 65535) as u16;
+            let addr = match (host, port).to_socket_addrs().ok().and_then(|mut a| a.next()) {
+                Some(a) => a,
+                None => return String::new(),
+            };
+            let mut s = match std::net::TcpStream::connect_timeout(&addr, timeout) {
+                Ok(s) => s,
+                Err(_) => return String::new(),
+            };
+            let _ = s.set_read_timeout(Some(timeout));
+            let _ = s.set_write_timeout(Some(timeout));
+            if !payload.is_empty() && s.write_all(&payload).is_err() {
+                return String::new();
+            }
+            let mut buf = [0u8; 8192];
+            match s.read(&mut buf) {
+                Ok(n) => buf[..n].iter().map(|b| format!("{:02x}", b)).collect(),
+                Err(_) => String::new(),
+            }
+        },
+    );
+    engine.register_fn(
+        "udp_send_hex",
+        |host: &str, port: i64, payload_hex: &str, timeout_ms: i64| -> String {
+            let payload = match hex_to_bytes(payload_hex) {
+                Some(p) => p,
+                None => return String::new(),
+            };
+            let timeout = Duration::from_millis(timeout_ms.clamp(50, 30_000) as u64);
+            let port = port.clamp(1, 65535) as u16;
+            let addr = match (host, port).to_socket_addrs().ok().and_then(|mut a| a.next()) {
+                Some(a) => a,
+                None => return String::new(),
+            };
+            let sock = match std::net::UdpSocket::bind(if addr.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" }) {
+                Ok(s) => s,
+                Err(_) => return String::new(),
+            };
+            let _ = sock.set_read_timeout(Some(timeout));
+            let _ = sock.set_write_timeout(Some(timeout));
+            if sock.send_to(&payload, addr).is_err() {
+                return String::new();
+            }
+            let mut buf = [0u8; 8192];
+            match sock.recv_from(&mut buf) {
+                Ok((n, _)) => buf[..n].iter().map(|b| format!("{:02x}", b)).collect(),
+                Err(_) => String::new(),
+            }
+        },
+    );
+
     engine
+}
+
+/// Decode a lowercase/uppercase hex string into raw bytes; `None` on any
+/// non-hex char or odd length. Shared by `tcp_send_hex` / `udp_send_hex`.
+fn hex_to_bytes(s: &str) -> Option<Vec<u8>> {
+    let bytes = s.as_bytes();
+    if bytes.len() % 2 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        let hi = (bytes[i] as char).to_digit(16)?;
+        let lo = (bytes[i + 1] as char).to_digit(16)?;
+        out.push((hi * 16 + lo) as u8);
+        i += 2;
+    }
+    Some(out)
 }
 
 /// Run a list of (name, source) scripts against a host set.
@@ -1336,5 +1558,71 @@ mod tests {
         let rh: String = engine.eval(r#"rand_hex(8)"#).unwrap();
         assert_eq!(rh.len(), 16); // 8 bytes → 16 hex chars
         assert!(rh.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn sdk_round2_primitives_work() {
+        let engine = build_engine();
+
+        // Extra digests — standard test vectors.
+        let sh512: String = engine.eval(r#"sha512("abc")"#).unwrap();
+        assert_eq!(
+            sh512,
+            "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a\
+             2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+        );
+        let m4: String = engine.eval(r#"md4("abc")"#).unwrap();
+        assert_eq!(m4, "a448017aaf21d8525fc10ae87aa6729d");
+        let c32: String = engine.eval(r#"crc32("abc")"#).unwrap();
+        assert_eq!(c32, "352441c2");
+        // RFC-2202-style HMAC-SHA1 vector.
+        let hs1: String = engine
+            .eval(r#"hmac_sha1("key", "The quick brown fox jumps over the lazy dog")"#)
+            .unwrap();
+        assert_eq!(hs1, "de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9");
+
+        // json_parse → native map/array indexing.
+        let n: i64 = engine
+            .eval(r#"json_parse("{\"a\":[10,20,30]}")["a"][1]"#)
+            .unwrap();
+        assert_eq!(n, 20);
+        let b: bool = engine
+            .eval(r#"json_parse("{\"ok\":true}")["ok"]"#)
+            .unwrap();
+        assert!(b);
+        // Unit on malformed input (scripts can test with type_of / ==()).
+        let bad: String = engine.eval(r#"type_of(json_parse("{not json"))"#).unwrap();
+        assert_eq!(bad, "()");
+
+        // to_json round-trips (keys are sorted — both sides are BTreeMaps).
+        let j: String = engine.eval(r#"to_json(#{a: 1, b: "x"})"#).unwrap();
+        assert_eq!(j, r#"{"a":1,"b":"x"}"#);
+        let rt: i64 = engine
+            .eval(r#"json_parse(to_json(#{v: 7}))["v"]"#)
+            .unwrap();
+        assert_eq!(rt, 7);
+
+        // rand_int bounds (inclusive, args auto-ordered).
+        let fixed: i64 = engine.eval(r#"rand_int(5, 5)"#).unwrap();
+        assert_eq!(fixed, 5);
+        let within: bool = engine
+            .eval(r#"let r = rand_int(10, 1); r >= 1 && r <= 10"#)
+            .unwrap();
+        assert!(within);
+
+        // dns_resolve on a literal IP is deterministic & offline.
+        let ip: String = engine.eval(r#"dns_resolve("127.0.0.1")"#).unwrap();
+        assert_eq!(ip, "127.0.0.1");
+
+        // hex send helpers: bad hex → "", and a refused loopback port → ""
+        // (proves registration + hex framing + graceful failure, no panic).
+        let bad_hex: String = engine
+            .eval(r#"tcp_send_hex("127.0.0.1", 1, "zz", 200)"#)
+            .unwrap();
+        assert_eq!(bad_hex, "");
+        let refused: String = engine
+            .eval(r#"tcp_send_hex("127.0.0.1", 1, "41", 200)"#)
+            .unwrap();
+        assert_eq!(refused, "");
     }
 }
