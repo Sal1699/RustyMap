@@ -4,6 +4,36 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.111.5] - 2026-11-27
+
+**Speed — widen the connect pool for large *explicit* port ranges.** Closes
+most of the ~1.6× nmap wall-clock gap the v0.111.4 Kali validation measured on
+a firewalled full-range connect scan. 714 unit (+1) + 4 integration tests.
+
+### Changed
+- **A large explicit `-p` range now gets the same 2× connect pool that `-p-`
+  already used.** `parallel()` only widened the pool to `max_parallel × 2` for
+  `--all-ports` / `-p-`; a large *explicit* range such as `-p 1-1000` stayed at
+  the 500-wide default and paid an extra serial batch (998 filtered ports = two
+  500-wide batches, each bounded by the per-port retry budget — the measured
+  7.8 s vs nmap's 4.8 s). The bump now fires for **any explicitly-requested
+  range wider than the base pool**, halving the batch count on that workload.
+  (`cli.rs`.)
+
+### Note
+- This reuses the exact mechanism `-p-` has shipped with for many releases:
+  `max_parallel × 2`, then `fd_safe_cap()` clamps it under the live `ulimit`
+  (raising the soft limit toward the hard limit first), so **bug-09 (EMFILE →
+  every port mis-classified filtered) cannot return** — the ceiling is unchanged
+  (~960 on a default Kali `ulimit`), only the *trigger* is broadened. The
+  **implicit default top-1000 scan is deliberately untouched** (the bump needs
+  an explicit `-p` / `--all-ports`), so default scan aggressiveness is unchanged.
+  Classification is unaffected — this only changes how many ports are probed
+  concurrently, not how any port is classified. The wall-clock win wants Kali
+  confirmation (re-run the firewalled `-p 1-1000` / `-p-` case from the v0.111.4
+  report) — expectation is ~2× faster on that workload, landing around nmap
+  parity. `--fast-engine` untouched / opt-in.
+
 ## [0.111.4] - 2026-11-26
 
 **Speed — seed the connect scan's adaptive timeout from the discovery RTT.**

@@ -1509,18 +1509,35 @@ impl Cli {
             5 => self.max_parallel * 4,
             _ => self.max_parallel,
         };
-        // Bug-09 v0.66.3 → v0.66.7: --all-ports / -p- on a 65k port
-        // range used to be batch-bound by the default 500-wide pool.
-        // v0.66.3 auto-tripled to 1500 — but Linux's default ulimit
-        // is 1024 fds, so 1500 concurrent connect() syscalls hit
-        // EMFILE and the scanner classified every port as Filtered,
-        // returning zero open ports on hosts that actually had ten.
-        // Now: scale to 2× (1000) which still halves wall-clock vs
-        // the old default but stays under most default ulimits.
-        // Effective_parallel() additionally clamps to fd_safe_cap()
-        // so users with tighter ulimits don't hit the ceiling.
-        let timing_based = if (self.all_ports || self.ports.as_deref() == Some("-")) && self.timing >= 3 {
-            timing_based.max(self.max_parallel * 2)
+        // Bug-09 v0.66.3 → v0.66.7: a port range larger than the base pool
+        // used to be batch-bound by the default 500-wide pool. v0.66.3
+        // auto-tripled to 1500 — but Linux's default ulimit is 1024 fds, so
+        // 1500 concurrent connect() syscalls hit EMFILE and the scanner
+        // classified every port as Filtered, returning zero open ports on
+        // hosts that actually had ten. Now: scale to 2× (1000), which halves
+        // the batch count vs the base default but stays under most default
+        // ulimits; fd_safe_cap() below additionally clamps to the live ulimit
+        // so tighter limits can't hit the ceiling.
+        //
+        // v0.111.5: this bump used to fire only for --all-ports / -p-. A large
+        // *explicit* range (e.g. -p 1-1000) was left at the 500-wide pool and
+        // paid an extra serial batch — the reason a firewalled full-range
+        // connect scan ran ~1.6× nmap (998 filtered ports = two 500-wide
+        // batches, each bounded by the per-port retry budget). Any explicitly
+        // requested range wider than the base pool now gets the same 2× pool
+        // that -p- has used (and been Kali-validated at) for releases. The
+        // default top-1000 scan is deliberately untouched — the bump needs an
+        // explicit -p / --all-ports, so default aggressiveness is unchanged —
+        // and fd_safe_cap() still guarantees bug-09 can't return.
+        let timing_based = if (self.ports_explicit() || self.all_ports) && self.timing >= 3 {
+            let port_count = crate::ports::parse_ports(&self.effective_ports())
+                .map(|v| v.len())
+                .unwrap_or(0);
+            if port_count > self.max_parallel {
+                timing_based.max(self.max_parallel * 2)
+            } else {
+                timing_based
+            }
         } else {
             timing_based
         };
@@ -1567,4 +1584,41 @@ fn fd_safe_cap(want: usize) -> usize {
         }
     }
     want
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn cli(args: &[&str]) -> Cli {
+        let mut argv = vec!["rustymap"];
+        argv.extend_from_slice(args);
+        Cli::try_parse_from(&argv).unwrap()
+    }
+
+    // v0.111.5: the 2× parallel bump fires for ANY explicitly-requested range
+    // wider than the base pool (not just -p- / --all-ports), while the implicit
+    // default top-1000 scan is deliberately left at the base width. A tiny
+    // --max-parallel keeps the result well under any CI ulimit so fd_safe_cap
+    // is a passthrough and the assertions are environment-independent.
+    #[test]
+    fn parallel_bumps_only_for_explicit_large_ranges() {
+        // Implicit default scan (no -p): not bumped — default aggressiveness
+        // is unchanged.
+        assert_eq!(
+            cli(&["--timing", "3", "--max-parallel", "100", "1.2.3.4"]).parallel(),
+            100
+        );
+        // Explicit range that fits in one base batch: not bumped.
+        assert_eq!(
+            cli(&["--timing", "3", "--max-parallel", "100", "-p", "1-50", "1.2.3.4"]).parallel(),
+            100
+        );
+        // Explicit range wider than the base pool: 2× bump.
+        assert_eq!(
+            cli(&["--timing", "3", "--max-parallel", "100", "-p", "1-1000", "1.2.3.4"]).parallel(),
+            200
+        );
+    }
 }
