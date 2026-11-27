@@ -104,6 +104,43 @@ pub fn service_name(port: u16) -> Option<&'static str> {
         9200 | 9300 => Some("elasticsearch"),
         11211 => Some("memcached"),
         27017 | 27018 => Some("mongodb"),
+        // ── v0.112.0: fill common well-known ports that previously showed
+        //    "unknown" in the SERVICE column (no -sV needed) ──
+        88 => Some("kerberos"),
+        102 => Some("iso-tsap"),      // Siemens S7 (ICS)
+        500 => Some("isakmp"),
+        502 => Some("modbus"),        // ICS
+        548 => Some("afp"),
+        554 => Some("rtsp"),
+        623 => Some("asf-rmcp"),      // IPMI/BMC
+        873 => Some("rsync"),
+        902 | 912 => Some("vmware-auth"),
+        1194 => Some("openvpn"),
+        1434 => Some("ms-sql-m"),
+        1883 => Some("mqtt"),
+        1900 => Some("upnp"),         // SSDP
+        2181 => Some("zookeeper"),
+        2379 | 2380 => Some("etcd"),
+        2404 => Some("iec-104"),      // ICS
+        3268 | 3269 => Some("globalcat"),
+        4786 => Some("cisco-smi"),    // Smart Install (RCE-prone)
+        5353 => Some("mdns"),
+        5355 => Some("llmnr"),
+        5555 => Some("adb"),          // Android Debug Bridge
+        5672 => Some("amqp"),
+        5984 => Some("couchdb"),
+        6000..=6009 => Some("x11"),
+        8086 => Some("influxdb"),
+        8291 => Some("winbox"),       // MikroTik RouterOS
+        8883 => Some("secure-mqtt"),
+        9042 => Some("cassandra"),
+        9092 => Some("kafka"),
+        9100 => Some("jetdirect"),
+        10250 => Some("kubelet"),
+        15672 => Some("rabbitmq-mgmt"),
+        20000 => Some("dnp3"),        // ICS
+        44818 => Some("ethernet-ip"), // ICS
+        47808 => Some("bacnet"),
         _ => None,
     }
 }
@@ -175,5 +212,18 @@ mod tests {
     #[test]
     fn service_name_unknown() {
         assert_eq!(service_name(12345), None);
+    }
+
+    #[test]
+    fn service_name_v0_112_additions() {
+        // Ports that used to show "unknown" now carry their well-known label.
+        assert_eq!(service_name(902), Some("vmware-auth"));
+        assert_eq!(service_name(912), Some("vmware-auth"));
+        assert_eq!(service_name(88), Some("kerberos"));
+        assert_eq!(service_name(502), Some("modbus"));
+        assert_eq!(service_name(44818), Some("ethernet-ip"));
+        assert_eq!(service_name(8291), Some("winbox"));
+        assert_eq!(service_name(6000), Some("x11"));
+        assert_eq!(service_name(6009), Some("x11"));
     }
 }

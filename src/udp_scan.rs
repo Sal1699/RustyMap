@@ -269,6 +269,39 @@ fn udp_payload(port: u16) -> &'static [u8] {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x04, b'w', b'p', b'a', b'd', 0x00, 0x00, 0x01, 0x00, 0x01,
         ],
+        // ── added v0.112.0: more well-known UDP services that only answer a
+        //    well-formed datagram (otherwise stuck at open|filtered) ──
+        // XDMCP Query (version 1, opcode 2 Query, 0 authentication names). An
+        // X display manager answers with a Willing/Unwilling message.
+        177 => &[0x00, 0x01, 0x00, 0x02, 0x00, 0x01, 0x00],
+        // RIPv1 request for the full routing table (command=1, version=1, one
+        // RTE with AFI=0 and metric=16 = "send everything"). A RIP router replies.
+        520 => &[
+            0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
+        ],
+        // echo (RFC 862) — the server echoes whatever we send straight back.
+        7 => b"\r\n",
+        // chargen (RFC 864) — any datagram triggers a character-stream reply.
+        19 => b"\r\n",
+        // NFS RPC NULL call (program 100003 v3, procedure 0) — an NFS server on
+        // UDP 2049 answers the no-op even without a portmap lookup.
+        2049 => &[
+            0x72, 0xfe, 0x1d, 0x14, // xid
+            0x00, 0x00, 0x00, 0x00, // msg_type = CALL
+            0x00, 0x00, 0x00, 0x02, // rpc version 2
+            0x00, 0x01, 0x86, 0xa3, // program 100003 (NFS)
+            0x00, 0x00, 0x00, 0x03, // program version 3
+            0x00, 0x00, 0x00, 0x00, // procedure 0 (NULL)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // cred: AUTH_NULL, len 0
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // verf: AUTH_NULL, len 0
+        ],
+        // BACnet/IP ReadProperty of the device object's object-identifier
+        // (nmap's bacnet probe). A BACnet device replies with its ID.
+        47808 => &[
+            0x81, 0x0a, 0x00, 0x11, 0x01, 0x04, 0x00, 0x05, 0x01, 0x0c, 0x0c, 0x02,
+            0x3f, 0xff, 0xff, 0x19, 0x4b,
+        ],
         _ => &[],
     }
 }
@@ -384,6 +417,15 @@ mod tests {
         assert_eq!(&udp_payload(3478)[4..8], &[0x21, 0x12, 0xa4, 0x42]); // STUN magic cookie
         assert_eq!(udp_payload(5351), &[0x00, 0x00]); // NAT-PMP
         assert!(udp_payload(5683).starts_with(&[0x40, 0x01])); // CoAP CON GET
+        // v0.112.0: XDMCP Query, RIPv1 request, echo/chargen, NFS RPC NULL, BACnet.
+        assert_eq!(udp_payload(177), &[0x00, 0x01, 0x00, 0x02, 0x00, 0x01, 0x00]); // XDMCP
+        assert_eq!(&udp_payload(520)[..2], &[0x01, 0x01]); // RIP command=request, v1
+        assert_eq!(*udp_payload(520).last().unwrap(), 0x10); // metric = 16 (full table)
+        assert!(!udp_payload(7).is_empty()); // echo
+        assert!(!udp_payload(19).is_empty()); // chargen
+        assert_eq!(&udp_payload(2049)[12..16], &[0x00, 0x01, 0x86, 0xa3]); // NFS program 100003
+        assert_eq!(&udp_payload(2049)[16..20], &[0x00, 0x00, 0x00, 0x03]); // NFS version 3
+        assert_eq!(&udp_payload(47808)[..2], &[0x81, 0x0a]); // BACnet BVLC
         // Unknown ports get no payload (empty datagram; ICMP-only classification).
         assert!(udp_payload(9999).is_empty());
         assert!(udp_payload(80).is_empty());

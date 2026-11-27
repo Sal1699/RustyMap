@@ -170,6 +170,19 @@ pub fn describe(port: u16) -> Option<Desc> {
         20000 => ("DNP3 (ICS/SCADA) — must be isolated", High),
         47808 => ("BACnet (building automation)", Warn),
 
+        // ── v0.112.0: ports that category() already buckets but describe()
+        //    had no NOTE for, plus high-value pentest/IoT services ──
+        44818 => ("EtherNet/IP (ICS) — PLC/industrial; must be isolated", High),
+        2404 => ("IEC 60870-5-104 (ICS) — SCADA telecontrol; must be isolated", High),
+        5555 => ("ADB (Android Debug Bridge) — unauth device shell / RCE", High),
+        62078 => ("iOS lockdownd — iPhone pairing/sync service", Info),
+        4786 => ("Cisco Smart Install — unauth config theft / RCE (SMI)", High),
+        8291 => ("MikroTik Winbox — RouterOS mgmt; CVE-2018-14847 cred leak", High),
+        8086 => ("InfluxDB — time-series DB/API; check auth", High),
+        1434 => ("MSSQL Monitor (UDP) — SQL Server browser; instance enumeration", Warn),
+        1900 => ("SSDP/UPnP — device discovery; amplification + info exposure", Warn),
+        5353 => ("mDNS — multicast DNS; host/service enumeration leak", Info),
+
         _ => return None,
     };
     Some(Desc { text, risk })
@@ -218,5 +231,17 @@ mod tests {
     fn glyphs_distinct() {
         assert_ne!(Risk::Info.glyph(), Risk::Warn.glyph());
         assert_ne!(Risk::Warn.glyph(), Risk::High.glyph());
+    }
+
+    #[test]
+    fn v0_112_fills_categorized_but_undescribed() {
+        // Ports category() already buckets (ics/ot, mobile-device) now also
+        // carry a describe() NOTE instead of showing a blank risk column.
+        for p in [44818u16, 2404, 5555, 62078] {
+            assert!(describe(p).is_some(), "port {p} categorized but has no describe()");
+        }
+        // New high-value pentest ports are flagged High.
+        assert_eq!(describe(4786).unwrap().risk, Risk::High); // Cisco Smart Install
+        assert_eq!(describe(8291).unwrap().risk, Risk::High); // MikroTik Winbox
     }
 }

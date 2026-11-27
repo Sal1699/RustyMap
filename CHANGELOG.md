@@ -4,6 +4,59 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.112.0] - 2026-11-27
+
+**Detection & output coverage pass.** Ten+ gaps found by auditing the probe
+and port-metadata tables after the clean v0.111.4 validation, each verified as
+a real gap (not already covered) before touching it. 722 unit (+4) + 4
+integration tests. No CLI flags changed (guide.rs untouched).
+
+### Added — UDP probe coverage (`udp_scan.rs`)
+Six well-known services that only answer a well-formed datagram were stuck at
+`open|filtered`; they now get a nmap-correct payload so a reply proves them
+`open`:
+- **177 XDMCP** (Query), **520 RIP** (v1 full-table request), **7 echo**,
+  **19 chargen**, **2049 NFS** (RPC NULL to program 100003 v3), **47808
+  BACnet/IP** (ReadProperty of the device object). A wrong payload can only
+  fail to elicit a reply — it can never produce a false `open` — so these are
+  strictly additive.
+
+### Added — SERVICE-column names (`ports.rs::service_name`)
+~25 common ports that printed `unknown` now carry their label without needing
+`-sV`: **902/912** vmware-auth (the exact gap the v0.111.x smoke tests showed),
+**88** kerberos, **500** isakmp, **502** modbus, **548** afp, **554** rtsp,
+**623** asf-rmcp, **873** rsync, **1194** openvpn, **1434** ms-sql-m, **1883**
+mqtt, **1900** upnp, **2181** zookeeper, **2379/2380** etcd, **2404** iec-104,
+**3268/3269** globalcat, **4786** cisco-smi, **5353** mdns, **5355** llmnr,
+**5555** adb, **5672** amqp, **5984** couchdb, **6000-6009** x11, **8086**
+influxdb, **8291** winbox, **8883** secure-mqtt, **9042** cassandra, **9092**
+kafka, **9100** jetdirect, **10250** kubelet, **15672** rabbitmq-mgmt, **20000**
+dnp3, **44818** ethernet-ip, **47808** bacnet.
+
+### Added — exposure NOTEs (`portdesc.rs`)
+- **Fixed a `category()`/`describe()` inconsistency**: 44818 (EtherNet/IP),
+  2404 (IEC-104), 5555 (ADB) and 62078 (iOS lockdownd) were bucketed by
+  `category()` but had no risk NOTE — they now describe.
+- Added high-value pentest/IoT ports: **4786** Cisco Smart Install, **8291**
+  MikroTik Winbox (both `High`), **8086** InfluxDB, **1434** MSSQL-UDP, **1900**
+  SSDP/UPnP, **5353** mDNS. A consistency test guards the category↔describe gap.
+
+### Fixed — executive-summary exposure under-reporting (`exec_summary.rs`)
+- The scan-wide "sensitive exposure(s)" footer was driven by its own 26-entry
+  `SENSITIVE_PORTS` table, **divergent from `portdesc`'s ~30 Warn/High
+  services** — so a scan finding FTP(21), SNMP(161), TFTP(69), IPMI(623), an
+  ICS port, X11 or Kubelet showed the per-row `‼`/`⚠` NOTE but the exposure
+  **never reached the summary footer**. The footer now falls back to
+  `portdesc`'s rating when a port isn't in the curated table, keeping the two
+  **automatically in sync** (no parallel list to drift). Curated labels still
+  win for the ports that have them; benign services (HTTP/HTTPS/SSH) stay out.
+
+### Note
+- All changes are additive coverage or a footer-completeness fix; port
+  classification (open/closed/filtered) and `-sV` identification are unchanged.
+  The UDP additions want a Kali run against real responders to confirm the live
+  replies, but cannot regress existing results. `--fast-engine` untouched.
+
 ## [0.111.5] - 2026-11-27
 
 **Speed — widen the connect pool for large *explicit* port ranges.** Closes

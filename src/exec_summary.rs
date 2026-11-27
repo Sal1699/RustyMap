@@ -63,6 +63,30 @@ const SENSITIVE_PORTS: &[(u16, &str, u8)] = &[
     (27017, "MongoDB", 2),
 ];
 
+/// Label for the scan-wide "sensitive exposure" footer, or `None` when the
+/// port isn't a notable exposure.
+///
+/// A curated `SENSITIVE_PORTS` label wins; otherwise we fall back to
+/// `portdesc`'s Warn/High rating. Without the fallback this footer silently
+/// under-reported exposures the per-row NOTE already flagged — `portdesc`
+/// rates ~30 Warn/High services but this table only listed 26, so FTP(21),
+/// SNMP(161), TFTP(69), IPMI(623), the ICS ports, X11, Kubelet, etc. never
+/// reached the executive summary. Driving the fallback from `portdesc` keeps
+/// the two in sync automatically, with no parallel list to drift.
+fn sensitive_exposure(port: u16) -> Option<String> {
+    if let Some((_, label, sev)) = SENSITIVE_PORTS.iter().find(|(pp, _, _)| *pp == port) {
+        return (*sev >= 1).then(|| (*label).to_string());
+    }
+    match crate::portdesc::describe(port).map(|d| d.risk) {
+        Some(crate::portdesc::Risk::High) | Some(crate::portdesc::Risk::Warn) => Some(
+            crate::ports::service_name(port)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("port {port}")),
+        ),
+        _ => None,
+    }
+}
+
 pub fn build(hosts: &[HostResult], elapsed_secs: f64) -> ExecutiveSummary {
     let hosts_total = hosts.len();
     let hosts_up = hosts.iter().filter(|h| h.up).count();
@@ -86,15 +110,8 @@ pub fn build(hosts: &[HostResult], elapsed_secs: f64) -> ExecutiveSummary {
                     .unwrap_or_else(|| port_label(p.port));
                 *svc_counts.entry(svc_label).or_insert(0) += 1;
 
-                if let Some((_, label, sev)) = SENSITIVE_PORTS.iter().find(|(pp, _, _)| *pp == p.port) {
-                    if *sev >= 1 {
-                        sensitive.push(format!(
-                            "{} on {}:{}",
-                            label,
-                            h.target.ip,
-                            p.port
-                        ));
-                    }
+                if let Some(label) = sensitive_exposure(p.port) {
+                    sensitive.push(format!("{} on {}:{}", label, h.target.ip, p.port));
                 }
             }
         }
@@ -269,6 +286,31 @@ mod tests {
         assert!(s.sensitive_exposures.iter().any(|e| e.contains("RDP")));
         assert!(s.sensitive_exposures.iter().any(|e| e.contains("Redis")));
         assert!(!s.sensitive_exposures.iter().any(|e| e.contains("SSH on")));
+    }
+
+    #[test]
+    fn sensitive_exposure_falls_back_to_portdesc() {
+        // A curated SENSITIVE_PORTS label still wins.
+        assert_eq!(sensitive_exposure(3306).as_deref(), Some("MySQL"));
+        // Services portdesc rates High/Warn but SENSITIVE_PORTS never listed
+        // are now flagged (previously silently missing from the summary).
+        assert!(sensitive_exposure(21).is_some()); // FTP
+        assert!(sensitive_exposure(161).is_some()); // SNMP
+        assert!(sensitive_exposure(623).is_some()); // IPMI
+        assert!(sensitive_exposure(502).is_some()); // Modbus (ICS)
+        // Benign web / SSH stay out of the footer.
+        assert!(sensitive_exposure(80).is_none());
+        assert!(sensitive_exposure(443).is_none());
+        assert!(sensitive_exposure(22).is_none());
+    }
+
+    #[test]
+    fn footer_flags_ftp_and_snmp_via_fallback() {
+        let s = build(&[host_with(&[21, 161, 80], true)], 1.0);
+        assert!(s.sensitive_exposures.iter().any(|e| e.contains("ftp")));
+        assert!(s.sensitive_exposures.iter().any(|e| e.contains("snmp")));
+        // HTTP is not a sensitive exposure.
+        assert!(!s.sensitive_exposures.iter().any(|e| e.contains(":80")));
     }
 
     #[test]
