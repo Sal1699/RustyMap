@@ -4,6 +4,45 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.114.0] - 2026-11-27
+
+**Application-CPE emission.** RustyMap already generated an OS CPE
+(`cpe:2.3:o:…`) and `cpe_match.rs` already matched application CPEs
+(`cpe:2.3:a:…`) against NVD data — but nothing *produced* a service CPE from a
+detected product, so application-level CVE correlation had no input. This adds
+the missing generator and wires it into the three outputs. No scan-path,
+classification, or `-sV` detection change; output is additive. 723 unit (+4)
++ 4 integration tests.
+
+### Added — `cpe::from_service(product, version)` (`cpe.rs`)
+Service-level counterpart to `from_family`: maps a detected product string to
+its canonical NVD/nmap `vendor:product` and emits `cpe:2.3:a:…`. A curated,
+order-sensitive table covers ~35 common products (Apache httpd/Tomcat/
+CouchDB/Cassandra/Kafka/ZooKeeper, nginx, OpenResty, IIS, lighttpd, Caddy,
+Traefik, MySQL→oracle, MariaDB, PostgreSQL, MS SQL Server, Redis, MongoDB,
+memcached, Elasticsearch/Kibana→elastic, Jetty→eclipse, Jenkins, GitLab,
+Gitea, Grafana + Loki/Tempo/Mimir, Prometheus, InfluxDB→influxdata, HashiCorp
+Vault/Consul/Nomad, Neo4j, Jellyfin, Kubernetes, Docker, OpenSSH→openbsd).
+Specific names win over generic substrings they contain (Redpanda before
+`kafka`, Grafana Loki/Tempo/Mimir before `grafana`, OpenResty before `nginx`).
+Unrecognised products get `a:*:<product>:*` (vendor = any) — still a valid,
+matchable CPE, never a dropped result.
+- New `Cpe::uri_binding()` → the nmap `cpe:/<part>:<vendor>:<product>[:ver]`
+  URI form used inside XML `<cpe>` elements (version omitted when unknown).
+
+### Added — CPE in output (opt-in / nmap-compatible)
+- **`--cpe-out` console**: after the OS CPE, prints one application CPE per
+  open port that carried a detected product (`CPE (tcp/<port>): …`).
+- **XML (`--oX`)**: emits `<cpe>cpe:/a:…</cpe>` as a child of `<service>` when
+  a product was detected (what nmap writes; read by zenmap / `db_import`).
+  Ports with no detected product keep the previous self-closed `<service/>`.
+- **JSON (`--oJ`/`-oJ`)**: new optional `cpe` field on a port object (the 2.3
+  string), present only when a product was detected — backward compatible.
+
+### Changed
+- `guide.rs`: `--cpe-out` description now notes the per-service CPE (console +
+  XML + JSON).
+
 ## [0.113.0] - 2026-11-27
 
 **Rhai scripting SDK, round 2.** Ten new script primitives + a doc-sync fix,

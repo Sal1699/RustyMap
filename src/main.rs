@@ -2971,11 +2971,22 @@ async fn run(mut args: Cli) -> Result<()> {
                 os_fp_multi::print_candidates(&h.target.display(), &list);
             }
         }
-        // Optional: CPE 2.3 string for the OS guess.
+        // Optional: CPE 2.3 strings — the OS guess plus an application CPE
+        // for every open port that carried a detected service product.
         if args.cpe_out {
             if let Some(g) = &h.os {
                 let c = cpe::from_family(&g.family, None);
                 println!("  CPE: {}", c.raw);
+            }
+            for p in &h.ports {
+                if p.state != PortState::Open {
+                    continue;
+                }
+                if let Some(prod) = p.service.as_ref().and_then(|s| s.product.as_deref()) {
+                    let version = p.service.as_ref().and_then(|s| s.version.as_deref());
+                    let c = cpe::from_service(prod, version);
+                    println!("  CPE (tcp/{}): {}", p.port, c.raw);
+                }
             }
         }
     }

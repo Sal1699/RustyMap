@@ -142,7 +142,23 @@ pub fn write_xml_styled(
                     svc_attrs.push_str(&format!(" extrainfo=\"{}\"", escape(banner)));
                 }
             }
-            writeln!(out, "        <service {} method=\"probed\"/>", svc_attrs)?;
+            // nmap emits the application CPE as a <cpe> child of <service>
+            // (zenmap / `db_import` read it). Only when a product was detected.
+            let app_cpe = p.service.as_ref().and_then(|svc| {
+                svc.product.as_deref().map(|prod| {
+                    crate::cpe::from_service(prod, svc.version.as_deref()).uri_binding()
+                })
+            });
+            match app_cpe {
+                Some(uri) => {
+                    writeln!(out, "        <service {} method=\"probed\">", svc_attrs)?;
+                    writeln!(out, "          <cpe>{}</cpe>", escape(&uri))?;
+                    writeln!(out, "        </service>")?;
+                }
+                None => {
+                    writeln!(out, "        <service {} method=\"probed\"/>", svc_attrs)?;
+                }
+            }
             writeln!(out, "      </port>")?;
         }
         writeln!(out, "    </ports>")?;

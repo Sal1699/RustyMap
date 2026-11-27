@@ -111,6 +111,104 @@ fn windows_product(family_lower: &str) -> String {
     }
 }
 
+impl Cpe {
+    /// nmap-style URI binding — `cpe:/<part>:<vendor>:<product>[:<version>]`.
+    /// This is the form nmap writes inside the `<cpe>` elements of its XML
+    /// output (zenmap / Metasploit `db_import` read this binding), as opposed
+    /// to the 2.3 formatted-string in [`Cpe::raw`]. The trailing version is
+    /// omitted when unknown (`*`) so the URI stays well-formed.
+    pub fn uri_binding(&self) -> String {
+        let mut s = format!("cpe:/{}:{}:{}", self.part, self.vendor, self.product);
+        if self.version != "*" {
+            s.push(':');
+            s.push_str(&self.version);
+        }
+        s
+    }
+}
+
+/// Produce an **application** CPE 2.3 string (`part = a`) from a detected
+/// service product name (as emitted by `src/service_probe.rs`) plus an
+/// optional version. This is the service-level counterpart to
+/// [`from_family`]: it lets a scan feed `src/cpe_match.rs` / `src/nvd.rs`
+/// application-level CVE lookups for the software on each open port, not just
+/// the host OS. A recognised product maps to its canonical NVD/nmap
+/// `vendor:product`; anything unrecognised gets `a:*:<product>:*` (vendor =
+/// any), which is still a valid, matchable CPE rather than a dropped result.
+pub fn from_service(product: &str, version: Option<&str>) -> Cpe {
+    let lower = product.to_lowercase();
+    let (vendor, product_cpe) = service_vendor_product(&lower);
+    let ver = version
+        .map(normalize_field)
+        .unwrap_or_else(|| "*".to_string());
+    let raw = format!("cpe:2.3:a:{}:{}:{}:*:*:*:*:*:*:*", vendor, product_cpe, ver);
+    Cpe {
+        part: "a".into(),
+        vendor: vendor.into(),
+        product: product_cpe,
+        version: ver,
+        raw,
+    }
+}
+
+/// Map a lower-cased service product string to a canonical CPE
+/// `(vendor, product)`. Ordered so a more specific product name wins over a
+/// generic substring it contains (Redpanda before "kafka"; Grafana
+/// Loki/Tempo/Mimir before "grafana"; OpenResty before "nginx"). The chosen
+/// vendor/product follow the dominant NVD / nmap-service-probes spelling for
+/// each so the emitted CPE actually matches public CVE data.
+fn service_vendor_product(p: &str) -> (&'static str, String) {
+    const MAP: &[(&str, &str, &str)] = &[
+        // (distinctive substring, vendor, product)
+        ("tomcat", "apache", "tomcat"),
+        ("openresty", "openresty", "openresty"),
+        ("httpd", "apache", "http_server"),
+        ("nginx", "nginx", "nginx"),
+        ("lighttpd", "lighttpd", "lighttpd"),
+        ("iis", "microsoft", "iis"),
+        ("caddy", "caddyserver", "caddy"),
+        ("traefik", "traefik", "traefik"),
+        ("mariadb", "mariadb", "mariadb"),
+        ("mysql", "oracle", "mysql"),
+        ("postgresql", "postgresql", "postgresql"),
+        ("sql server", "microsoft", "sql_server"),
+        ("redis", "redis", "redis"),
+        ("mongodb", "mongodb", "mongodb"),
+        ("memcached", "memcached", "memcached"),
+        ("elasticsearch", "elastic", "elasticsearch"),
+        ("kibana", "elastic", "kibana"),
+        ("jetty", "eclipse", "jetty"),
+        ("couchdb", "apache", "couchdb"),
+        ("cassandra", "apache", "cassandra"),
+        ("redpanda", "redpanda", "redpanda"), // before "kafka" (Kafka-compatible)
+        ("kafka", "apache", "kafka"),
+        ("zookeeper", "apache", "zookeeper"),
+        ("jenkins", "jenkins", "jenkins"),
+        ("gitlab", "gitlab", "gitlab"),
+        ("gitea", "gitea", "gitea"),
+        ("loki", "grafana", "loki"),   // before "grafana"
+        ("tempo", "grafana", "tempo"), // before "grafana"
+        ("mimir", "grafana", "mimir"), // before "grafana"
+        ("grafana", "grafana", "grafana"),
+        ("prometheus", "prometheus", "prometheus"),
+        ("influxdb", "influxdata", "influxdb"),
+        ("vault", "hashicorp", "vault"),
+        ("consul", "hashicorp", "consul"),
+        ("nomad", "hashicorp", "nomad"),
+        ("neo4j", "neo4j", "neo4j"),
+        ("jellyfin", "jellyfin", "jellyfin"),
+        ("kubernetes", "kubernetes", "kubernetes"),
+        ("docker", "docker", "docker"),
+        ("openssh", "openbsd", "openssh"),
+    ];
+    for (needle, vendor, product) in MAP {
+        if p.contains(needle) {
+            return (vendor, (*product).to_string());
+        }
+    }
+    ("*", normalize_field(p))
+}
+
 /// Lower-case, replace `:` / space / tab with `_`, strip leading/
 /// trailing whitespace. Per CPE 2.3 §6.2 the colon character is
 /// reserved as field separator, so any value with `:` would corrupt
@@ -189,5 +287,51 @@ mod tests {
         assert_eq!(normalize_field("RHEL 8.4"), "rhel_8.4");
         assert_eq!(normalize_field("X:Y"), "x_y");
         assert_eq!(normalize_field("  spaces  "), "spaces");
+    }
+
+    #[test]
+    fn service_cpe_maps_common_products() {
+        // part is always `a`, vendor/product follow NVD canonical spelling.
+        let a = from_service("Apache httpd", Some("2.4.59"));
+        assert_eq!(a.part, "a");
+        assert_eq!(a.raw, "cpe:2.3:a:apache:http_server:2.4.59:*:*:*:*:*:*:*");
+        assert_eq!(from_service("nginx", None).vendor, "nginx");
+        assert_eq!(from_service("MySQL", None).vendor, "oracle");
+        assert_eq!(from_service("MariaDB", None).vendor, "mariadb");
+        assert_eq!(from_service("Elasticsearch", None).product, "elasticsearch");
+        assert_eq!(from_service("Microsoft SQL Server", None).product, "sql_server");
+        assert_eq!(from_service("OpenSSH", Some("9.6p1")).vendor, "openbsd");
+    }
+
+    #[test]
+    fn service_cpe_specific_wins_over_generic_substring() {
+        // "Apache Tomcat" must not fall into apache:http_server, and a
+        // Kafka-compatible product must not be mislabelled apache:kafka.
+        assert_eq!(from_service("Apache Tomcat", None).product, "tomcat");
+        let rp = from_service("Redpanda (Kafka-compatible)", None);
+        assert_eq!((rp.vendor.as_str(), rp.product.as_str()), ("redpanda", "redpanda"));
+        // Grafana Loki is its own product, not grafana:grafana.
+        assert_eq!(from_service("Grafana Loki", None).product, "loki");
+        // OpenResty wins over the "nginx" it mentions.
+        assert_eq!(from_service("OpenResty (nginx fork)", None).vendor, "openresty");
+    }
+
+    #[test]
+    fn service_cpe_unknown_uses_any_vendor() {
+        let c = from_service("Totally Bespoke Daemon", None);
+        assert_eq!(c.vendor, "*");
+        assert_eq!(c.raw, "cpe:2.3:a:*:totally_bespoke_daemon:*:*:*:*:*:*:*:*");
+    }
+
+    #[test]
+    fn uri_binding_matches_nmap_form() {
+        // With a version, and without (version omitted when unknown).
+        let withv = from_service("Apache httpd", Some("2.4.59"));
+        assert_eq!(withv.uri_binding(), "cpe:/a:apache:http_server:2.4.59");
+        let nov = from_service("nginx", None);
+        assert_eq!(nov.uri_binding(), "cpe:/a:nginx:nginx");
+        // OS binding too (the `<osclass>` form).
+        let os = from_family("Linux 5.10", Some("5.10.0"));
+        assert_eq!(os.uri_binding(), "cpe:/o:linux:linux_kernel:5.10.0");
     }
 }

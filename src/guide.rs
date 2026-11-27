@@ -142,7 +142,8 @@ pub fn print_guide() {
     line("--nbt-broadcast       NetBIOS broadcast sweep");
     line("--discover-wait SEC   Wait time per i probe multicast/broadcast (default 3)");
     line("--osscan-guess N      Top-N candidati OS con confidence%% (nmap-style)");
-    line("--cpe-out             Emette CPE 2.3 string accanto al guess OS");
+    line("--cpe-out             Emette CPE 2.3: OS guess + CPE applicativo per");
+    line("                      servizio rilevato (anche in XML <cpe>/JSON)");
     line("--osdb-submit H:LABEL Genera submission pack per il community OS-DB");
     line("--osdb-submit-out F   Scrive il pack su file invece di stdout");
     line("--os-fp-v6-multi H    IPv6 OS-fp multi-port (confidence boost se ≥2 agree)");

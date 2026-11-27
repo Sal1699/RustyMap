@@ -19,6 +19,10 @@ struct JsonPort {
     /// Exposure-risk tier for an open port: "high" | "warn" | "info".
     #[serde(skip_serializing_if = "Option::is_none")]
     risk: Option<&'static str>,
+    /// Application CPE 2.3 string, when `-sV` detected a product (feeds
+    /// downstream CVE correlation). Absent for ports without a product.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cpe: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -87,6 +91,11 @@ fn host_to_json(h: &HostResult) -> JsonHost {
                         portdesc::Risk::High => "high",
                         portdesc::Risk::Warn => "warn",
                         portdesc::Risk::Info => "info",
+                    }),
+                    cpe: p.service.as_ref().and_then(|s| {
+                        s.product
+                            .as_deref()
+                            .map(|prod| crate::cpe::from_service(prod, s.version.as_deref()).raw)
                     }),
                 }
             })
