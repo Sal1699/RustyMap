@@ -85,7 +85,7 @@ pub fn reason_for(scan_type: &str, state: PortState) -> &'static str {
 }
 
 /// Format a 6-byte MAC as the canonical colon-separated uppercase hex.
-fn fmt_mac(mac: &[u8; 6]) -> String {
+pub(crate) fn fmt_mac(mac: &[u8; 6]) -> String {
     mac.iter()
         .map(|b| format!("{:02X}", b))
         .collect::<Vec<_>>()
@@ -96,7 +96,7 @@ fn fmt_mac(mac: &[u8; 6]) -> String {
 /// assume the sender used the nearest standard initial TTL at or above
 /// the observed value (64 for *nix/macOS, 128 for Windows, 255 for many
 /// network appliances) and count how far it decremented in transit.
-fn network_distance(ttl: u8) -> u8 {
+pub(crate) fn network_distance(ttl: u8) -> u8 {
     let initial: u16 = if ttl <= 64 {
         64
     } else if ttl <= 128 {
@@ -590,11 +590,22 @@ pub fn write_normal(path: &str, hosts: &[HostResult], elapsed_sec: f64) -> Resul
             continue;
         }
         writeln!(f, "  Status: Up (latency {:.3}s)", h.elapsed.as_secs_f64())?;
+        if let Some(os) = &h.os {
+            writeln!(f, "  OS: {} (confidence {}%)", os.family, os.confidence)?;
+        }
         if let Some(dev) = &h.device {
             let v = dev.vendor.as_deref().map(|v| format!(" · {}", v)).unwrap_or_default();
             writeln!(f, "  Device: {}{} (confidence {}%)", dev.class.as_str(), v, dev.confidence)?;
         }
-        writeln!(f, "  PORT        STATE       SERVICE")?;
+        if let Some(mac) = &h.mac {
+            let v = crate::device_fp::vendor_from_mac(mac)
+                .map(|v| format!(" ({})", v))
+                .unwrap_or_default();
+            writeln!(f, "  MAC: {}{}", fmt_mac(mac), v)?;
+        }
+        // VERSION column carries the -sV product/version that the old layout
+        // dropped entirely (the file output showed service-by-port only).
+        writeln!(f, "  {:<11} {:<13} {:<16} {}", "PORT", "STATE", "SERVICE", "VERSION")?;
         for p in &h.ports {
             let state = match p.state {
                 PortState::Open => "open",
@@ -604,7 +615,8 @@ pub fn write_normal(path: &str, hosts: &[HostResult], elapsed_sec: f64) -> Resul
                 PortState::Unfiltered => "unfiltered",
             };
             let svc = service_name(p.port).unwrap_or("unknown");
-            writeln!(f, "  {:<11} {:<13} {}", format!("{}/tcp", p.port), state, svc)?;
+            let version = p.service.as_ref().map(|s| s.display()).unwrap_or_default();
+            writeln!(f, "  {:<11} {:<13} {:<16} {}", format!("{}/tcp", p.port), state, svc, version)?;
         }
     }
     let up = hosts.iter().filter(|h| h.up).count();
@@ -634,9 +646,22 @@ pub fn write_grepable(path: &str, hosts: &[HostResult]) -> Result<()> {
                     PortState::OpenFiltered => "open|filtered",
                     PortState::Unfiltered => "unfiltered",
                 };
-                format!("{}/{}/tcp//{}", p.port, state, service_name(p.port).unwrap_or(""))
+                // nmap grepable port tuple is port/state/proto/owner/service/
+                // rpc/version. We now fill the trailing version field from -sV;
+                // `/` and `,` are field/record separators so strip them.
+                let version = p
+                    .service
+                    .as_ref()
+                    .map(|s| s.display())
+                    .unwrap_or_default()
+                    .replace(['/', ',', '\t'], " ");
+                format!("{}/{}/tcp//{}//{}", p.port, state, service_name(p.port).unwrap_or(""), version.trim())
             }).collect();
             write!(f, "{}", parts.join(", "))?;
+        }
+        // nmap appends an OS field to the grepable host line under -O.
+        if let Some(os) = &h.os {
+            write!(f, "\tOS: {}", os.family.replace(['\t', '\n'], " "))?;
         }
         writeln!(f)?;
     }

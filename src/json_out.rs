@@ -23,6 +23,22 @@ struct JsonPort {
     /// downstream CVE correlation). Absent for ports without a product.
     #[serde(skip_serializing_if = "Option::is_none")]
     cpe: Option<String>,
+    // ── v0.117.0: the -sV detail the JSON used to drop entirely ──
+    #[serde(skip_serializing_if = "Option::is_none")]
+    product: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra: Option<String>,
+    /// First banner line (trimmed/truncated), when captured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    banner: Option<String>,
+    /// One-line TLS summary, when the port spoke TLS.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tls: Option<String>,
+    /// Per-port probe RTT in milliseconds, when recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rtt_ms: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -41,6 +57,21 @@ struct JsonHost {
     firmware: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     device_confidence: Option<u8>,
+    // ── v0.117.0: OS guess, MAC and hop distance the JSON used to drop ──
+    #[serde(skip_serializing_if = "Option::is_none")]
+    os: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    os_confidence: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    os_ttl: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    os_cpe: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    distance_hops: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mac: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mac_vendor: Option<String>,
     ports: Vec<JsonPort>,
 }
 
@@ -70,6 +101,16 @@ fn host_to_json(h: &HostResult) -> JsonHost {
         model: h.device.as_ref().and_then(|d| d.model.clone()),
         firmware: h.device.as_ref().and_then(|d| d.firmware.clone()),
         device_confidence: h.device.as_ref().map(|d| d.confidence),
+        os: h.os.as_ref().map(|o| o.family.clone()),
+        os_confidence: h.os.as_ref().map(|o| o.confidence),
+        os_ttl: h.os.as_ref().and_then(|o| o.ttl),
+        os_cpe: h.os.as_ref().map(|o| crate::cpe::from_family(&o.family, None).raw),
+        distance_hops: h.os.as_ref().and_then(|o| o.ttl).map(crate::output::network_distance),
+        mac: h.mac.as_ref().map(crate::output::fmt_mac),
+        mac_vendor: h
+            .mac
+            .as_ref()
+            .and_then(|m| crate::device_fp::vendor_from_mac(m).map(|v| v.to_string())),
         ports: h
             .ports
             .iter()
@@ -97,6 +138,20 @@ fn host_to_json(h: &HostResult) -> JsonHost {
                             .as_deref()
                             .map(|prod| crate::cpe::from_service(prod, s.version.as_deref()).raw)
                     }),
+                    product: p.service.as_ref().and_then(|s| s.product.clone()),
+                    version: p.service.as_ref().and_then(|s| s.version.clone()),
+                    extra: p.service.as_ref().and_then(|s| s.extra.clone()),
+                    banner: p.service.as_ref().and_then(|s| {
+                        s.banner.as_ref().and_then(|b| {
+                            let line: String = b.lines().next().unwrap_or("").trim().chars().take(200).collect();
+                            (!line.is_empty()).then_some(line)
+                        })
+                    }),
+                    tls: p.service.as_ref().and_then(|s| s.tls.as_ref().map(|t| t.summary())),
+                    rtt_ms: {
+                        let ms = p.rtt.as_secs_f64() * 1000.0;
+                        (ms > 0.0).then_some((ms * 100.0).round() / 100.0)
+                    },
                 }
             })
             .collect(),
@@ -192,6 +247,40 @@ mod tests {
                 p, json
             );
         }
+    }
+
+    #[test]
+    fn json_carries_sv_os_mac_distance_detail() {
+        use crate::os_fp::OsGuess;
+        use crate::service_probe::ServiceInfo;
+        let mut h = host_with_ports([10, 0, 0, 5], vec![80]);
+        h.ports[0].service = Some(ServiceInfo {
+            product: Some("nginx".into()),
+            version: Some("1.25.3".into()),
+            extra: Some("Ubuntu".into()),
+            banner: Some("Server: nginx 1.25.3\r\nextra".into()),
+            ..Default::default()
+        });
+        h.os = Some(OsGuess {
+            family: "Linux 5.x".into(),
+            confidence: 92,
+            ttl: Some(64),
+            hints: vec![],
+        });
+        h.mac = Some([0x00, 0x0c, 0x29, 0x11, 0x22, 0x33]);
+        let json = to_jsonl_string(std::slice::from_ref(&h)).unwrap();
+        // -sV detail the JSON used to drop entirely:
+        assert!(json.contains("\"product\":\"nginx\""), "product missing: {json}");
+        assert!(json.contains("\"version\":\"1.25.3\""), "version missing");
+        assert!(json.contains("\"extra\":\"Ubuntu\""), "extra missing");
+        assert!(json.contains("\"banner\":\"Server: nginx 1.25.3\""), "banner first-line missing");
+        assert!(json.contains("\"cpe\":\"cpe:2.3:a:nginx:nginx:1.25.3"), "app cpe missing");
+        // host OS / MAC / hop distance:
+        assert!(json.contains("\"os\":\"Linux 5.x\""), "os missing");
+        assert!(json.contains("\"os_confidence\":92"), "os_confidence missing");
+        assert!(json.contains("\"os_cpe\":\"cpe:2.3:o:linux:linux_kernel"), "os_cpe missing");
+        assert!(json.contains("\"distance_hops\":0"), "distance missing"); // ttl 64 → 0 hops
+        assert!(json.contains("\"mac\":\"00:0C:29:11:22:33\""), "mac missing");
     }
 
     #[test]

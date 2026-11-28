@@ -163,14 +163,35 @@ pub fn write_xml_styled(
         }
         writeln!(out, "    </ports>")?;
         if let Some(os) = &h.os {
+            let oc = crate::cpe::from_family(&os.family, None);
             writeln!(out, "    <os>")?;
+            // osmatch now carries an <osclass> with the OS CPE — what
+            // `msf db_import` / zenmap read for OS-level CVE correlation.
             writeln!(
                 out,
-                "      <osmatch name=\"{}\" accuracy=\"{}\"/>",
+                "      <osmatch name=\"{}\" accuracy=\"{}\">",
                 escape(&os.family),
                 os.confidence
             )?;
+            writeln!(
+                out,
+                "        <osclass type=\"general purpose\" vendor=\"{}\" osfamily=\"{}\" accuracy=\"{}\">",
+                escape(&oc.vendor),
+                escape(&oc.product),
+                os.confidence
+            )?;
+            writeln!(out, "          <cpe>{}</cpe>", escape(&oc.uri_binding()))?;
+            writeln!(out, "        </osclass>")?;
+            writeln!(out, "      </osmatch>")?;
             writeln!(out, "    </os>")?;
+            // nmap emits <distance> from its TTL-based hop estimate.
+            if let Some(ttl) = os.ttl {
+                writeln!(
+                    out,
+                    "    <distance value=\"{}\"/>",
+                    crate::output::network_distance(ttl)
+                )?;
+            }
         }
         writeln!(
             out,

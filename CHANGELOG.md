@@ -4,6 +4,39 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.117.0] - 2026-11-28
+
+**Output fidelity.** The machine/file outputs silently dropped most of what a
+scan computes — `--oJ` emitted a service name per port but not the `-sV`
+product/version/banner, nor the host OS/MAC/hop-distance; `--oN`/`--oG` showed
+no version at all. This surfaces that data in all four writers. Purely
+additive (JSON fields are optional, so old consumers are unaffected); no scan,
+classification, or detection change. 731 unit (+1) + 4 integration tests.
+
+### Added — JSON (`--oJ`/jsonl), optional fields (absent when unknown)
+- Per port: `product`, `version`, `extra`, `banner` (first line), `tls`
+  (one-line summary), `rtt_ms`.
+- Per host: `os`, `os_confidence`, `os_ttl`, `os_cpe` (`cpe:2.3:o:…`),
+  `distance_hops`, `mac`, `mac_vendor`.
+- All `skip_serializing_if None`, so the schema stays backward compatible
+  (unchanged `schema` version).
+
+### Added — plain text (`--oN`) and grepable (`--oG`)
+- `--oN`: new VERSION column (was PORT/STATE/SERVICE only), plus OS-guess and
+  MAC lines.
+- `--oG`: the port tuple now fills nmap's trailing version field
+  (`port/state/tcp//service//version`), and the host line gets an `OS:` field
+  under `-O` — matching nmap's grepable layout.
+
+### Added — XML (`--oX`)
+- `<osmatch>` now contains an `<osclass>` with the OS `<cpe>` (`cpe:/o:…`) that
+  `msf db_import` / zenmap read for OS-level CVE correlation, and a
+  `<distance value>` element from the TTL hop estimate.
+
+### Changed
+- `output::network_distance` / `fmt_mac` are now crate-visible (shared by the
+  JSON and XML writers instead of being re-derived).
+
 ## [0.116.0] - 2026-11-28
 
 **Service-naming & risk coverage.** ~69 verified additions across three
