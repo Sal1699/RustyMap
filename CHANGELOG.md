@@ -4,6 +4,45 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.115.0] - 2026-11-27
+
+**Output polish + stdout streaming.** Console beautification plus the
+`-oX -`→stdout gap found while shipping 0.114.0. Machine formats
+(`--oN/--oG/--oJ/--oX`) are unchanged in content; the console-only changes
+route through the existing `colored` gate (`--no-color`/`--color`/CI
+respected). 726 unit (+3) + 4 integration tests.
+
+### Added — `-` means stdout for every text format (`file_out.rs`)
+`--oN -`, `--oG -`, `--oJ -`, `--oJL -`, `--oX -` now stream that format to
+standard output (the nmap convention) instead of creating a file literally
+named `-`. New `file_out::open_writer()` returns stdout for `-`, else the file
+(honouring `--append-output`); `write_normal`/`write_grepable`/`write_json`/
+XML/HTML/Markdown all go through it. When any sink is `-`, the human console
+output — banner, host tables, summary, rich footer, and the CVE-correlation /
+auto-run-script / traceroute analysis lines — is suppressed so it can't corrupt
+the stream; `rustymap --oX - host | xmllint -` (also with `--sV`/`--traceroute`)
+just works. The correlation/exit-code/file-output computations still run; only
+their stdout printing is skipped. (Rarer analysis flags that print their own
+report — `--tls-scan`, `--msf-suggest`, `--diff-against`, SARIF/SIEM/compliance
+writers — still emit to stdout; pair those with a file sink, not `-`.)
+
+### Changed — console beautification (rich style, colour-safe)
+- Port table: the SERVICE cell is truncated to its column width with `…`
+  (`truncate_cell`) so a long name can never misalign the table, and is tinted
+  cyan.
+- Status cues: `Host is up (…)` latency in green, `Host seems down` in red;
+  the `Not shown:` roll-up dimmed.
+- Exposure headline: each preview keeps its risk-tier glyph colour
+  (‼ red / ⚠ yellow) instead of the whole preview being dimmed flat.
+- Labels bolded for scannability: `OS guess:`, `MAC Address:`, `Service Info:`.
+- A thin dimmed rule separates successive host reports (never above the first).
+- Banner: tool name/version emphasised.
+- Summary: probe counts get thousands separators (`65,535`, via
+  `group_thousands`); hosts-up and open counts in green.
+
+### Changed
+- `guide.rs`: documents the `-`→stdout convention on the output-format flags.
+
 ## [0.114.0] - 2026-11-27
 
 **Application-CPE emission.** RustyMap already generated an OS CPE

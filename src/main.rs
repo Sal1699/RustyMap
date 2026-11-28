@@ -1946,7 +1946,24 @@ async fn run(mut args: Cli) -> Result<()> {
     }
 
     // ----- Scan pipeline -----
-    output::print_banner();
+    // nmap convention: `-oN/-oG/-oJ/-oX -` streams that format to stdout. When
+    // any output sink is `-`, suppress the human console output (banner, host
+    // tables, summary, rich footer) so it doesn't corrupt the stream.
+    let stdout_sink = [
+        args.output_normal.as_deref(),
+        args.output_grepable.as_deref(),
+        args.output_json.as_deref(),
+        args.output_jsonl.as_deref(),
+        args.output_xml.as_deref(),
+    ]
+    .iter()
+    .any(|o| matches!(o, Some("-")));
+    if stdout_sink {
+        output::set_rich(false);
+    }
+    if !stdout_sink {
+        output::print_banner();
+    }
 
     let scan_type = args.scan_type();
     let needs_privilege = !matches!(scan_type, ScanType::Connect | ScanType::List);
@@ -2959,6 +2976,11 @@ async fn run(mut args: Cli) -> Result<()> {
     }
     sorted.sort_by_key(|h| h.target.ip);
     for h in &sorted {
+        // `--oX -` & friends stream a machine format to stdout; the human
+        // host report would corrupt it, so skip console rendering (nmap does).
+        if stdout_sink {
+            break;
+        }
         let mut h_view = h.clone();
         if args.only_open {
             h_view.ports.retain(|p| p.state == PortState::Open);
@@ -3039,7 +3061,11 @@ async fn run(mut args: Cli) -> Result<()> {
             // Tag each hit with KEV / public-exploit availability from the
             // synced exploit-refs catalog, if present (review #16).
             cve::enrich_with_exploits(&mut hits);
-            cve::print_hits(&hits);
+            // Keep the correlation compute (exit code, msf/file findings) but
+            // don't print to stdout when a format is streaming there.
+            if !stdout_sink {
+                cve::print_hits(&hits);
+            }
             audit.event(
                 "cve_correlated",
                 json!({ "hits": hits.len(), "kev": hits.iter().filter(|h| h.kev).count() }),
@@ -3434,8 +3460,9 @@ async fn run(mut args: Cli) -> Result<()> {
         }
     }
 
-    // Traceroute + topology
-    if args.traceroute {
+    // Traceroute + topology (skipped entirely when streaming a format to
+    // stdout — its hops aren't in the XML and would corrupt the stream).
+    if args.traceroute && !stdout_sink {
         let mut traces = Vec::new();
         println!("\n-- Traceroute --");
         for h in sorted.iter().filter(|h| h.up) {
@@ -3521,12 +3548,14 @@ async fn run(mut args: Cli) -> Result<()> {
         })
         .await
         .unwrap_or_default();
-        scripting::print_findings(&f);
+        if !stdout_sink {
+            scripting::print_findings(&f);
+        }
         if !f.is_empty() {
             audit.event("scripts_builtin_run", json!({ "count": f.len() }));
             exit::note_findings(true);
         }
-    } else if !args.no_builtin_scripts && args.script_path.is_none() && script_sweep {
+    } else if !args.no_builtin_scripts && args.script_path.is_none() && script_sweep && !stdout_sink {
         println!(
             "[scripts] {} hosts up — built-in scripts skipped on sweeps (opt-in at scale). \
              Re-run against a single host, or pass --force-scripts.",
@@ -3544,7 +3573,9 @@ async fn run(mut args: Cli) -> Result<()> {
         .await;
         match result {
             Ok(Ok(f)) => {
-                scripting::print_findings(&f);
+                if !stdout_sink {
+                    scripting::print_findings(&f);
+                }
                 audit.event("scripts_run", json!({ "count": f.len() }));
                 exit::note_findings(!f.is_empty());
             }
@@ -3570,7 +3601,9 @@ async fn run(mut args: Cli) -> Result<()> {
     // This same total feeds the DB record and every report writer below,
     // so console and file outputs agree.
     let elapsed = t_start.elapsed().as_secs_f64();
-    output::print_summary(&sorted, elapsed);
+    if !stdout_sink {
+        output::print_summary(&sorted, elapsed);
+    }
 
     // 6) Persist to DB and run diff
     let mut diffs: std::collections::HashMap<String, db::PortDiff> = std::collections::HashMap::new();

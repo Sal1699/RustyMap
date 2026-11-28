@@ -139,8 +139,9 @@ pub fn to_json_string(
 }
 
 pub fn write_json(path: &str, json: &str) -> Result<()> {
-    let mut f = crate::file_out::open(path)?;
+    let mut f = crate::file_out::open_writer(path)?;
     f.write_all(json.as_bytes())?;
+    f.flush()?;
     Ok(())
 }
 

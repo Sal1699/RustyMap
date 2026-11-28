@@ -23,10 +23,46 @@ pub fn is_rich() -> bool {
     RICH.load(Ordering::Relaxed)
 }
 
+/// First host of the run? Used to draw a separator rule *between* host
+/// reports (rich style) without one dangling above the first.
+static FIRST_HOST: AtomicBool = AtomicBool::new(true);
+
+/// Truncate a cell's visible text to `width`, ending in `…` when clipped, so
+/// an unexpectedly long value (e.g. a verbose SERVICE name) can never push the
+/// following columns out of alignment. Operates on plain text — colorize the
+/// result afterwards, never before.
+fn truncate_cell(s: &str, width: usize) -> String {
+    if s.chars().count() <= width {
+        return s.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let keep: String = s.chars().take(width - 1).collect();
+    format!("{}…", keep)
+}
+
+/// Group a number with thousands separators for the human summary
+/// (`65535` → `65,535`). Machine formats never see this.
+fn group_thousands(n: usize) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    let mut out = String::with_capacity(len + len / 3);
+    for (i, b) in bytes.iter().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(*b as char);
+    }
+    out
+}
+
 pub fn print_banner() {
     println!(
-        "Starting RustyMap {} ( https://github.com/Sal1699/RustyMap ) at {}",
-        env!("CARGO_PKG_VERSION"),
+        "Starting {} {} ( https://github.com/Sal1699/RustyMap ) at {}",
+        "RustyMap".bold().cyan(),
+        env!("CARGO_PKG_VERSION").bold(),
         chrono::Local::now().format("%Y-%m-%d %H:%M %Z")
     );
 }
@@ -113,10 +149,19 @@ fn rich_exposure_line(host: &HostResult) -> Option<String> {
     let preview: Vec<String> = items
         .iter()
         .take(4)
-        .map(|(r, port, svc)| format!("{} {} {}", r.glyph(), port, svc))
+        .map(|(r, port, svc)| {
+            // Keep the risk glyph in its tier colour; dim only the port+service
+            // text so the ‼/⚠ cues still read at a glance.
+            let glyph = match r {
+                portdesc::Risk::High => r.glyph().red().bold(),
+                portdesc::Risk::Warn => r.glyph().yellow().bold(),
+                portdesc::Risk::Info => r.glyph().dimmed(),
+            };
+            format!("{} {}", glyph, format!("{} {}", port, svc).dimmed())
+        })
         .collect();
     let more = if items.len() > 4 {
-        format!(" (+{} more)", items.len() - 4)
+        format!(" (+{} more)", items.len() - 4).dimmed().to_string()
     } else {
         String::new()
     };
@@ -129,7 +174,7 @@ fn rich_exposure_line(host: &HostResult) -> Option<String> {
     }
     let head = format!("Exposure: {}", counts.join(", "));
     let head = if high > 0 { head.red().bold() } else { head.yellow().bold() };
-    Some(format!("{}  ({}{})", head, preview.join(" · ").dimmed(), more))
+    Some(format!("{}  ({}{})", head, preview.join(" · "), more))
 }
 
 pub fn print_host_with_reason(host: &HostResult, verbose: u8, scan_type: &str, show_reason: bool) {
@@ -142,6 +187,10 @@ pub fn print_host(host: &HostResult, verbose: u8) {
 }
 
 fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason: bool) {
+    // A thin rule between host reports (rich style) — never above the first.
+    if is_rich() && !FIRST_HOST.swap(false, Ordering::Relaxed) {
+        println!("\n{}", "─".repeat(56).dimmed());
+    }
     println!();
     println!(
         "RustyMap scan report for {}",
@@ -149,7 +198,7 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
     );
 
     if !host.up {
-        println!("Host seems down. If it is really up, try --Pn");
+        println!("{}", "Host seems down. If it is really up, try --Pn".red());
         return;
     }
 
@@ -180,7 +229,7 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
     } else {
         format!("{:.3}", lat)
     };
-    println!("Host is up ({}s latency).", lat_str);
+    println!("Host is up ({}s latency).", lat_str.green());
 
     // IPv6 address-structure intelligence — a RustyMap strength (#6):
     // the v6 IID leaks how the host got its address (and often its MAC).
@@ -197,7 +246,7 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
 
     if let Some(os) = &host.os {
         let ttl_s = os.ttl.map(|t| format!(" TTL={}", t)).unwrap_or_default();
-        println!("OS guess: {} (confidence {}%{})", os.family, os.confidence, ttl_s);
+        println!("{} {} (confidence {}%{})", "OS guess:".bold(), os.family, os.confidence, ttl_s);
         if verbose > 0 && !os.hints.is_empty() {
             println!("  hints: {}", os.hints.join(", "));
         }
@@ -230,7 +279,7 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
         let vendor = crate::device_fp::vendor_from_mac(mac)
             .map(|v| format!(" ({})", v))
             .unwrap_or_default();
-        println!("MAC Address: {}{}", fmt_mac(mac), vendor);
+        println!("{} {}{}", "MAC Address:".bold(), fmt_mac(mac), vendor);
     }
 
     // Network distance derived from the fingerprinted TTL/hop-limit —
@@ -288,7 +337,10 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
         if filtered_count > 0 { parts.push(format!("{} filtered", filtered_count)); }
         if open_filtered_count > 0 { parts.push(format!("{} open|filtered", open_filtered_count)); }
         if unfiltered_count > 0 { parts.push(format!("{} unfiltered", unfiltered_count)); }
-        println!("Not shown: {} ({})", nonopen_count, parts.join(", "));
+        println!(
+            "{}",
+            format!("Not shown: {} ({})", nonopen_count, parts.join(", ")).dimmed()
+        );
     }
 
     let shown: Vec<&PortResult> = host
@@ -383,7 +435,9 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
         if show_rtt {
             cells.push(format!("{:<10}", fmt_rtt(p.rtt)));
         }
-        cells.push(format!("{:<16}", service));
+        // Truncate to the column width (so a long name can't misalign the
+        // table) then colour — plain text first, ANSI after.
+        cells.push(format!("{:<16}", truncate_cell(service, 16)).cyan().to_string());
         if is_rich() {
             // Fixed-width VERSION, then the descriptive NOTE (glyph + text)
             // for open/open-filtered ports we have something to say about.
@@ -471,7 +525,7 @@ fn print_host_inner(host: &HostResult, verbose: u8, scan_type: &str, show_reason
         info_bits.push(format!("Services: {}", products.join(", ")));
     }
     if !info_bits.is_empty() {
-        println!("Service Info: {}", info_bits.join("; "));
+        println!("{} {}", "Service Info:".bold(), info_bits.join("; "));
     }
 }
 
@@ -483,7 +537,7 @@ pub fn print_summary(hosts: &[HostResult], elapsed_sec: f64) {
         "RustyMap done: {} IP address{} ({} host{} up) scanned in {:.2} seconds",
         total,
         if total == 1 { "" } else { "es" },
-        up,
+        up.to_string().green().bold(),
         if up == 1 { "" } else { "s" },
         elapsed_sec
     );
@@ -513,16 +567,16 @@ pub fn print_summary(hosts: &[HostResult], elapsed_sec: f64) {
         };
         println!(
             "  stats: {} port-probe{} · {} open · {:.0} probes/s",
-            probed,
+            group_thousands(probed),
             if probed == 1 { "" } else { "s" },
-            open,
+            open.to_string().green(),
             rate
         );
     }
 }
 
 pub fn write_normal(path: &str, hosts: &[HostResult], elapsed_sec: f64) -> Result<()> {
-    let mut f = file_out::open(path)?;
+    let mut f = file_out::open_writer(path)?;
     writeln!(
         f,
         "# RustyMap {} scan at {}",
@@ -565,7 +619,7 @@ pub fn write_normal(path: &str, hosts: &[HostResult], elapsed_sec: f64) -> Resul
 }
 
 pub fn write_grepable(path: &str, hosts: &[HostResult]) -> Result<()> {
-    let mut f = file_out::open(path)?;
+    let mut f = file_out::open_writer(path)?;
     writeln!(f, "# RustyMap grepable output")?;
     for h in hosts {
         let status = if h.up { "Up" } else { "Down" };
@@ -620,5 +674,23 @@ mod tests {
     #[test]
     fn ack_unfiltered_is_rst() {
         assert_eq!(reason_for("Ack", PortState::Unfiltered), "rst");
+    }
+
+    #[test]
+    fn truncate_cell_clips_with_ellipsis() {
+        assert_eq!(truncate_cell("http", 16), "http"); // short: untouched
+        assert_eq!(truncate_cell("exactly-sixteen!", 16), "exactly-sixteen!"); // ==width
+        assert_eq!(truncate_cell("supercalifragilistic", 10), "supercali…");
+        assert_eq!(truncate_cell("supercali…", 10).chars().count(), 10);
+    }
+
+    #[test]
+    fn group_thousands_inserts_separators() {
+        assert_eq!(group_thousands(0), "0");
+        assert_eq!(group_thousands(42), "42");
+        assert_eq!(group_thousands(100), "100");
+        assert_eq!(group_thousands(1000), "1,000");
+        assert_eq!(group_thousands(65535), "65,535");
+        assert_eq!(group_thousands(1_000_000), "1,000,000");
     }
 }
