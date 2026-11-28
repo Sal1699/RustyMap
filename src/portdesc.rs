@@ -183,6 +183,29 @@ pub fn describe(port: u16) -> Option<Desc> {
         1900 => ("SSDP/UPnP — device discovery; amplification + info exposure", Warn),
         5353 => ("mDNS — multicast DNS; host/service enumeration leak", Info),
 
+        // ── v0.116.0: risk NOTEs for the newly-named pentest-relevant ports ──
+        79 => ("Finger — user enumeration; legacy info leak", Warn),
+        113 => ("ident/auth — reveals process owner; legacy", Info),
+        177 => ("XDMCP — remote X login; exposes desktops", Warn),
+        427 => ("SLP — service discovery; amplification + info leak", Warn),
+        543 | 544 => ("Kerberos rlogin/rsh — legacy remote shell", Warn),
+        990 => ("FTPS — FTP over TLS", Info),
+        992 => ("Telnet over TLS — legacy; prefer SSH", Warn),
+        1080 => ("SOCKS proxy — open-proxy / pivot risk if unauthenticated", Warn),
+        1099 => ("Java RMI registry — deserialization RCE surface", High),
+        3128 => ("Squid/HTTP proxy — open-proxy / SSRF pivot risk", Warn),
+        3260 => ("iSCSI target — unauthenticated block-storage exposure", High),
+        4369 => ("Erlang EPMD — shared-cookie reuse → distributed RCE", Warn),
+        5222 | 5269 => ("XMPP — chat server; check TLS and auth", Info),
+        5601 => ("Kibana — Elasticsearch UI; often unauth, data exposure", High),
+        5666 => ("Nagios NRPE — remote check exec; arg-injection RCE", High),
+        6667 => ("IRC — chat; occasionally botnet C2", Info),
+        7687 => ("Neo4j Bolt — graph database; check auth", High),
+        8009 => ("Tomcat AJP — Ghostcat (CVE-2020-1938) file read / RCE", High),
+        8140 => ("Puppet master — config mgmt; catalog/cert abuse", Warn),
+        10000 => ("Webmin — admin panel; RCE history (CVE-2019-15107)", High),
+        61616 => ("ActiveMQ OpenWire — CVE-2023-46604 unauth RCE", High),
+
         _ => return None,
     };
     Some(Desc { text, risk })
@@ -243,5 +266,17 @@ mod tests {
         // New high-value pentest ports are flagged High.
         assert_eq!(describe(4786).unwrap().risk, Risk::High); // Cisco Smart Install
         assert_eq!(describe(8291).unwrap().risk, Risk::High); // MikroTik Winbox
+    }
+
+    #[test]
+    fn v0_116_adds_pentest_risk_notes() {
+        // RCE-prone surfaces flagged High.
+        for p in [1099u16, 3260, 5601, 5666, 7687, 8009, 10000, 61616] {
+            assert_eq!(describe(p).unwrap().risk, Risk::High, "port {p} should be High");
+        }
+        // Proxy / legacy / discovery surfaces flagged Warn.
+        for p in [79u16, 177, 427, 1080, 3128, 4369, 8140] {
+            assert_eq!(describe(p).unwrap().risk, Risk::Warn, "port {p} should be Warn");
+        }
     }
 }

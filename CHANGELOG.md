@@ -4,6 +4,42 @@ All notable changes to RustyMap are recorded here.
 Versioning policy: `0.MINOR.PATCH` until the 1.0 stable cut. MINOR adds
 functionality, PATCH fixes bugs or cleans up internals.
 
+## [0.116.0] - 2026-11-28
+
+**Service-naming & risk coverage.** ~69 verified additions across three
+port-metadata tables, each confirmed a real gap before touching it. The
+organising insight: `portdesc::describe()` already described several ports
+(512/513/515/543/749/990/1701/7000/8500/9418/10255/62078…) that
+`ports::service_name()` returned `None` for — so they printed a risk NOTE next
+to a bare `unknown` in the SERVICE column. This closes that divergence and adds
+the common/pentest ports missing from both. Pure lookup-table data — no scan,
+classification, `-sV`, or output-format change. 730 unit (+4) + 4 integration
+tests, incl. a consistency test that every described port now has a label.
+
+### Added — `ports::service_name` (~42 ports)
+Previously `unknown`, now labelled (no `-sV` needed): 20 ftp-data, 43 whois,
+79 finger, 113 ident, 119 nntp, 177 xdmcp, 427 svrloc, 464 kpasswd, 512 exec,
+513 login, 515 printer, 543 klogin, 544 kshell, 749 kerberos-adm, 990 ftps,
+992 telnets, 1080 socks, 1099 rmiregistry, 1701 l2tp, 1812/1813 radius,
+3128 squid-http, 3260 iscsi, 4369 epmd, 4500 ipsec-nat-t, 5000 upnp,
+5222/5269 xmpp, 5601 kibana, 5666 nrpe, 6667 irc, 7000 cassandra, 7687 bolt,
+8009 ajp13, 8081 http-alt, 8140 puppet, 8500 consul, 9418 git, 10000 webmin,
+10255 kubelet-ro, 61616 activemq, 62078 iphone-sync.
+
+### Added — `portdesc::describe` risk NOTEs (~21 ports)
+High: 1099 Java RMI (deserialization RCE), 3260 iSCSI, 5601 Kibana, 5666 NRPE,
+7687 Neo4j Bolt, 8009 Tomcat AJP (Ghostcat CVE-2020-1938), 10000 Webmin
+(CVE-2019-15107), 61616 ActiveMQ (CVE-2023-46604). Warn: 79 finger, 177 XDMCP,
+427 SLP, 543/544 Kerberos r-cmds, 992 telnets, 1080 SOCKS proxy, 3128 Squid
+proxy, 4369 Erlang EPMD, 8140 Puppet. Info: 113 ident, 990 FTPS, 5222/5269
+XMPP, 6667 IRC. (These flow into the scan-wide "sensitive exposure" footer
+automatically, via the v0.112 `exec_summary`→`portdesc` fallback.)
+
+### Added — `cpe::from_service` mappings (6 products)
+Products `service_probe` detects but v0.114 hadn't mapped to a CPE vendor:
+Apache Superset (apache:superset), Apache Airflow (apache:airflow), Metabase,
+Portainer, Nextcloud, ClickHouse.
+
 ## [0.115.0] - 2026-11-27
 
 **Output polish + stdout streaming.** Console beautification plus the

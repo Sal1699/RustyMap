@@ -200,6 +200,13 @@ fn service_vendor_product(p: &str) -> (&'static str, String) {
         ("kubernetes", "kubernetes", "kubernetes"),
         ("docker", "docker", "docker"),
         ("openssh", "openbsd", "openssh"),
+        // v0.116.0: more products service_probe detects (canonical NVD vendors)
+        ("superset", "apache", "superset"),
+        ("airflow", "apache", "airflow"),
+        ("metabase", "metabase", "metabase"),
+        ("portainer", "portainer", "portainer"),
+        ("nextcloud", "nextcloud", "nextcloud"),
+        ("clickhouse", "clickhouse", "clickhouse"),
     ];
     for (needle, vendor, product) in MAP {
         if p.contains(needle) {
@@ -301,6 +308,17 @@ mod tests {
         assert_eq!(from_service("Elasticsearch", None).product, "elasticsearch");
         assert_eq!(from_service("Microsoft SQL Server", None).product, "sql_server");
         assert_eq!(from_service("OpenSSH", Some("9.6p1")).vendor, "openbsd");
+    }
+
+    #[test]
+    fn service_cpe_v0_116_products() {
+        assert_eq!(from_service("Apache Superset", None).product, "superset");
+        assert_eq!(from_service("Apache Airflow", None).vendor, "apache");
+        assert_eq!(from_service("Metabase", None).vendor, "metabase");
+        assert_eq!(from_service("Portainer", None).vendor, "portainer");
+        assert_eq!(from_service("Nextcloud", None).vendor, "nextcloud");
+        assert_eq!(from_service("ClickHouse", Some("24.3")).raw,
+                   "cpe:2.3:a:clickhouse:clickhouse:24.3:*:*:*:*:*:*:*");
     }
 
     #[test]

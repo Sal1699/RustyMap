@@ -141,6 +141,52 @@ pub fn service_name(port: u16) -> Option<&'static str> {
         20000 => Some("dnp3"),        // ICS
         44818 => Some("ethernet-ip"), // ICS
         47808 => Some("bacnet"),
+        // ── v0.116.0: more common/pentest ports that showed "unknown", plus
+        //    ports portdesc already DESCRIBED while the SERVICE column stayed
+        //    blank (512/513/515/543/544/749/990/992/1701/4500/7000/8500/
+        //    9418/10255/62078) — SERVICE now names what the NOTE describes ──
+        20 => Some("ftp-data"),
+        43 => Some("whois"),
+        79 => Some("finger"),
+        113 => Some("ident"),
+        119 => Some("nntp"),
+        177 => Some("xdmcp"),
+        427 => Some("svrloc"),         // Service Location Protocol
+        464 => Some("kpasswd"),
+        512 => Some("exec"),           // rexec (cleartext)
+        513 => Some("login"),          // rlogin (cleartext)
+        515 => Some("printer"),        // LPD
+        543 => Some("klogin"),
+        544 => Some("kshell"),
+        749 => Some("kerberos-adm"),
+        990 => Some("ftps"),
+        992 => Some("telnets"),
+        1080 => Some("socks"),
+        1099 => Some("rmiregistry"),   // Java RMI (deserialization RCE)
+        1701 => Some("l2tp"),
+        1812 => Some("radius"),
+        1813 => Some("radius-acct"),
+        3128 => Some("squid-http"),    // proxy
+        3260 => Some("iscsi"),
+        4369 => Some("epmd"),          // Erlang Port Mapper (RabbitMQ/CouchDB)
+        4500 => Some("ipsec-nat-t"),
+        5000 => Some("upnp"),
+        5222 => Some("xmpp-client"),
+        5269 => Some("xmpp-server"),
+        5601 => Some("kibana"),
+        5666 => Some("nrpe"),          // Nagios NRPE
+        6667 => Some("irc"),
+        7000 => Some("cassandra"),     // inter-node
+        7687 => Some("bolt"),          // Neo4j Bolt
+        8009 => Some("ajp13"),         // Tomcat AJP (Ghostcat CVE-2020-1938)
+        8081 => Some("http-alt"),
+        8140 => Some("puppet"),
+        8500 => Some("consul"),
+        9418 => Some("git"),           // git:// daemon
+        10000 => Some("webmin"),
+        10255 => Some("kubelet-ro"),
+        61616 => Some("activemq"),     // OpenWire (CVE-2023-46604 RCE)
+        62078 => Some("iphone-sync"),  // iOS lockdownd
         _ => None,
     }
 }
@@ -225,5 +271,31 @@ mod tests {
         assert_eq!(service_name(8291), Some("winbox"));
         assert_eq!(service_name(6000), Some("x11"));
         assert_eq!(service_name(6009), Some("x11"));
+    }
+
+    #[test]
+    fn service_name_v0_116_additions() {
+        assert_eq!(service_name(20), Some("ftp-data"));
+        assert_eq!(service_name(79), Some("finger"));
+        assert_eq!(service_name(1099), Some("rmiregistry"));
+        assert_eq!(service_name(8009), Some("ajp13"));
+        assert_eq!(service_name(10000), Some("webmin"));
+        assert_eq!(service_name(61616), Some("activemq"));
+        assert_eq!(service_name(3260), Some("iscsi"));
+        assert_eq!(service_name(5601), Some("kibana"));
+    }
+
+    #[test]
+    fn described_ports_also_have_a_service_name() {
+        // Consistency: every port portdesc describes should also get a SERVICE
+        // label, so the NOTE column never sits next to a bare "unknown".
+        // (The inverse divergence v0.116.0 set out to close.)
+        for p in [512u16, 513, 515, 543, 749, 990, 1701, 7000, 8500, 9418, 10255, 62078,
+                  79, 113, 177, 427, 1099, 3128, 3260, 4369, 5601, 5666, 8009, 8140, 10000, 61616] {
+            assert!(
+                crate::portdesc::describe(p).is_none() || service_name(p).is_some(),
+                "port {p} is described but has no service_name label"
+            );
+        }
     }
 }
